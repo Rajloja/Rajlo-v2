@@ -12,6 +12,7 @@ import { HailChatSheet } from "@/components/hail-chat-sheet";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useSelfGpsPosition } from "@/lib/use-self-gps";
 import { formatJMD, type Place } from "@/lib/jamaica";
+import { riderCancellationFeeJmd } from "@/lib/cancellation-fees";
 
 /**
  * /rider/route-taxi/live — Live hailing screen.
@@ -914,9 +915,28 @@ function ActionBar({
     hail.status === "completed" ||
     hail.status === "cancelled" ||
     hail.status === "no_show";
+  // Cancellation fee that would apply right now — J$0 while still
+  // `requested` or inside the 2-min grace window, J$100 once a driver
+  // has accepted and the window has passed. Surfaced before the rider
+  // confirms so the charge is never a surprise.
+  const cancelFeeJmd = riderCancellationFeeJmd(
+    hail.status,
+    hail.requestedAt,
+  );
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-3 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.15)] backdrop-blur md:px-4 md:py-4">
+      {canCancel && cancelArmed && cancelFeeJmd > 0 && (
+        <div className="mx-auto mb-2 max-w-3xl rounded-lg bg-amber-50 px-3 py-2">
+          <p className="text-[11px] font-semibold leading-snug text-amber-900">
+            Cancelling now charges a{" "}
+            <span className="font-extrabold">
+              J${cancelFeeJmd.toLocaleString("en-JM")}
+            </span>{" "}
+            cancellation fee, deducted from your wallet.
+          </p>
+        </div>
+      )}
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-muted">

@@ -17,6 +17,9 @@ type SendEmailArgs = {
   html: string;
   /** Optional plain-text fallback. */
   text?: string;
+  /** Optional Reply-To — e.g. the contact-form submitter's address so
+   *  support can reply straight to them. */
+  replyTo?: string;
 };
 
 type SendEmailResult =
@@ -29,6 +32,7 @@ export async function sendEmail({
   subject,
   html,
   text,
+  replyTo,
 }: SendEmailArgs): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL ?? "Rajlo <noreply@rajlo.com>";
@@ -48,7 +52,14 @@ export async function sendEmail({
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ from, to, subject, html, text }),
+      body: JSON.stringify({
+        from,
+        to,
+        subject,
+        html,
+        text,
+        reply_to: replyTo,
+      }),
     });
 
     if (!res.ok) {

@@ -24,14 +24,28 @@ export default function ContactPage() {
   const [message, setMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    // TODO Phase 2: POST to /api/contact and forward to support inbox.
-    await new Promise((r) => setTimeout(r, 600));
-    setLoading(false);
-    setSubmitted(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, topic, message }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Something went wrong.");
+      setSubmitted(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Couldn't send your message.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -165,6 +179,12 @@ export default function ContactPage() {
                       className="w-full resize-y rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
                     />
                   </label>
+
+                  {error && (
+                    <p className="rounded-xl border border-rajlo-red/20 bg-primary-soft px-4 py-3 text-sm font-semibold text-rajlo-red">
+                      {error}
+                    </p>
+                  )}
 
                   <button
                     type="submit"
