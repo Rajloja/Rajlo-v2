@@ -83,19 +83,18 @@ export async function proxy(request: NextRequest) {
 
   // ─── 1. Subdomain gating ────────────────────────────────────────
   if (portal) {
-    // Root path → driver/admin go straight to their login screen;
-    // rider keeps the marketing landing.
+    // Root path → each portal subdomain goes straight to its own
+    // login screen (rider.rajlo.com → rider login, etc.). The apex
+    // rajlo.com keeps the marketing landing — it has no `portal`.
     if (path === "/") {
-      if (portal === "driver") {
-        const url = request.nextUrl.clone();
-        url.pathname = "/auth/driver/login";
-        return NextResponse.redirect(url);
-      }
-      if (portal === "admin") {
-        const url = request.nextUrl.clone();
-        url.pathname = "/auth/admin/login";
-        return NextResponse.redirect(url);
-      }
+      const loginByPortal: Record<Portal, string> = {
+        rider: "/auth/rider/login",
+        driver: "/auth/driver/login",
+        admin: "/auth/admin/login",
+      };
+      const url = request.nextUrl.clone();
+      url.pathname = loginByPortal[portal];
+      return NextResponse.redirect(url);
     }
 
     const owner = portalForPath(path);
