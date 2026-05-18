@@ -44,7 +44,11 @@ type FeedItem = {
 export async function GET(request: NextRequest) {
   const gate = await requireAdmin();
   if (gate.error) return gate.error;
-  const { supabase } = gate;
+  const { supabase, actor } = gate;
+  // Admin actions (admin_audit_logs) are governance-sensitive — role
+  // changes, suspensions, bans. Only super_admins see them in the live
+  // feed; every other tier gets the operational stream without them.
+  const isSuperAdmin = actor.adminRole === "super_admin";
 
   const limit = Math.min(
     100,
@@ -252,5 +256,12 @@ export async function GET(request: NextRequest) {
     (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
   );
 
-  return NextResponse.json({ items: feed.slice(0, limit) });
+  // Strip admin-action entries for everyone below super_admin. Done
+  // before the slice so lower tiers still get a full-length feed of
+  // operational events.
+  const visible = isSuperAdmin
+    ? feed
+    : feed.filter((item) => item.source !== "admin_audit");
+
+  return NextResponse.json({ items: visible.slice(0, limit) });
 }
