@@ -19,10 +19,14 @@ import type { AdminPermission } from "./admin-rbac";
 type Rule = { prefix: string; permission: AdminPermission };
 
 const ROUTE_PERMISSIONS: Rule[] = [
+  // ── Business analytics (revenue / growth / volume) — senior tiers ──
+  { prefix: "/admin/analytics", permission: "view_analytics" },
   // ── Operations / monitoring ──
-  { prefix: "/admin/activity", permission: "view_operations" },
-  { prefix: "/admin/analytics", permission: "view_operations" },
+  // `/admin/stats` is the operational KPI strip (driver / ride / queue
+  // counts) — every admin tier needs it. Its one financial field
+  // (revenue) is gated separately inside the route itself.
   { prefix: "/admin/stats", permission: "view_operations" },
+  { prefix: "/admin/activity", permission: "view_operations" },
   { prefix: "/admin/live-trips", permission: "view_operations" },
   { prefix: "/admin/ride-monitoring", permission: "view_operations" },
   { prefix: "/admin/route-sessions", permission: "view_operations" },

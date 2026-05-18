@@ -937,8 +937,12 @@ function DecisionActionBar({
   const [noteOpen, setNoteOpen] = useState(false);
   const totalDecided = counts.approved + counts.rejected + counts.resubmit;
 
+  // `md:left-[280px]` clears the 280px portal sidebar so the bar sits
+  // inside the main content column instead of spanning the whole
+  // viewport. On mobile the sidebar is an off-canvas drawer, so the
+  // bar stays full-width there.
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40">
+    <div className="fixed inset-x-0 bottom-0 z-40 md:left-[280px]">
       {/* Optional expandable note */}
       {noteOpen && (
         <div className="border-t border-line bg-surface px-2 py-4 shadow-lg md:px-3">

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
+import { hasPermission } from "@/lib/admin-rbac";
 
 /**
  * GET /api/admin/stats
@@ -17,7 +18,11 @@ import { requireAdmin } from "@/lib/admin-auth";
 export async function GET() {
   const gate = await requireAdmin();
   if (gate.error) return gate.error;
-  const { supabase } = gate;
+  const { supabase, actor } = gate;
+  // Revenue is business-financial data — only tiers with view_analytics
+  // (compliance, super_admin) get it. The rest of this payload is
+  // operational and goes to every admin tier.
+  const canViewRevenue = hasPermission(actor.adminRole, "view_analytics");
 
   const now = new Date();
   const startOfToday = new Date(now);
@@ -192,11 +197,15 @@ export async function GET() {
       cancelledToday: todayCancelled.length,
       sparkline7d: ridesSparkline,
     },
-    revenue: {
-      today: revenueToday,
-      last30d: revenue30d,
-      sparkline30d: revenueSparkline,
-    },
+    // Null for tiers without analytics access — the dashboard hides
+    // the revenue card entirely rather than showing a zeroed one.
+    revenue: canViewRevenue
+      ? {
+          today: revenueToday,
+          last30d: revenue30d,
+          sparkline30d: revenueSparkline,
+        }
+      : null,
     queue: {
       docsPending: docsPending.count ?? 0,
       docsRejected: docsRejected.count ?? 0,

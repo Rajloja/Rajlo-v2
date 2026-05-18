@@ -70,17 +70,6 @@ export default async function DriverPendingPage() {
 
       {/* ────── Body ────── */}
       <div className="relative mx-auto w-full max-w-3xl flex-1 px-2 py-10 md:px-3 md:py-16">
-        <ArcWatermark
-          size={520}
-          variant="red"
-          className="absolute -right-32 -top-10 opacity-[0.04]"
-        />
-        <ArcWatermark
-          size={420}
-          variant="red"
-          className="absolute -left-24 bottom-0 opacity-[0.04]"
-        />
-
         {/* ─── Status hero ─── */}
         <div
           className={`relative overflow-hidden rounded-3xl p-7 text-white shadow-xl md:p-10 ${

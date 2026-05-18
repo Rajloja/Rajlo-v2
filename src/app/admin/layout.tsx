@@ -3,8 +3,13 @@ import { PortalLayout } from "@/components/portal-layout";
 import { AdminAccessBeacon } from "@/components/admin-access-beacon";
 import { adminNav, safetyOfficerNav } from "@/lib/mock-data";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
-import { asAdminRole, userHasPermission } from "@/lib/admin-rbac";
+import {
+  asAdminRole,
+  userHasPermission,
+  userPermissions,
+} from "@/lib/admin-rbac";
 import { requiredPermissionForAdminPath } from "@/lib/admin-route-permissions";
+import { AdminPermissionsProvider } from "@/components/admin-permissions";
 
 /**
  * Admin / officer portal shell.
@@ -58,20 +63,26 @@ export default async function AdminLayout({
       })
     : safetyOfficerNav;
 
+  // The viewer's effective RBAC permissions — handed to client pages
+  // (via context) so they can scope what they render to the tier.
+  const permissions = userPermissions(role, adminRole);
+
   return (
-    <PortalLayout
-      title={isAdmin ? "Admin/Ops Portal" : "Safety Operations"}
-      subtitle={
-        isAdmin
-          ? "Verification operations, pricing controls, and incident workflows."
-          : "Safety queue, live trips, and rider chat — scoped to safety scope."
-      }
-      nav={nav}
-    >
-      {/* Records an admin_access_logs entry once per session for the
-         security dashboard's access history. */}
-      {isAdmin && <AdminAccessBeacon />}
-      {children}
-    </PortalLayout>
+    <AdminPermissionsProvider permissions={permissions}>
+      <PortalLayout
+        title={isAdmin ? "Admin/Ops Portal" : "Safety Operations"}
+        subtitle={
+          isAdmin
+            ? "Verification operations, pricing controls, and incident workflows."
+            : "Safety queue, live trips, and rider chat — scoped to safety scope."
+        }
+        nav={nav}
+      >
+        {/* Records an admin_access_logs entry once per session for the
+           security dashboard's access history. */}
+        {isAdmin && <AdminAccessBeacon />}
+        {children}
+      </PortalLayout>
+    </AdminPermissionsProvider>
   );
 }

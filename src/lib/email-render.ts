@@ -405,7 +405,14 @@ export function attr(s: string): string {
 
 /** Convert plain-text URLs to brand-coloured anchors. Used inside body copy. */
 function linkify(text: string): string {
-  const safe = esc(text);
+  // Escape everything first, THEN re-allow the one bit of inline
+  // markup the templates use — <strong> for bold. It carries no
+  // attributes (no injection surface) and this text is always
+  // template-defined, never raw user input. Without this the literal
+  // "<strong>" tags show as text in the email.
+  const safe = esc(text)
+    .replace(/&lt;strong&gt;/g, "<strong>")
+    .replace(/&lt;\/strong&gt;/g, "</strong>");
   return safe.replace(/https?:\/\/[^\s<>"]+/g, (url) => {
     return `<a href="${url}" style="color:${BRAND.red};font-weight:600;text-decoration:none;">${url}</a>`;
   });

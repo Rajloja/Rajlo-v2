@@ -28,7 +28,8 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
  *  Adding a permission here without mapping a route just means no
  *  route requires it yet. */
 export type AdminPermission =
-  | "view_operations" // dashboard, analytics, live trips, ride monitoring
+  | "view_operations" // ops dashboard, live trips, ride monitoring, sessions
+  | "view_analytics" // business-performance analytics — revenue, growth, volume
   | "manage_routes" // edit the route-taxi catalogue
   | "manage_users" // view + act on rider / driver accounts
   | "view_incidents" // incident reports + safety queue + messaging
@@ -54,78 +55,92 @@ export const ADMIN_ROLE_LABEL: Record<AdminRole, string> = {
   super_admin: "Super admin",
 };
 
-/** One-line description of each tier — shown in the role picker. */
+/** One-line description of each tier — shown in the role picker.
+ *  Worded to make the hierarchy explicit at a glance. */
 export const ADMIN_ROLE_DESCRIPTION: Record<AdminRole, string> = {
-  support_agent: "Read-only incident review and basic support tools.",
+  support_agent:
+    "Front line — read-only incident review and live-ops visibility.",
   moderator:
-    "Handles incidents, issues temporary suspensions, reviews fraud signals.",
+    "Everything Support can do, plus incident handling, user suspensions and driver review.",
   compliance:
-    "Fraud investigations, payout holds, evidence exports, driver review.",
+    "Everything Moderator can do, plus financial records, payouts, fraud cases, evidence exports and analytics.",
   technical_admin:
-    "Infrastructure + security configuration; minimal user-data access.",
-  super_admin: "Full access, including admin management and bans.",
+    "Specialist — infrastructure, security console and the route catalogue. No financial or user-data access.",
+  super_admin:
+    "Full access — everything Compliance can do, plus bans, policy publishing and admin management.",
 };
 
 /**
- * The permission matrix. `super_admin` is granted everything
- * explicitly below so the set is auditable at a glance — no implicit
- * "and also everything else".
+ * The permission matrix — built as a strict HIERARCHY.
+ *
+ * support_agent ⊂ moderator ⊂ compliance ⊂ super_admin: each rung is
+ * literally the rung below it (spread in) plus its own additions, so
+ * the hierarchy can never silently drift — a lower tier can't hold a
+ * permission a higher tier lacks.
+ *
+ * `technical_admin` is deliberately NOT a rung in that ladder. It is a
+ * SPECIALIST tier — platform infrastructure, the security console and
+ * the route catalogue — with no financial or user-data access. It
+ * sits beside the ladder, not inside it.
  */
+
+/** Tier 1 — front line. Read-only operational + incident visibility. */
+const SUPPORT_AGENT_PERMISSIONS: AdminPermission[] = [
+  "view_operations",
+  "view_incidents",
+];
+
+/** Tier 2 — Support + enforcement: works incidents, suspends users,
+ *  reviews drivers and fraud signals. No finance, no analytics. */
+const MODERATOR_PERMISSIONS: AdminPermission[] = [
+  ...SUPPORT_AGENT_PERMISSIONS,
+  "manage_incidents",
+  "manage_users",
+  "suspend_user",
+  "view_fraud",
+  "review_drivers",
+];
+
+/** Tier 3 — Moderator + the financial / investigative reach: business
+ *  analytics, wallets, payouts, fraud cases and evidence exports. */
+const COMPLIANCE_PERMISSIONS: AdminPermission[] = [
+  ...MODERATOR_PERMISSIONS,
+  "view_analytics",
+  "view_finance",
+  "freeze_payout",
+  "manage_fraud",
+  "export_evidence",
+];
+
+/** Tier 4 — Compliance + the platform-governance powers: permanent
+ *  bans, policy publishing, the security console and admin management.
+ *  Spread from Compliance so it can never lack a lower tier's reach. */
+const SUPER_ADMIN_PERMISSIONS: AdminPermission[] = [
+  ...COMPLIANCE_PERMISSIONS,
+  "manage_routes",
+  "ban_user",
+  "edit_policies",
+  "manage_security",
+  "manage_admins",
+];
+
+/** Specialist (OFF-ladder) — platform infrastructure, security config
+ *  and the route catalogue. Deliberately no finance, no fraud cases,
+ *  no user management — an infra role shouldn't see customer money or
+ *  personal data. */
+const TECHNICAL_ADMIN_PERMISSIONS: AdminPermission[] = [
+  "view_operations",
+  "view_incidents",
+  "manage_routes",
+  "manage_security",
+];
+
 const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
-  // Support: read-only operational + incident visibility, nothing more.
-  support_agent: ["view_operations", "view_incidents"],
-  // Moderator: works incidents, suspends users, reviews drivers + fraud
-  // signals — no finance, no permanent bans, no security/admin config.
-  moderator: [
-    "view_operations",
-    "view_incidents",
-    "manage_incidents",
-    "manage_users",
-    "suspend_user",
-    "view_fraud",
-    "review_drivers",
-  ],
-  // Compliance / investigator: full fraud + financial + evidence reach.
-  compliance: [
-    "view_operations",
-    "view_incidents",
-    "manage_incidents",
-    "manage_users",
-    "suspend_user",
-    "view_finance",
-    "freeze_payout",
-    "view_fraud",
-    "manage_fraud",
-    "export_evidence",
-    "review_drivers",
-  ],
-  // Technical admin: operations + routes + security config; minimal
-  // user-data access (no finance, no fraud-management, no bans).
-  technical_admin: [
-    "view_operations",
-    "view_incidents",
-    "manage_routes",
-    "manage_security",
-  ],
-  // Super admin: everything — listed explicitly, no implicit wildcard.
-  super_admin: [
-    "view_operations",
-    "manage_routes",
-    "manage_users",
-    "view_incidents",
-    "manage_incidents",
-    "suspend_user",
-    "ban_user",
-    "view_finance",
-    "freeze_payout",
-    "view_fraud",
-    "manage_fraud",
-    "export_evidence",
-    "review_drivers",
-    "edit_policies",
-    "manage_security",
-    "manage_admins",
-  ],
+  support_agent: SUPPORT_AGENT_PERMISSIONS,
+  moderator: MODERATOR_PERMISSIONS,
+  compliance: COMPLIANCE_PERMISSIONS,
+  technical_admin: TECHNICAL_ADMIN_PERMISSIONS,
+  super_admin: SUPER_ADMIN_PERMISSIONS,
 };
 
 /** Permissions granted to a safety officer (profiles.role =

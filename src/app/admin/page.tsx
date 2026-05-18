@@ -18,6 +18,7 @@ import {
 import { LiveIndicator } from "@/components/live-indicator";
 import { useLiveQuery } from "@/lib/use-live-query";
 import { formatJMD } from "@/lib/jamaica";
+import { useHasAdminPermission } from "@/components/admin-permissions";
 
 /**
  * Admin Operations dashboard.
@@ -51,7 +52,9 @@ type Stats = {
     cancelledToday: number;
     sparkline7d: number[];
   };
-  revenue: { today: number; last30d: number; sparkline30d: number[] };
+  // Null for admin tiers without `view_analytics` — the API omits it
+  // and the dashboard hides the revenue card entirely.
+  revenue: { today: number; last30d: number; sparkline30d: number[] } | null;
   queue: {
     docsPending: number;
     docsRejected: number;
@@ -110,6 +113,11 @@ export default function AdminOperationsPage() {
   //   - analytics every 45s — heavier aggregation; doesn't need to
   //                            churn faster than that
   // All three pause when the tab is hidden.
+  // Business analytics (revenue, charts, leaderboards) is for tiers
+  // with `view_analytics` only — compliance + super_admin. Lower tiers
+  // get a clean ops-only dashboard.
+  const canViewAnalytics = useHasAdminPermission("view_analytics");
+
   const statsQuery = useLiveQuery<Stats>("/api/admin/stats", { interval: 15_000 });
   const activityQuery = useLiveQuery<{ items: Activity[] }>(
     "/api/admin/activity?limit=20",
@@ -117,7 +125,7 @@ export default function AdminOperationsPage() {
   );
   const analyticsQuery = useLiveQuery<Analytics>(
     "/api/admin/analytics/overview?days=14",
-    { interval: 45_000 },
+    { interval: 45_000, enabled: canViewAnalytics },
   );
 
   const stats = statsQuery.data;
@@ -128,7 +136,9 @@ export default function AdminOperationsPage() {
   // payload has resolved, so the page swaps to skeletons just once
   // rather than flashing them on every refresh tick.
   const loading =
-    statsQuery.loading || analyticsQuery.loading || activityQuery.loading;
+    statsQuery.loading ||
+    activityQuery.loading ||
+    (canViewAnalytics && analyticsQuery.loading);
 
   const newestUpdate = [
     statsQuery.lastUpdated,
@@ -223,13 +233,15 @@ export default function AdminOperationsPage() {
                 <Icon name="mail" className="h-4 w-4" />
                 Messaging
               </Link>
-              <Link
-                href="/admin/analytics"
-                className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition-all hover:-translate-y-0.5 hover:bg-white/20"
-              >
-                <Icon name="bar-chart" className="h-4 w-4" />
-                Analytics
-              </Link>
+              {canViewAnalytics && (
+                <Link
+                  href="/admin/analytics"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition-all hover:-translate-y-0.5 hover:bg-white/20"
+                >
+                  <Icon name="bar-chart" className="h-4 w-4" />
+                  Analytics
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -249,18 +261,20 @@ export default function AdminOperationsPage() {
           sparkline={stats?.rides.sparkline7d ?? []}
           icon="navigation"
         />
-        <KpiTile
-          eyebrow="Revenue today"
-          value={loading ? "—" : formatJMD(stats?.revenue.today ?? 0)}
-          caption={
-            stats
-              ? `30-day total · ${formatJMD(stats.revenue.last30d)}`
-              : undefined
-          }
-          sparkline={stats?.revenue.sparkline30d ?? []}
-          sparkAccent="emerald"
-          icon="trending-up"
-        />
+        {canViewAnalytics && (
+          <KpiTile
+            eyebrow="Revenue today"
+            value={loading ? "—" : formatJMD(stats?.revenue?.today ?? 0)}
+            caption={
+              stats?.revenue
+                ? `30-day total · ${formatJMD(stats.revenue.last30d)}`
+                : undefined
+            }
+            sparkline={stats?.revenue?.sparkline30d ?? []}
+            sparkAccent="emerald"
+            icon="trending-up"
+          />
+        )}
         <KpiTile
           eyebrow="Drivers online"
           value={
@@ -329,7 +343,8 @@ export default function AdminOperationsPage() {
         </FadeUp>
       )}
 
-      {/* ─── Charts row ─── */}
+      {/* ─── Charts row — business analytics, senior tiers only ─── */}
+      {canViewAnalytics && (
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Volume area chart — spans 2 columns */}
         <FadeUp delay={0.08}>
@@ -404,9 +419,13 @@ export default function AdminOperationsPage() {
           </div>
         </FadeUp>
       </div>
+      )}
 
       {/* ─── Bottom row: Top drivers + parishes + activity ─── */}
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div
+        className={`grid gap-5 ${canViewAnalytics ? "lg:grid-cols-3" : ""}`}
+      >
+        {canViewAnalytics && (
         <FadeUp delay={0.12}>
           <div className="rounded-2xl border border-line bg-surface p-5">
             <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
@@ -444,7 +463,9 @@ export default function AdminOperationsPage() {
             )}
           </div>
         </FadeUp>
+        )}
 
+        {canViewAnalytics && (
         <FadeUp delay={0.14}>
           <div className="rounded-2xl border border-line bg-surface p-5">
             <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
@@ -498,8 +519,9 @@ export default function AdminOperationsPage() {
             )}
           </div>
         </FadeUp>
+        )}
 
-        {/* Activity feed */}
+        {/* Activity feed — operational, shown to every admin tier */}
         <FadeUp delay={0.16}>
           <div className="flex h-full flex-col rounded-2xl border border-line bg-surface p-5">
             <div className="mb-4 flex items-center justify-between">
