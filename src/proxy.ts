@@ -13,10 +13,12 @@ import { requiredPermissionForAdminPath } from "@/lib/admin-route-permissions";
  *      admin.rajlo.com   → only /, /admin/*, /auth/admin/*, shared pages
  *    Hitting the wrong portal on the wrong subdomain redirects to the
  *    correct subdomain (preserving the path) so deep links still work.
- *    On any other host (rajlo.com apex, *.vercel.app preview deploys,
- *    localhost dev) the subdomain rules are bypassed — paths just route
- *    however they're requested. That's how the same code works on real
- *    domains AND Vercel previews without two deployments.
+ *    The rajlo.com apex serves the marketing site ONLY — any portal
+ *    path requested there is bounced to its subdomain (so a "Book a
+ *    ride" link lands on rider.rajlo.com). On *.vercel.app preview
+ *    deploys and localhost the subdomain rules are fully bypassed
+ *    (no subdomains exist), so the same code works on real domains
+ *    AND Vercel previews without two deployments.
  *
  * 2. Auth + role gating (path-based, identical to before)
  *    Anonymous visitors hitting a protected portal get bounced to the
@@ -59,6 +61,16 @@ function portalForHost(host: string | null): Portal | null {
   if (hostname.startsWith("driver.")) return "driver";
   if (hostname.startsWith("admin.")) return "admin";
   return null;
+}
+
+/** True for the production marketing apex (rajlo.com / www.rajlo.com).
+ *  Deliberately NOT true for *.vercel.app previews or localhost — there
+ *  the portal subdomains don't exist, so portal paths must serve as-is
+ *  rather than redirect to a host that isn't reachable. */
+function isRajloApex(host: string | null): boolean {
+  if (!host) return false;
+  const hostname = host.split(":")[0].toLowerCase();
+  return hostname === "rajlo.com" || hostname === "www.rajlo.com";
 }
 
 /** Figure out which portal owns a given path. Returns null for
@@ -113,6 +125,18 @@ export async function proxy(request: NextRequest) {
       // `url.host` keeps any :port suffix. In production Vercel handles
       // that; in dev it preserves the local port so cross-subdomain
       // redirects still work when testing.
+      return NextResponse.redirect(url);
+    }
+  } else if (isRajloApex(host)) {
+    // rajlo.com (and www.) is the marketing site ONLY. Any portal path
+    // — /rider/*, /driver/*, /admin/*, /auth/<portal>/* — belongs on
+    // its own subdomain, so bounce it there. This is what makes a
+    // "Book a ride" link (→ /rider/request) on the landing page land
+    // on rider.rajlo.com, and keeps the apex purely marketing.
+    const owner = portalForPath(path);
+    if (owner) {
+      const url = new URL(request.url);
+      url.host = `${owner}.rajlo.com`;
       return NextResponse.redirect(url);
     }
   }

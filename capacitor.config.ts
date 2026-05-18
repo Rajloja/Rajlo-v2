@@ -32,10 +32,11 @@ const config: CapacitorConfig = {
   // Loading the live Next.js app instead of bundling. The driver
   // portal logic, auth gates, and proxy all live there.
   //
-  // Pre-launch this points at the Vercel preview URL. Swap to
-  // `https://driver.rajlo.com` once DNS is wired on launch day.
+  // Points at the production driver subdomain. The proxy scopes
+  // driver.rajlo.com to the driver portal, and an unauthenticated
+  // launch lands on /auth/driver/login automatically.
   server: {
-    url: "https://rajlo-v2.vercel.app/driver",
+    url: "https://driver.rajlo.com/driver",
     // `cleartext: false` blocks plaintext HTTP — defends against
     // anyone trying to redirect the app at an HTTP fake.
     cleartext: false,

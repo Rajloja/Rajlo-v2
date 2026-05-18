@@ -96,6 +96,30 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * Open a URL in the device's external browser (not the in-app
+ * WebView). Used by the driver app so any link pointing outside the
+ * driver portal — marketing, legal, the rider/admin surfaces — opens
+ * in the real browser instead of taking over the driver shell.
+ *
+ * On the web it's a plain `window.open`. In the native app it uses
+ * the Capacitor Browser plugin, which hands the URL to the OS.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isNativeApp()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  try {
+    const { Browser } = await import("@capacitor/browser");
+    await Browser.open({ url });
+  } catch {
+    // Plugin missing / failed — fall back to a normal open so the
+    // link still works rather than dead-ending.
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+/**
  * Type of the position handler. Mirrors the `LivePosition` shape
  * used by useRidePosition so callers don't have to translate.
  */

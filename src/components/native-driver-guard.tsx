@@ -2,63 +2,55 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { isNativeApp } from "@/lib/native";
+import { isNativeApp, openExternalUrl } from "@/lib/native";
 
 /**
- * Capacitor-only navigation guard for the driver app.
+ * Capacitor-only navigation behaviour for the driver app.
  *
- * The driver native app is a thin WebView wrapper around the live
- * Next.js site. By default any link inside the WebView (logo → home,
- * deep-link from a notification, etc.) can navigate to any path on
- * the site — including /rider, /admin, marketing pages. That breaks
- * the mental model of a "Rajlo Driver" app.
+ * The driver native app is a thin WebView around driver.rajlo.com.
+ * This component does two things, and is a no-op on the web:
  *
- * This component runs on every navigation and snaps the user back to
- * /driver whenever they end up somewhere they shouldn't be. On the
- * web (non-Capacitor) it's a no-op so the marketing site stays open
- * to everyone.
+ *  1. Link interception — any LINK the driver taps that points
+ *     outside the driver portal (marketing, legal, the rider/admin
+ *     surfaces, or any non-Rajlo site) opens in the device's real
+ *     browser instead of hijacking the driver shell.
  *
- * Allowed prefixes:
- *   - /driver          the driver portal
- *   - /auth/driver     driver sign-in / sign-up
- *   - /auth/forgot…    shared password recovery
- *   - /auth/reset…
- *   - /auth/callback   Supabase OAuth callback
- *   - /legal           terms, privacy
- *   - /403, /404       error pages
- *
- * Everything else → redirect to /driver. The server-side proxy in
- * src/proxy.ts then handles the unauthenticated case (bounces to
- * /auth/driver/login if no session).
+ *  2. Snap-back — a safety net for navigation that ISN'T a link
+ *     click (a notification deep-link, a programmatic router.push):
+ *     if the app still lands somewhere off-portal, bounce to /driver.
  */
 
-const ALLOWED_PREFIXES = [
+// Paths that legitimately stay INSIDE the driver app — the driver
+// portal itself, the auth flows a driver needs to sign in / recover,
+// and the in-app error pages. Everything else opens externally.
+const IN_APP_PREFIXES = [
   "/driver",
   "/auth/driver",
+  "/auth/callback",
   "/auth/forgot-password",
   "/auth/reset-password",
-  "/auth/callback",
   "/auth/confirm",
-  "/legal",
   "/403",
   "/404",
 ];
 
-function isAllowedPath(path: string): boolean {
+function isInAppPath(path: string): boolean {
   if (path === "/driver") return true;
-  return ALLOWED_PREFIXES.some(
-    (p) => path === p || path.startsWith(`${p}/`),
-  );
+  return IN_APP_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+/** A Rajlo host — rajlo.com or any *.rajlo.com subdomain. */
+function isRajloHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "rajlo.com" || h.endsWith(".rajlo.com");
 }
 
 export function NativeDriverGuard() {
   const pathname = usePathname();
   const router = useRouter();
 
-  // Mark <html> with `data-rajlo-native="1"` so globals.css can apply
-  // native-only styling (disabled text selection, no long-press
-  // callout, etc.). Set once on mount when we're in the Capacitor
-  // shell; web users never see the attribute.
+  // Mark <html data-rajlo-native="1"> so globals.css can apply
+  // native-only styling. Set once on mount inside the Capacitor shell.
   useEffect(() => {
     if (!isNativeApp()) return;
     if (typeof document === "undefined") return;
@@ -68,13 +60,62 @@ export function NativeDriverGuard() {
     };
   }, []);
 
+  // ─── 1. Link interception — off-portal links → system browser ───
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    if (typeof document === "undefined") return;
+
+    const onClick = (e: MouseEvent) => {
+      // Only plain primary clicks/taps — leave modified clicks alone.
+      if (
+        e.defaultPrevented ||
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey
+      ) {
+        return;
+      }
+      const target = e.target as Element | null;
+      const anchor = target?.closest?.("a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      // Non-web schemes (mailto:, tel:) — let the OS handle them.
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
+
+      // Stays in the app ONLY when it's a Rajlo URL on a driver-portal
+      // or auth path. Off-portal Rajlo pages and any other site open
+      // in the device browser.
+      if (isRajloHost(url.hostname) && isInAppPath(url.pathname)) return;
+
+      // Capture-phase + stopPropagation so Next's <Link> handler never
+      // also fires — the external open fully replaces the navigation.
+      e.preventDefault();
+      e.stopPropagation();
+      void openExternalUrl(url.href);
+    };
+
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
+  // ─── 2. Snap-back safety net (non-link navigation) ───
   useEffect(() => {
     if (!isNativeApp()) return;
     if (!pathname) return;
-    if (isAllowedPath(pathname)) return;
-    // Off-portal navigation inside the native app — bounce back to
-    // the driver dashboard. `replace` (not push) so the back button
-    // doesn't return them to the disallowed page.
+    // `/legal` may render in-app if reached without a link click
+    // (harmless), so the snap-back allows a touch more than the link
+    // interceptor does.
+    if (isInAppPath(pathname) || pathname.startsWith("/legal")) return;
     router.replace("/driver");
   }, [pathname, router]);
 
