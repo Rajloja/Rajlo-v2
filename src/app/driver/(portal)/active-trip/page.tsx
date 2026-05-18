@@ -15,6 +15,7 @@ import { useLocationViolationMonitor } from "@/lib/use-location-violation-monito
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { formatJMD, type Place } from "@/lib/jamaica";
 import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
+import { describeEndedTrip } from "@/lib/ride-ended";
 import { HeroSkeleton, MapSkeleton, Skeleton } from "@/components/skeleton";
 import {
   getCachedDriverData,
@@ -490,8 +491,14 @@ export default function DriverActiveTripPage() {
     // driver isn't left guessing why the trip vanished.
     const ended = data?.recentlyEnded ?? null;
     if (ended && !dismissedEndedTrips.has(ended.id)) {
-      const noShow = ended.cancellationReason === "rider_no_show";
       const done = ended.status === "completed";
+      // Spell out exactly why the trip ended (wrong PIN, no-show, the
+      // rider's own reason) — never a vague "trip cancelled".
+      const { title, detail } = describeEndedTrip(
+        ended.status,
+        ended.cancellationReason,
+        "driver",
+      );
       return (
         <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
           <span
@@ -507,19 +514,9 @@ export default function DriverActiveTripPage() {
             />
           </span>
           <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
-            {done
-              ? "Trip completed"
-              : noShow
-              ? "Reported as a no-show"
-              : "Trip cancelled"}
+            {title}
           </h1>
-          <p className="mt-2 max-w-md text-sm text-muted">
-            {done
-              ? "This trip was completed."
-              : noShow
-              ? "The rider didn't show — the no-show fee was applied."
-              : "The rider cancelled this trip."}
-          </p>
+          <p className="mt-2 max-w-md text-sm text-muted">{detail}</p>
           <p className="mt-1 text-xs font-semibold text-muted">
             {ended.pickupName} → {ended.dropoffName}
           </p>

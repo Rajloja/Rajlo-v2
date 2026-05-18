@@ -202,6 +202,28 @@ function drawGradientPolyline(
   return polylines;
 }
 
+/**
+ * The FULL-resolution driving geometry for a route.
+ *
+ * `route.overview_path` is Google's *simplified* overview line — it
+ * drops vertices, so it visibly cuts corners and looks straight when
+ * you zoom in. Each `DirectionsStep` instead carries a detailed
+ * `path`; stitching every step's path together gives the geometry
+ * that actually bends with every curve in the road.
+ */
+function fullRoutePath(
+  route: google.maps.DirectionsRoute,
+): Array<google.maps.LatLng | { lat: number; lng: number }> {
+  const path: google.maps.LatLng[] = [];
+  for (const leg of route.legs ?? []) {
+    for (const step of leg.steps ?? []) {
+      for (const pt of step.path ?? []) path.push(pt);
+    }
+  }
+  // Fall back to the overview if the steps somehow carry no detail.
+  return path.length > 1 ? path : route.overview_path;
+}
+
 // Sleek top-down car icon — Bolt-style minimalist. A smooth rounded-pill
 // body in Rajlo red with subtle horizontal gradient (left/right edges
 // shaded slightly darker than the centre for a "polished metal"
@@ -700,13 +722,13 @@ export function MapView({
           drawStraightLineFallback();
           return;
         }
-        // overview_path is the smoothed driving path — already a flat
-        // LatLng[] across all legs. Render it as a gradient strip
-        // (brand red → deep crimson) so the rider can read direction
-        // from the colour alone.
+        // Full-resolution road geometry (not the simplified
+        // overview_path) so the line bends with every curve. Rendered
+        // as a gradient strip (brand red → deep crimson) so the rider
+        // can read direction from the colour alone.
         polylineRef.current = drawGradientPolyline(
           map,
-          route.overview_path,
+          fullRoutePath(route),
           5,
         );
         // Use the route's own bounds — tighter than fitting to stops alone.
@@ -870,7 +892,7 @@ export function MapView({
         livePolylineRef.current.forEach((p) => p.setMap(null));
         livePolylineRef.current = drawGradientPolyline(
           map,
-          route.overview_path,
+          fullRoutePath(route),
           5,
         );
         // Fit the camera to driver+target the first time we draw the

@@ -13,6 +13,7 @@ import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { SafetySheet } from "@/components/safety-sheet";
 import { CancelReasonDialog } from "@/components/cancel-reason-dialog";
 import { riderCancellationFeeJmd } from "@/lib/cancellation-fees";
+import { describeEndedTrip } from "@/lib/ride-ended";
 import { SafetyCheckModal } from "@/components/safety-check-modal";
 import { useUnusualStopDetector } from "@/lib/use-unusual-stop-detector";
 import { useOffRouteDetector } from "@/lib/use-off-route-detector";
@@ -673,24 +674,23 @@ export default function RiderLiveTripPage() {
       ended != null &&
       ended.status === "cancelled" &&
       !dismissedEndedTrips.has(ended.id);
+    // Spell out exactly why the trip ended — wrong PIN, no-show,
+    // expiry, or the cancel reason — never a vague "trip cancelled".
+    const endedInfo = ended
+      ? describeEndedTrip(ended.status, ended.cancellationReason, "rider")
+      : null;
     return (
       <>
-        {showEndedCard && ended ? (
+        {showEndedCard && ended && endedInfo ? (
           <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
             <span className="grid h-14 w-14 place-items-center rounded-full bg-primary-soft text-rajlo-red">
               <Icon name="x" className="h-6 w-6" />
             </span>
             <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
-              {ended.cancellationReason === "rider_no_show"
-                ? "Trip cancelled — no-show"
-                : "Trip cancelled"}
+              {endedInfo.title}
             </h1>
             <p className="mt-2 max-w-md text-sm text-muted">
-              {ended.cancellationReason === "rider_no_show"
-                ? "The driver waited at the pickup and a no-show fee was applied."
-                : ended.cancellationReason === "expired_no_driver"
-                ? "No driver accepted this trip in time."
-                : "This trip was cancelled."}
+              {endedInfo.detail}
             </p>
             <p className="mt-1 text-xs font-semibold text-muted">
               {ended.pickupName} → {ended.dropoffName}
