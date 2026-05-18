@@ -57,7 +57,17 @@ type RouteRow = {
   distance_km: number;
   ta_fare_jmd: number;
   slug: string;
+  /** Endpoint coordinates — null until `scripts/geocode-routes.mjs`
+   *  has run. When present the matcher uses exact proximity. */
+  origin_lat: number | null;
+  origin_lng: number | null;
+  destination_lat: number | null;
+  destination_lng: number | null;
 };
+
+/** How far (km) a rider's pickup/dropoff may sit from the corridor
+ *  line and still count — route taxi riders walk a little to the road. */
+const CORRIDOR_RADIUS_KM = 3;
 
 const STOPWORDS = new Set([
   "jamaica",
@@ -152,7 +162,7 @@ export async function POST(request: Request) {
   const { data: routes, error } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd, slug",
+      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd, slug, origin_lat, origin_lng, destination_lat, destination_lng",
     )
     .eq("active", true)
     .limit(1000);
@@ -172,6 +182,7 @@ export async function POST(request: Request) {
 
   let gatedOut = 0;
   let parishGated = 0;
+  let geoGated = 0;
   for (const r of (routes ?? []) as RouteRow[]) {
     // Geographic sanity gate. A route taxi rider boards a segment of
     // the corridor, so the trip can't be meaningfully longer than the
@@ -181,6 +192,45 @@ export async function POST(request: Request) {
     if (tripKm !== null && tripKm > routeKm * 1.3 + 2) {
       gatedOut++;
       continue;
+    }
+
+    // ── Coordinate proximity — preferred when the route is geocoded ──
+    // A route with real endpoint coordinates is matched purely on
+    // geography: the rider's pickup AND dropoff must both sit close to
+    // the corridor line. Exact — no name-token guesswork at all.
+    if (
+      pickupCoord &&
+      dropoffCoord &&
+      r.origin_lat != null &&
+      r.origin_lng != null &&
+      r.destination_lat != null &&
+      r.destination_lng != null
+    ) {
+      const origin = { lat: Number(r.origin_lat), lng: Number(r.origin_lng) };
+      const dest = {
+        lat: Number(r.destination_lat),
+        lng: Number(r.destination_lng),
+      };
+      const segP = projectToSegment(pickupCoord, origin, dest);
+      const segD = projectToSegment(dropoffCoord, origin, dest);
+      if (
+        segP.distKm > CORRIDOR_RADIUS_KM ||
+        segD.distKm > CORRIDOR_RADIUS_KM
+      ) {
+        geoGated++;
+        continue; // off-corridor — geography says no, whatever the names
+      }
+      // Closer to the corridor → higher score. Geocoded matches sit
+      // above any name-only score (base 3.0) so they always rank first.
+      const closeness =
+        1 - (segP.distKm + segD.distKm) / (2 * CORRIDOR_RADIUS_KM);
+      candidates.push({
+        route: r,
+        direction: segP.t <= segD.t ? "forward" : "reverse",
+        score: 3 + closeness,
+        confidence: "high",
+      });
+      continue; // coordinates decided it — skip the name heuristics
     }
 
     const originTokens = tokenize(r.origin_name);
@@ -250,7 +300,7 @@ export async function POST(request: Request) {
   console.log(
     `[route-match] pickupTokens=${pickupTokens.size} dropoffTokens=${dropoffTokens.size} ` +
       `routesScanned=${routes?.length ?? 0} distanceGated=${gatedOut} ` +
-      `parishGated=${parishGated} ` +
+      `parishGated=${parishGated} geoGated=${geoGated} ` +
       `tripKm=${tripKm !== null ? tripKm.toFixed(1) : "n/a"} ` +
       `candidates=${candidates.length} returned=${top.length}` +
       (top.length > 0 ? ` topScore=${top[0].score.toFixed(2)}` : ""),
@@ -291,6 +341,32 @@ function asCoord(
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat === 0 && lng === 0) return null;
   return { lat, lng };
+}
+
+/**
+ * Project a point onto the segment a→b. Returns the perpendicular
+ * distance in km and `t` ∈ [0,1] — how far along the segment the
+ * projection lands (0 = at a, 1 = at b). A local equirectangular
+ * approximation, accurate at Jamaican-corridor scale.
+ */
+function projectToSegment(
+  p: { lat: number; lng: number },
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): { distKm: number; t: number } {
+  const KM_PER_DEG_LAT = 111;
+  const kmPerDegLng = 111 * Math.cos((a.lat * Math.PI) / 180);
+  const bx = (b.lng - a.lng) * kmPerDegLng;
+  const by = (b.lat - a.lat) * KM_PER_DEG_LAT;
+  const px = (p.lng - a.lng) * kmPerDegLng;
+  const py = (p.lat - a.lat) * KM_PER_DEG_LAT;
+  const segLen2 = bx * bx + by * by;
+  let t = segLen2 > 0 ? (px * bx + py * by) / segLen2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return {
+    distKm: Math.hypot(px - t * bx, py - t * by),
+    t,
+  };
 }
 
 /**

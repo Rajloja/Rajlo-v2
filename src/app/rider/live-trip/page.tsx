@@ -96,10 +96,30 @@ type DriverInfo = {
   avatarUrl: string | null;
 };
 
+/** A ride that ended (cancelled/completed) in the last ~2 minutes. */
+type RecentlyEndedTrip = {
+  id: string;
+  status: "cancelled" | "completed";
+  pickupName: string;
+  dropoffName: string;
+  cancellationReason: string | null;
+};
+
 type ActiveResponse = {
   ride: ActiveRide | null;
   driver: DriverInfo | null;
+  /** Present only when there's no active ride but one ended very
+   *  recently — drives the "trip ended" card. */
+  recentlyEnded?: RecentlyEndedTrip | null;
 };
+
+/**
+ * Ride ids whose "trip ended" card the rider has already moved past —
+ * tapped through, or navigated away from. Module-scoped so it survives
+ * client-side route changes; a full reload clears it (by then the ride
+ * is outside the server's 2-minute window anyway).
+ */
+const dismissedEndedTrips = new Set<string>();
 
 const STATUS_HERO: Record<
   ActiveRide["status"],
@@ -189,6 +209,17 @@ export default function RiderLiveTripPage() {
   // no-op in either case.
   const [plannedPolyline, setPlannedPolyline] = useState<string | null>(null);
   const [completed, setCompleted] = useState<CompletedSnapshot | null>(null);
+
+  // Once the rider moves past a shown "trip ended" card — taps through
+  // it or leaves the page — remember it so a later return lands on a
+  // clean "no active trip" rather than re-surfacing the ended ride.
+  const recentlyEndedId = data?.recentlyEnded?.id ?? null;
+  useEffect(() => {
+    if (!recentlyEndedId) return;
+    return () => {
+      dismissedEndedTrips.add(recentlyEndedId);
+    };
+  }, [recentlyEndedId]);
   // Tracks the most recent active-ride snapshot we saw, so when
   // refresh() returns `{ ride: null }` we can detect the active → done
   // transition and pop the rating overlay using the previous ride's
@@ -633,26 +664,66 @@ export default function RiderLiveTripPage() {
 
   /* ── No active trip ── */
   if (!data?.ride) {
+    // A trip that JUST ended (driver cancelled, expired, no-show) —
+    // show what happened + a way forward before collapsing to the
+    // generic empty state. Completed trips are handled by the
+    // CompletionDialog overlay below, so we only card-up cancellations.
+    const ended = data?.recentlyEnded ?? null;
+    const showEndedCard =
+      ended != null &&
+      ended.status === "cancelled" &&
+      !dismissedEndedTrips.has(ended.id);
     return (
       <>
-        <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-surface-soft text-muted">
-            <Icon name="navigation" className="h-6 w-6" />
-          </span>
-          <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
-            No active trip
-          </h1>
-          <p className="mt-2 max-w-md text-sm text-muted">
-            Book a ride to get started.
-          </p>
-          <Link
-            href="/rider/request"
-            className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
-          >
-            Book a ride
-            <Icon name="arrow-right" className="h-4 w-4" />
-          </Link>
-        </div>
+        {showEndedCard && ended ? (
+          <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-primary-soft text-rajlo-red">
+              <Icon name="x" className="h-6 w-6" />
+            </span>
+            <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
+              {ended.cancellationReason === "rider_no_show"
+                ? "Trip cancelled — no-show"
+                : "Trip cancelled"}
+            </h1>
+            <p className="mt-2 max-w-md text-sm text-muted">
+              {ended.cancellationReason === "rider_no_show"
+                ? "The driver waited at the pickup and a no-show fee was applied."
+                : ended.cancellationReason === "expired_no_driver"
+                ? "No driver accepted this trip in time."
+                : "This trip was cancelled."}
+            </p>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              {ended.pickupName} → {ended.dropoffName}
+            </p>
+            <Link
+              href="/rider/request"
+              onClick={() => dismissedEndedTrips.add(ended.id)}
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
+            >
+              Book another ride
+              <Icon name="arrow-right" className="h-4 w-4" />
+            </Link>
+          </div>
+        ) : (
+          <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-surface-soft text-muted">
+              <Icon name="navigation" className="h-6 w-6" />
+            </span>
+            <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
+              No active trip
+            </h1>
+            <p className="mt-2 max-w-md text-sm text-muted">
+              Book a ride to get started.
+            </p>
+            <Link
+              href="/rider/request"
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
+            >
+              Book a ride
+              <Icon name="arrow-right" className="h-4 w-4" />
+            </Link>
+          </div>
+        )}
         {/* Completion overlay — pops over the empty state when the
            driver just tapped Complete on a trip we were tracking.
            Submitting a rating or dismissing the dialog clears it,

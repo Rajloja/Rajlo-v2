@@ -83,7 +83,37 @@ export async function GET() {
   }
 
   if (!ride) {
-    return NextResponse.json({ ride: null });
+    // No active ride — but surface a ride that ended in the last
+    // couple of minutes so the live-trip page can show "this trip was
+    // cancelled / completed" instead of silently blanking to "no
+    // active trip". `recentlyEnded` is a SEPARATE field so existing
+    // consumers that only read `ride` are unaffected.
+    const endedCutoff = new Date(Date.now() - 120_000).toISOString();
+    const { data: ended } = await supabase
+      .from("rides")
+      .select(
+        "id, status, pickup_name, dropoff_name, cancellation_reason, cancelled_at, completed_at",
+      )
+      .eq("rider_id", user.id)
+      .in("status", ["cancelled", "completed"])
+      .or(
+        `cancelled_at.gt.${endedCutoff},completed_at.gt.${endedCutoff}`,
+      )
+      .order("requested_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return NextResponse.json({
+      ride: null,
+      recentlyEnded: ended
+        ? {
+            id: ended.id,
+            status: ended.status,
+            pickupName: ended.pickup_name,
+            dropoffName: ended.dropoff_name,
+            cancellationReason: ended.cancellation_reason,
+          }
+        : null,
+    });
   }
 
   // If this rider's trip is part of a carpool, surface the partner's

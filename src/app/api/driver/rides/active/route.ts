@@ -55,7 +55,37 @@ export async function GET() {
     .maybeSingle();
 
   if (!ride) {
-    return NextResponse.json({ ride: null });
+    // No active ride — surface a ride that ended in the last couple
+    // of minutes so the active-trip page can show "the rider
+    // cancelled / trip completed" instead of silently blanking to "no
+    // active trip" (e.g. when the RIDER cancels and the driver took
+    // no action). Separate field — `ride` semantics are unchanged.
+    const endedCutoff = new Date(Date.now() - 120_000).toISOString();
+    const { data: ended } = await supabase
+      .from("rides")
+      .select(
+        "id, status, pickup_name, dropoff_name, cancellation_reason, cancelled_at, completed_at",
+      )
+      .eq("driver_id", driver.id)
+      .in("status", ["cancelled", "completed"])
+      .or(
+        `cancelled_at.gt.${endedCutoff},completed_at.gt.${endedCutoff}`,
+      )
+      .order("accepted_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    return NextResponse.json({
+      ride: null,
+      recentlyEnded: ended
+        ? {
+            id: ended.id,
+            status: ended.status,
+            pickupName: ended.pickup_name,
+            dropoffName: ended.dropoff_name,
+            cancellationReason: ended.cancellation_reason,
+          }
+        : null,
+    });
   }
 
   // Carpool partner — same group, different ride row. There can only

@@ -14,6 +14,7 @@ import { useRidePosition } from "@/lib/use-ride-position";
 import { useLocationViolationMonitor } from "@/lib/use-location-violation-monitor";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { formatJMD, type Place } from "@/lib/jamaica";
+import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
 import { HeroSkeleton, MapSkeleton, Skeleton } from "@/components/skeleton";
 import {
   getCachedDriverData,
@@ -21,6 +22,24 @@ import {
 } from "@/lib/driver-prefetch";
 
 const ACTIVE_URL = "/api/driver/rides/active";
+
+/** A ride that ended (cancelled/completed) in the last ~2 minutes. */
+type RecentlyEndedTrip = {
+  id: string;
+  status: "cancelled" | "completed";
+  pickupName: string;
+  dropoffName: string;
+  cancellationReason: string | null;
+};
+
+/**
+ * Ride ids whose "trip ended" card the driver has already moved past
+ * — either by tapping through it, or by navigating away from the
+ * page. Module-scoped so it survives client-side route changes (a
+ * fresh full page load clears it, by which point the ride is well
+ * outside the server's 2-minute window anyway).
+ */
+const dismissedEndedTrips = new Set<string>();
 
 /**
  * Driver's active-trip console.
@@ -51,6 +70,12 @@ type ActiveRide = {
   estimatedFareJMD: number;
   estimatedDistanceKm: number | null;
   estimatedEtaMinutes: number | null;
+  timeline: {
+    requestedAt: string | null;
+    acceptedAt: string | null;
+    arrivedAt: string | null;
+    startedAt: string | null;
+  };
 };
 
 type CarpoolPartner = {
@@ -76,6 +101,9 @@ type ActiveResponse = {
     phone: string | null;
   } | null;
   carpool: { groupId: string; partner: CarpoolPartner } | null;
+  /** Present only when there's no active ride but one ended very
+   *  recently — drives the "trip ended" card. */
+  recentlyEnded?: RecentlyEndedTrip | null;
 };
 
 const STAGE_COPY = {
@@ -142,6 +170,10 @@ export default function DriverActiveTripPage() {
   // the driver gets a clear "the rider will be charged" confirmation
   // before the no-show fee actually fires.
   const [noShowArmed, setNoShowArmed] = useState(false);
+  // Ticks every second while parked at pickup so the no-show countdown
+  // (the driver must wait the full window before the button unlocks)
+  // updates live.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Live position channel: driver streams own GPS so the rider can watch
   // the car move on the map. Hook also receives the rider's position so
@@ -226,6 +258,27 @@ export default function DriverActiveTripPage() {
   // comes back into focus, so the cost is bounded.
   useBackgroundRefresh(refresh, 5_000);
 
+  // Tick once a second only while the driver is parked at pickup, so
+  // the no-show countdown stays live without re-rendering the whole
+  // page every second the rest of the time.
+  const atPickup = data?.ride?.status === "arrived";
+  useEffect(() => {
+    if (!atPickup) return;
+    setNowMs(Date.now());
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [atPickup]);
+
+  // Once the driver navigates away from a shown "trip ended" card,
+  // remember it so coming back lands on a clean "no active trip".
+  const recentlyEndedId = data?.recentlyEnded?.id ?? null;
+  useEffect(() => {
+    if (!recentlyEndedId) return;
+    return () => {
+      dismissedEndedTrips.add(recentlyEndedId);
+    };
+  }, [recentlyEndedId]);
+
   const handleAction = async (
     rideId: string,
     action: "arrived" | "start" | "complete",
@@ -244,6 +297,9 @@ export default function DriverActiveTripPage() {
         throw new Error(err.error ?? `Server returned ${res.status}`);
       }
       if (action === "complete") {
+        // The driver completed this trip themselves — the flash card
+        // below covers it, so suppress the generic "trip ended" card.
+        dismissedEndedTrips.add(rideId);
         // Capture the rider info BEFORE we clear `data` — the flash
         // card uses this snapshot to render the names + rating UI.
         const primary = data?.ride;
@@ -290,6 +346,9 @@ export default function DriverActiveTripPage() {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? `Server returned ${res.status}`);
       }
+      // The driver cancelled this trip themselves — no need to also
+      // show the "trip ended" card for it.
+      dismissedEndedTrips.add(cancelTargetId);
       setData({ ride: null, rider: null, carpool: null });
       setCancelTargetId(null);
     } catch (e) {
@@ -315,6 +374,9 @@ export default function DriverActiveTripPage() {
       if (!res.ok) {
         throw new Error(json.error ?? `Server returned ${res.status}`);
       }
+      // The driver reported this no-show themselves — don't re-surface
+      // it as a generic "trip ended" card on the next poll.
+      dismissedEndedTrips.add(rideId);
       setNoShowArmed(false);
       setData({ ride: null, rider: null, carpool: null });
     } catch (e) {
@@ -423,6 +485,55 @@ export default function DriverActiveTripPage() {
 
   /* ─── No active trip ─── */
   if (!data?.ride) {
+    // A trip that JUST ended (the rider cancelled, etc.) — show what
+    // happened before collapsing to the generic empty state, so the
+    // driver isn't left guessing why the trip vanished.
+    const ended = data?.recentlyEnded ?? null;
+    if (ended && !dismissedEndedTrips.has(ended.id)) {
+      const noShow = ended.cancellationReason === "rider_no_show";
+      const done = ended.status === "completed";
+      return (
+        <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
+          <span
+            className={`grid h-14 w-14 place-items-center rounded-full ${
+              done
+                ? "bg-emerald-50 text-emerald-600"
+                : "bg-primary-soft text-rajlo-red"
+            }`}
+          >
+            <Icon
+              name={done ? "check-circle" : "x"}
+              className="h-6 w-6"
+            />
+          </span>
+          <h1 className="mt-5 text-2xl font-extrabold tracking-tight">
+            {done
+              ? "Trip completed"
+              : noShow
+              ? "Reported as a no-show"
+              : "Trip cancelled"}
+          </h1>
+          <p className="mt-2 max-w-md text-sm text-muted">
+            {done
+              ? "This trip was completed."
+              : noShow
+              ? "The rider didn't show — the no-show fee was applied."
+              : "The rider cancelled this trip."}
+          </p>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            {ended.pickupName} → {ended.dropoffName}
+          </p>
+          <Link
+            href="/driver"
+            onClick={() => dismissedEndedTrips.add(ended.id)}
+            className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
+          >
+            Back to dashboard
+            <Icon name="arrow-right" className="h-4 w-4" />
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-[70dvh] flex-col items-center justify-center px-4 text-center">
         <span className="grid h-14 w-14 place-items-center rounded-full bg-surface-soft text-muted">
@@ -448,6 +559,21 @@ export default function DriverActiveTripPage() {
 
   const { ride, rider } = data;
   const stage = STAGE_COPY[ride.status];
+
+  // No-show countdown — the driver must wait the full pickup window
+  // after marking "Arrived" before the no-show button unlocks. The
+  // server enforces the same wait; this just surfaces it as a live
+  // timer instead of letting the driver tap and get rejected.
+  const noShowArrivedAt =
+    ride.status === "arrived" ? ride.timeline?.arrivedAt ?? null : null;
+  const noShowRemainingSec = noShowArrivedAt
+    ? Math.max(
+        0,
+        NO_SHOW_WAIT_SEC.private -
+          Math.floor((nowMs - new Date(noShowArrivedAt).getTime()) / 1000),
+      )
+    : NO_SHOW_WAIT_SEC.private;
+  const noShowReady = ride.status === "arrived" && noShowRemainingSec <= 0;
   const initials = rider?.name
     ? rider.name
         .split(" ")
@@ -850,10 +976,18 @@ export default function DriverActiveTripPage() {
             </button>
           )}
 
-          {/* No-show — only once the driver is at the pickup. The
-             server enforces the 5-minute wait; this UI just collects
-             a clear confirmation since the rider gets charged J$300. */}
+          {/* No-show — only once the driver is at the pickup, and only
+             after the full wait window. Until the timer runs out the
+             driver sees a live countdown instead of the button. */}
+          {ride.status === "arrived" && !noShowReady && (
+            <div className="flex items-center justify-center gap-2 rounded-full border border-line bg-surface-soft px-5 py-3 text-sm font-bold text-muted">
+              <Icon name="history" className="h-4 w-4" />
+              Report no-show in {Math.floor(noShowRemainingSec / 60)}:
+              {String(noShowRemainingSec % 60).padStart(2, "0")}
+            </div>
+          )}
           {ride.status === "arrived" &&
+            noShowReady &&
             (noShowArmed ? (
               <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
                 <p className="text-xs font-semibold leading-relaxed text-amber-900">

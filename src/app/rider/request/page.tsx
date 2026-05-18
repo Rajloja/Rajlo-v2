@@ -258,28 +258,29 @@ export default function RiderRequestPage() {
     return list;
   }, [pickup, filledStops, dropoff]);
 
-  // Instant straight-line estimate — shown immediately, and the
-  // fallback if Google Directions is unavailable.
+  // Straight-line fallback — only used if Google Directions is
+  // unavailable. It is NEVER shown as the live price (that caused the
+  // "low fare flashes, then jumps higher" bug) — while the accurate
+  // lookup runs the UI shows a "Calculating…" state instead.
   const localFare = useMemo(
     () => estimateFare(allPoints, seats),
     [allPoints, seats],
   );
 
-  // Accurate fare from REAL road distance via Google Directions. The
-  // straight-line estimate can be wildly off on Jamaica's winding
-  // roads; this resolves the actual driving distance (waypoints
-  // included) and re-prices the trip. Null until it resolves.
-  const [drivingFare, setDrivingFare] = useState<FareEstimate | null>(null);
+  // Real road distance from Google Directions, keyed to the EXACT set
+  // of points it was computed for — so a stale result from a previous
+  // trip can never be shown while a new lookup is in flight.
+  const [drivingDist, setDrivingDist] = useState<{
+    key: Place[];
+    totalKm: number;
+    etaMinutes: number;
+  } | null>(null);
+  // The points set the Directions lookup failed for (if any).
+  const [fareFailedKey, setFareFailedKey] = useState<Place[] | null>(null);
 
   useEffect(() => {
-    if (allPoints.length < 2) {
-      setDrivingFare(null);
-      return;
-    }
+    if (allPoints.length < 2) return;
     let cancelled = false;
-    // Reset so the displayed fare falls back to the straight-line
-    // estimate while the accurate lookup is in flight.
-    setDrivingFare(null);
     (async () => {
       try {
         const g = await loadGoogleMaps();
@@ -304,27 +305,48 @@ export default function RiderRequestPage() {
           meters += leg.distance?.value ?? 0;
           seconds += leg.duration?.value ?? 0;
         }
-        if (meters <= 0) return;
-        setDrivingFare(
-          fareForDistance({
-            totalKm: meters / 1000,
-            etaMinutes: Math.max(5, Math.round(seconds / 60)),
-            intermediateStops: Math.max(0, allPoints.length - 2),
-            extraSeats: Math.max(0, seats - 1),
-          }),
-        );
+        if (meters <= 0) {
+          setFareFailedKey(allPoints);
+          return;
+        }
+        setDrivingDist({
+          key: allPoints,
+          totalKm: meters / 1000,
+          etaMinutes: Math.max(5, Math.round(seconds / 60)),
+        });
       } catch {
-        // Directions unavailable — keep the straight-line estimate.
+        if (!cancelled) setFareFailedKey(allPoints);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [allPoints, seats]);
+  }, [allPoints]);
 
-  // Prefer the accurate road-distance fare; fall back to the instant
-  // straight-line estimate while it loads or if Directions fails.
-  const fare = drivingFare ?? localFare;
+  // The accurate distance only counts when it's for the CURRENT points.
+  const drivingMatches =
+    drivingDist && drivingDist.key === allPoints ? drivingDist : null;
+
+  // True while the accurate fare is still being fetched. The price UI
+  // shows "Calculating…" rather than the rough straight-line estimate,
+  // so the rider only ever sees one final, correct number.
+  const fareCalculating =
+    allPoints.length >= 2 && !drivingMatches && fareFailedKey !== allPoints;
+
+  // Re-price from the real road distance; recomputes instantly when
+  // the seat count changes (no need to re-hit Directions). Falls back
+  // to the straight-line estimate only if Directions failed.
+  const fare = useMemo<FareEstimate>(() => {
+    if (drivingMatches) {
+      return fareForDistance({
+        totalKm: drivingMatches.totalKm,
+        etaMinutes: drivingMatches.etaMinutes,
+        intermediateStops: Math.max(0, allPoints.length - 2),
+        extraSeats: Math.max(0, seats - 1),
+      });
+    }
+    return localFare;
+  }, [drivingMatches, allPoints, seats, localFare]);
 
   // Subscribe to the global fleet channel so we can show car icons on the
   // booking-screen map. Disabled while we're bootstrapping (no point
@@ -355,7 +377,13 @@ export default function RiderRequestPage() {
     return Math.max(1, Math.round(nearestKm * 2));
   }, [pickup, fleetDrivers]);
 
-  const canSubmit = Boolean(pickup) && Boolean(dropoff) && !submitting;
+  const canSubmit =
+    Boolean(pickup) &&
+    Boolean(dropoff) &&
+    !submitting &&
+    // Don't let a private ride book while its fare is still being
+    // calculated — the rider must see the final price first.
+    !(mode !== "route_taxi" && fareCalculating);
 
   const addStop = () => {
     if (stops.length >= 4) return;
@@ -728,11 +756,18 @@ export default function RiderRequestPage() {
                   </span>
                 </div>
                 <p className="text-base font-extrabold tracking-tight">
-                  {fare.fareJMD > 0 ? formatJMD(fare.fareJMD) : "Tap to choose"}
+                  {fareCalculating ? (
+                    <span className="text-muted">Calculating fare…</span>
+                  ) : fare.fareJMD > 0 ? (
+                    formatJMD(fare.fareJMD)
+                  ) : (
+                    "Tap to choose"
+                  )}
                 </p>
                 <p className="text-[11px] leading-relaxed text-muted">
-                  Door to door, your stops, ~{formatEta(fare.etaMinutes)} ETA.
-                  Multi-stop ready.
+                  {fareCalculating
+                    ? "Working out the exact road distance…"
+                    : `Door to door, your stops, ~${formatEta(fare.etaMinutes)} ETA. Multi-stop ready.`}
                 </p>
               </button>
 
@@ -870,7 +905,7 @@ export default function RiderRequestPage() {
         </div>
       </FadeUp>
 
-      {fare.fareJMD > 0 && mode !== "route_taxi" && (
+      {!fareCalculating && fare.fareJMD > 0 && mode !== "route_taxi" && (
         <FadeUp delay={0.25}>
           <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface-soft">
             <div className="flex items-center justify-between border-b border-line bg-white px-5 py-4">
@@ -925,6 +960,8 @@ export default function RiderRequestPage() {
   const barLabel =
     mode === "route_taxi" && selectedMatch
       ? "Route taxi fare"
+      : fareCalculating
+      ? "Calculating fare…"
       : fare.fareJMD > 0
       ? "Trip total"
       : "Estimate appears here";
@@ -938,7 +975,11 @@ export default function RiderRequestPage() {
           {barLabel}
         </p>
         <p className="text-lg font-extrabold tracking-tight">
-          {barFareJmd > 0 ? formatJMD(barFareJmd) : "—"}
+          {mode !== "route_taxi" && fareCalculating
+            ? "…"
+            : barFareJmd > 0
+            ? formatJMD(barFareJmd)
+            : "—"}
         </p>
       </div>
       <button
