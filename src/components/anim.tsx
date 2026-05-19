@@ -9,7 +9,14 @@ import {
   useReducedMotion,
   type Variants,
 } from "motion/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { isNativeApp } from "@/lib/native";
 
 /* ────────────────────────────────────────────────
  * Performance discipline:
@@ -22,6 +29,30 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
  * ──────────────────────────────────────────────── */
 
 const easing = [0.22, 1, 0.36, 1] as const; // smooth easeOutCubic
+
+/**
+ * True when entrance animations should be SKIPPED entirely — content
+ * just appears at its final state.
+ *
+ * Two cases:
+ *   - the user asked for reduced motion, or
+ *   - we're inside the Capacitor native app.
+ *
+ * The native case is the important one: a native app's screens appear
+ * instantly. Replaying a 0.6s fade-and-slide (staggered across every
+ * section) on every single tab switch makes a fully-loaded page read
+ * as "still loading" for over a second. On the web the entrance
+ * animation stays — it's a marketing/portal nicety there.
+ */
+function useInstantMotion(): boolean {
+  const reduced = useReducedMotion();
+  const native = useSyncExternalStore(
+    () => () => {},
+    () => isNativeApp(),
+    () => false,
+  );
+  return !!reduced || native;
+}
 
 /* ─────────── FadeUp ─────────── */
 
@@ -48,14 +79,17 @@ export function FadeUp({
   y = 24,
   as = "div",
 }: FadeUpProps) {
-  const reduced = useReducedMotion();
+  const instant = useInstantMotion();
   const Tag = m[as];
   return (
     <Tag
       className={className}
-      initial={{ opacity: 0, y: reduced ? 0 : y }}
+      // `initial={false}` tells motion to render straight at the
+      // final state — no entrance animation at all. That's what makes
+      // native-app navigation feel instant.
+      initial={instant ? false : { opacity: 0, y }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reduced ? 0.01 : 0.6, delay, ease: easing }}
+      transition={instant ? { duration: 0 } : { duration: 0.6, delay, ease: easing }}
     >
       {children}
     </Tag>
@@ -88,11 +122,15 @@ export function Stagger({
   className?: string;
   amount?: number;
 }) {
+  const instant = useInstantMotion();
   return (
     <m.div
       className={className}
       variants={staggerContainer}
-      initial="hidden"
+      // `initial={false}` skips the staggered entrance — it also
+      // propagates to the StaggerItem children, so they render at
+      // their final state immediately in the native app.
+      initial={instant ? false : "hidden"}
       animate="show"
     >
       {children}
@@ -139,15 +177,16 @@ export function CountUp({
   className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const reduced = useReducedMotion();
+  const instant = useInstantMotion();
   const inView = useInView(ref, { once: true, margin: "0px 0px -100px 0px" });
   const [display, setDisplay] = useState(0);
 
   useEffect(() => {
     if (!inView) return;
-    if (reduced) {
-      // Defer the reduced-motion snap-to-final off the synchronous
-      // effect body so React 19's cascading-render lint passes.
+    if (instant) {
+      // Native app / reduced motion — snap straight to the final
+      // number. Deferred off the synchronous effect body so React
+      // 19's cascading-render lint passes.
       queueMicrotask(() => setDisplay(to));
       return;
     }
@@ -157,7 +196,7 @@ export function CountUp({
       onUpdate: (latest) => setDisplay(Math.round(latest)),
     });
     return () => controls.stop();
-  }, [inView, to, duration, reduced, easing]);
+  }, [inView, to, duration, instant, easing]);
 
   return (
     <span ref={ref} className={className}>
