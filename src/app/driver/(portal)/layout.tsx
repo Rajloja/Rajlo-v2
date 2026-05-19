@@ -5,6 +5,8 @@ import { SessionGuard } from "@/components/session-guard";
 import { DriverActivityTracker } from "@/components/driver-activity-tracker";
 import { DriverPortalGate } from "@/components/driver-portal-gate";
 import { DriverOnlinePresence } from "@/components/driver-online-presence";
+import { DriverWarmupGate } from "@/components/driver-warmup-gate";
+import { ConnectivityMonitor } from "@/components/connectivity-monitor";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
@@ -62,6 +64,16 @@ export default async function DriverPortalLayout({
       nav={driverNav}
     >
       <SessionGuard />
+      {/* One-time launch warm-up: holds a branded loader until the
+         bottom-nav tab chunks + data caches are prefetched, so the
+         first tab taps after launch are instant instead of a dead
+         few seconds. Native app only; lifts itself after warm-up. */}
+      <DriverWarmupGate />
+      {/* Watches live connectivity: covers the app with an offline
+         screen the moment the connection drops (Capacitor's errorPath
+         only catches failed page loads, not a loaded page losing
+         signal), and reports a violation if it happens mid-trip. */}
+      <ConnectivityMonitor />
       {/* Blocks the driver with a consent modal if they owe acceptance
          of any new or updated policy. The driver-online API enforces
          the same gate server-side. */}

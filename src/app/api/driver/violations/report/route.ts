@@ -31,6 +31,13 @@ const ALLOWED_KINDS = new Set([
   "location_off_mid_trip",
   "location_off_while_online",
   "permission_denied_at_toggle",
+  // The driver's device lost its internet connection during an active
+  // trip — live location stopped reaching the rider. Recorded for the
+  // safety team, but does NOT feed the 2-strike auto-deactivation: a
+  // dropped signal (dead zone, tunnel) is often not the driver's
+  // fault, so an admin reviews these rather than the system auto-
+  // penalising. See the branch in POST below.
+  "offline_mid_trip",
 ]);
 
 const DEDUP_WINDOW_MIN = 5;
@@ -91,6 +98,22 @@ export async function POST(request: Request) {
     kind,
     details,
   });
+
+  // Connection-loss violations are recorded for the safety team but
+  // are NOT run through the 2-strike auto-deactivation: a dropped
+  // mobile signal often isn't the driver's fault, so an admin reviews
+  // these instead of the system locking the driver out automatically.
+  if (kind === "offline_mid_trip") {
+    void notifyDriver(supabase, {
+      driverUserId: driver.user_id as string,
+      kind: "system",
+      title: "Stay connected during trips",
+      body: "Your phone lost its internet connection during a recent trip — your rider couldn't see your live location. Keep a stable connection while driving.",
+      href: "/driver",
+      pushTag: `violation-offline-${driver.id}`,
+    }).catch(() => null);
+    return NextResponse.json({ ok: true, recorded: true });
+  }
 
   // Count unresolved violations across the driver's history.
   const { count: unresolvedCount } = await supabase

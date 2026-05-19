@@ -86,6 +86,40 @@ export async function GET(request: NextRequest) {
     .single();
   const role = profile?.role ?? "rider";
 
+  // A driver arriving here (OAuth sign-in, email confirmation, magic
+  // link) is starting a fresh session — reset them OFFLINE so they
+  // must explicitly go online before taking trips. Skipped when a trip
+  // is in flight: a driver re-authenticating with a rider aboard must
+  // stay online. Best-effort — never block the login on this.
+  if (role === "driver") {
+    const admin = getSupabaseServerClient();
+    if (admin) {
+      try {
+        const { data: drv } = await admin
+          .from("drivers")
+          .select("id")
+          .eq("user_id", data.user.id)
+          .maybeSingle();
+        if (drv) {
+          const { count } = await admin
+            .from("rides")
+            .select("id", { count: "exact", head: true })
+            .eq("driver_id", drv.id)
+            .in("status", ["accepted", "arrived", "in_progress"]);
+          if (!count) {
+            await admin
+              .from("drivers")
+              .update({ is_online: false })
+              .eq("id", drv.id);
+          }
+        }
+      } catch {
+        /* best-effort — a stale online flag is caught by the
+           heartbeat sweep anyway */
+      }
+    }
+  }
+
   // First-time welcome email — fires only when this is a genuine
   // brand-new sign-up. The `isBrandNewUser` helper combines two
   // signals: the `welcome_sent_at` flag in user_metadata AND a

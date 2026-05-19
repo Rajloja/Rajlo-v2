@@ -75,6 +75,18 @@ function DriverLoginInner() {
       return;
     }
 
+    // A fresh login always starts the driver OFFLINE — they must
+    // explicitly tap "Go online" to take trips. Without this, a driver
+    // who was online when they last closed the app would silently be
+    // dispatchable again the moment they sign back in. The endpoint
+    // 409s if a trip is mid-flight (a driver re-authenticating with a
+    // rider aboard must stay online) — that case is left untouched.
+    await fetch("/api/driver/online", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ online: false }),
+    }).catch(() => null);
+
     // Stamp the client-side session expiry. <SessionGuard> in the
     // driver portal layout reads this on every navigation and signs
     // the user out once it elapses.
