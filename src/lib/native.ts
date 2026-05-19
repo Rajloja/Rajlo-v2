@@ -170,7 +170,17 @@ export async function startBackgroundGeolocation(
         backgroundMessage:
           "Rajlo is sharing your location for an active trip.",
         backgroundTitle: "Rajlo Driver",
-        requestPermissions: true,
+        // Never prompt from the tracking watcher. The OS location
+        // dialog must fire ONLY after the prominent disclosure shown
+        // in the driver readiness gate — requestNativeLocationPermission
+        // is the single sanctioned prompt. This watcher can start
+        // before the driver has granted (e.g. they were already
+        // `is_online` server-side and just reopened the app); a `true`
+        // here would pop the system dialog before the disclosure card
+        // is ever seen, violating Google Play's background-location
+        // policy. With `false` the watcher simply emits NOT_AUTHORIZED
+        // until permission is granted through the proper flow.
+        requestPermissions: false,
         // Drop sub-10m jitter so we don't fire on standing-still
         // GPS noise. Matches the broadcast hook's dedupe threshold.
         distanceFilter: 10,
