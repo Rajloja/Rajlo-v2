@@ -15,18 +15,18 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.rajlo.driver"
+    namespace = "com.rajlodriversapp"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.rajlo.driver"
+        applicationId "com.rajlodriversapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Date-encoded versionCode (YYYYMMDD) — guarantees a number
         // higher than any small integer the previous developer almost
         // certainly used. Bump on every Play Store upload; this style
         // means we never have to remember what was last published.
-        versionCode 20260514
-        versionName "1.0.1"
+        versionCode 20260518
+        versionName "1.0.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

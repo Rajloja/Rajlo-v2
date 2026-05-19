@@ -200,6 +200,41 @@ export function useFleetBroadcaster(driverId: string | null, online: boolean) {
       });
     };
 
+    // Server-side position cache push. `drivers.last_position_at` —
+    // the value this writes — is the freshness signal that
+    // notifyAllAvailableDrivers() filters on when dispatching new
+    // rides. If it goes stale the driver silently drops out of
+    // dispatch range and stops receiving ride-request pushes.
+    //
+    // It must therefore keep updating while the app is backgrounded.
+    // Android throttles (and eventually freezes) WebView JS timers
+    // once the app loses the foreground, so a setInterval alone lets
+    // the cache rot within minutes — exactly when an online driver is
+    // waiting, screen locked, for a ride. The native background-
+    // geolocation callback keeps firing via the foreground service,
+    // so we push from every fix (see recordFix) instead. The
+    // timestamp guard throttles the actual network call to
+    // SERVER_POSITION_CACHE_MS no matter how fast fixes arrive.
+    let lastServerPushAt = 0;
+    const pushPositionToServer = (force = false) => {
+      const fix = lastFixRef.current;
+      if (!fix) return;
+      const now = Date.now();
+      if (!force && now - lastServerPushAt < SERVER_POSITION_CACHE_MS) {
+        return;
+      }
+      lastServerPushAt = now;
+      void fetch("/api/driver/position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: fix.latitude, lng: fix.longitude }),
+      }).catch(() => {
+        // Failed POST — clear the throttle so the next fix retries
+        // straight away rather than waiting out the full window.
+        lastServerPushAt = 0;
+      });
+    };
+
     /** Records a position fix from either GPS source. We can't reuse
      *  a single `GeolocationCoordinates` shape because the native
      *  plugin returns `latitude`/`longitude`/`bearing` — slightly
@@ -216,6 +251,9 @@ export function useFleetBroadcaster(driverId: string | null, online: boolean) {
         accuracy: 0,
         speed: null,
       } as unknown as GeolocationCoordinates;
+      // Keep the server dispatch cache fresh from every fix — this is
+      // what survives backgrounding, where the interval below freezes.
+      pushPositionToServer();
     };
 
     channel.subscribe((status) => {
@@ -247,25 +285,16 @@ export function useFleetBroadcaster(driverId: string | null, online: boolean) {
       // their staleness sweep's perspective).
       heartbeatTimer = setInterval(broadcastLatest, BROADCAST_THROTTLE_MS);
 
-      // Server-side position cache — slower cadence than the realtime
-      // broadcast since the only consumer is /api/rider/rides's new-
-      // ride radius matcher. Without this the matcher would have no
-      // idea where any driver is sitting and would fall back to
-      // pinging every online driver in the country.
-      const pushPositionToServer = () => {
-        const fix = lastFixRef.current;
-        if (!fix) return;
-        void fetch("/api/driver/position", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat: fix.latitude, lng: fix.longitude }),
-        }).catch(() => null);
-      };
-      // Fire once immediately so the matcher sees us within a few
-      // seconds of going online, then settle into the slow cadence.
-      pushPositionToServer();
+      // Server-side position cache (drivers.last_position_at) — the
+      // freshness signal the new-ride dispatch matcher filters on.
+      // The real cadence driver is recordFix, which pushes on every
+      // GPS fix (throttled) so the cache stays fresh while the app is
+      // backgrounded and WebView JS timers are throttled. This
+      // interval is a foreground belt-and-suspenders for a stationary
+      // driver whose watcher emits no movement callbacks.
+      pushPositionToServer(true);
       serverCacheTimer = setInterval(
-        pushPositionToServer,
+        () => pushPositionToServer(),
         SERVER_POSITION_CACHE_MS,
       );
     });

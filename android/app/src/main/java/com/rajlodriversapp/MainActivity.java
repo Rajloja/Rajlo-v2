@@ -1,4 +1,4 @@
-package com.rajlo.driver;
+package com.rajlodriversapp;
 
 import android.os.Bundle;
 import android.webkit.CookieManager;

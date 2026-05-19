@@ -710,8 +710,62 @@ function NativeReadinessGate({ children }: { children: React.ReactNode }) {
       <StepHeader
         number={1}
         title="Allow location"
-        subtitle="Rajlo needs your GPS to match you with riders nearby and to share your live position during a trip. We only track while you're online."
+        subtitle="Before we ask the system for permission, here is exactly what Rajlo does with your location."
       />
+
+      {/* Prominent disclosure — required by Google Play policy for
+          background location. Must be shown BEFORE the runtime
+          permission prompt (which fires from askLocation →
+          requestNativeLocationPermission), must name the data, must
+          explicitly state background / "closed or not in use"
+          collection, must describe the features it powers, and must
+          be gated behind an affirmative action (the button below).
+          Do not soften this copy without re-checking the policy. */}
+      {!locationGranted && (
+        <div className="rounded-2xl border border-white/15 bg-white/5 p-5 backdrop-blur">
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/15">
+              <Icon name="map-pin" className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 space-y-3">
+              <p className="text-sm font-extrabold tracking-tight">
+                How Rajlo Driver uses your location
+              </p>
+              <p className="text-sm leading-relaxed text-white/85">
+                Rajlo Driver collects location data to:
+              </p>
+              <ul className="space-y-1.5 text-sm text-white/85">
+                <li className="flex gap-2">
+                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-white/60" />
+                  <span>Match you with riders requesting trips near you.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-white/60" />
+                  <span>
+                    Share your live position with your rider so they can see
+                    you approaching during a trip.
+                  </span>
+                </li>
+              </ul>
+              <p className="text-sm font-semibold leading-relaxed text-white">
+                Rajlo collects this location data in the background — even
+                when the app is closed or not in use, and while your screen
+                is locked — so tracking continues while you drive.
+              </p>
+              <p className="text-sm leading-relaxed text-white/85">
+                Location is collected only while you are online or on an
+                active trip, and stops the moment you go offline.
+              </p>
+              <a
+                href="/legal/privacy-policy"
+                className="inline-block text-sm font-bold text-white underline underline-offset-2"
+              >
+                See our Privacy Policy
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mt-3 mb-4 flex flex-col gap-3 sm:flex-row">
         {locationGranted ? (
           <DoneStep number={1} text="Location allowed" />

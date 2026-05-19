@@ -42,3 +42,10 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# android signing — the upload keystore + its passwords. NEVER commit
+# these: a leaked key lets anyone sign a malicious build as Rajlo
+# Driver. `key.properties.example` (the template) stays tracked.
+/android/key.properties
+*.jks
+*.keystore

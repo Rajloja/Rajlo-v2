@@ -20,7 +20,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  */
 
 const config: CapacitorConfig = {
-  appId: "com.rajlo.driver",
+  appId: "com.rajlodriversapp",
   appName: "Rajlo Driver",
   // Minimal offline-fallback shell. The real UI loads from server.url.
   webDir: "capacitor-shell",
