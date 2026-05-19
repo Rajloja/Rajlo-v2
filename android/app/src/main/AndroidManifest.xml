@@ -69,13 +69,14 @@
          type="file" capture="environment">` triggers the system camera). -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Photo gallery: Android 13+ split the old READ_EXTERNAL_STORAGE
-         into per-type media permissions. We only need image access for
-         chat attachments. Older Android falls back to the legacy
-         storage permission. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+    <!-- No READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE: Rajlo only picks a
+         photo occasionally (chat attachments, verification-document
+         uploads), which is one-time/infrequent access. Google Play's
+         Photo and Video Permissions policy reserves those permissions
+         for apps whose core purpose is broad photo-library access.
+         The WebView's `<input type="file">` chooser delegates to the
+         Android system photo picker, which needs no permission — so
+         photo selection keeps working without them. -->
 
     <!-- Hardware features: Android implicitly marks camera + microphone
          as REQUIRED because the CAMERA / RECORD_AUDIO permissions are

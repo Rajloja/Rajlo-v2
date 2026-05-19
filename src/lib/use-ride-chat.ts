@@ -164,12 +164,23 @@ export function useRideChat(
         },
         (payload) => {
           const incoming = mapRow(payload.new as RawMessageRow);
-          setMessages((prev) => {
-            // Dedupe — own optimistic-sent messages will already be in
-            // the list when their realtime echo arrives.
-            if (prev.find((m) => m.id === incoming.id)) return prev;
-            return [...prev, incoming];
-          });
+          if (incoming.kind === "text") {
+            setMessages((prev) => {
+              // Dedupe — own optimistic-sent messages will already be in
+              // the list when their realtime echo arrives.
+              if (prev.find((m) => m.id === incoming.id)) return prev;
+              return [...prev, incoming];
+            });
+          } else {
+            // Image / voice messages arrive here with `body` set to the
+            // raw Supabase Storage path — the realtime payload can't
+            // carry the signed URL the API generates. Appending it
+            // directly renders a broken <img> / dead <audio> on the
+            // recipient's side. Re-fetch the thread so the GET endpoint
+            // signs the media URLs. Text needs no signing, so it keeps
+            // the cheap in-place append above.
+            void refresh();
+          }
           // Only peer messages count toward unread + toast — AND only
           // when they're not already read. A reconnect that re-fires
           // events for messages I've already seen shouldn't keep
@@ -187,7 +198,7 @@ export function useRideChat(
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [rideId, myRole, enabled]);
+  }, [rideId, myRole, enabled, refresh]);
 
   const markAllRead = useCallback(() => {
     setUnreadCount(0);

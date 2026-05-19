@@ -41,6 +41,12 @@ const config: CapacitorConfig = {
     // anyone trying to redirect the app at an HTTP fake.
     cleartext: false,
     androidScheme: "https",
+    // When the WebView can't reach the live portal (no internet,
+    // server down), Capacitor loads this bundled page from webDir
+    // instead of the raw Chrome "Webpage not available" error. The
+    // page polls for connectivity and navigates back into the live
+    // app the moment the device is online again.
+    errorPath: "index.html",
   },
   plugins: {
     SplashScreen: {
