@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { HeroSkeleton, Skeleton } from "@/components/skeleton";
 import { usePush } from "@/lib/use-push";
+import { isNativeApp } from "@/lib/native";
 import { DeleteAccountDialog } from "@/components/delete-account-dialog";
 import {
   getCachedDriverData,
@@ -62,6 +63,13 @@ export default function DriverProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const push = usePush();
+  // SSR-safe native detection — the web-push section below is hidden
+  // inside the Capacitor app (push there is native FCM, not web push).
+  const native = useSyncExternalStore(
+    () => () => {},
+    () => isNativeApp(),
+    () => false,
+  );
 
   // Editable form state — kept separate from the loaded `driver` so we
   // can detect dirty fields and let the rider revert with a refresh.
@@ -448,9 +456,14 @@ export default function DriverProfilePage() {
         </Section>
       </FadeUp>
 
-      {/* Push notifications — most important channel for drivers
-         because new ride requests come in real-time. Without push,
-         the only way to see them is to keep the inbox tab open. */}
+      {/* Push notifications — WEB-push controls. Hidden in the native
+         app: there, push is delivered via native FCM and the
+         permission is granted through the OS (the readiness gate
+         handles it on first launch), so the web-push toggle and the
+         "this browser doesn't support push" notice are both wrong and
+         non-functional inside the Capacitor WebView. Native drivers
+         manage notifications in their phone's Settings. */}
+      {!native && (
       <FadeUp delay={0.18}>
         <Section title="Push notifications" icon="bell">
           <p className="text-xs text-muted">
@@ -564,6 +577,7 @@ export default function DriverProfilePage() {
           )}
         </Section>
       </FadeUp>
+      )}
 
       {/* Nothing on this page is self-editable anymore — every field is
          locked to verified TA / compliance data and changes need
