@@ -471,9 +471,28 @@ export default function RiderLiveTripPage() {
   // "No active trip" empty state.
   const refresh = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/rider/rides/active", { signal });
-      if (!res.ok) return;
-      const json = (await res.json()) as ActiveResponse;
+      // Two ride modes share this surface — private (Mode A) lives here,
+      // route taxi (Mode B) has its own dedicated page. The drawer only
+      // links to /rider/live-trip, so if a hail is active we transparently
+      // route the rider onto the route-taxi-live UI so "Live trip" always
+      // takes them to whichever trip they're actually on.
+      const [rideRes, hailRes] = await Promise.all([
+        fetch("/api/rider/rides/active", { signal }),
+        fetch("/api/rider/route-taxi/hails/active", { signal }).catch(
+          () => null,
+        ),
+      ]);
+      if (hailRes && hailRes.ok) {
+        const hailJson = (await hailRes.json()) as {
+          hail: { id: string } | null;
+        };
+        if (hailJson.hail) {
+          router.replace(`/rider/route-taxi/live?id=${hailJson.hail.id}`);
+          return;
+        }
+      }
+      if (!rideRes.ok) return;
+      const json = (await rideRes.json()) as ActiveResponse;
       setData(json);
 
       const prev = prevActiveRef.current;

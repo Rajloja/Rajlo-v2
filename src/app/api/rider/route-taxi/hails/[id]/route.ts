@@ -4,6 +4,7 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getWalletBalance } from "@/lib/wallet";
 import { getDriverSelfieUrl } from "@/lib/driver-selfie";
 import { riderCancellationFeeJmd, chargeFee } from "@/lib/cancellation-fees";
+import { sendRiderHailCancelledEmail } from "@/lib/email-templates";
 
 /**
  * /api/rider/route-taxi/hails/[id]
@@ -291,6 +292,25 @@ export async function PATCH(
         })
         .eq("id", id);
     }
+  }
+
+  // Rider self-cancel confirmation email. Best-effort — we use
+  // user.email from the JWT so no extra lookup is needed.
+  if (user.email) {
+    const { data: riderProfile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+    void sendRiderHailCancelledEmail(user.email, {
+      riderFirstName: riderProfile?.full_name ?? null,
+      hailId: hail.id,
+      pickup: hail.pickup_name,
+      dropoff: hail.dropoff_name,
+      cancelledBy: "rider",
+      reason: body.reason ?? null,
+      cancellationFeeJmd: feeCharged ? feeJmd : null,
+    }).catch(() => null);
   }
 
   return NextResponse.json({

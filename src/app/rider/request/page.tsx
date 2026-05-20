@@ -89,18 +89,34 @@ export default function RiderRequestPage() {
   // form), hide the form to avoid a flash of "book a ride" UI.
   const [bootstrapping, setBootstrapping] = useState(true);
 
-  // On mount: if the rider already has an in-flight ride (e.g. they
-  // refreshed mid-flow, or came back from another tab), skip the booking
-  // form and send them straight to the live-trip view. This is what
-  // makes the whole booking flow refresh-survivable — no state lives in
-  // component memory, the URL determines what you see.
+  // On mount: if the rider already has an in-flight trip — either a
+  // private ride (Mode A) or a route taxi hail (Mode B) — skip the
+  // booking form and send them to the live surface for whichever they're
+  // on. This makes the booking flow refresh-survivable AND blocks
+  // double-booking when one trip is already in flight.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/rider/rides/active");
-        if (!res.ok) return;
-        const json = (await res.json()) as { ride: { id: string } | null };
+        const [rideRes, hailRes] = await Promise.all([
+          fetch("/api/rider/rides/active"),
+          fetch("/api/rider/route-taxi/hails/active").catch(() => null),
+        ]);
+        if (hailRes && hailRes.ok) {
+          const hailJson = (await hailRes.json()) as {
+            hail: { id: string } | null;
+          };
+          if (!cancelled && hailJson.hail) {
+            router.replace(
+              `/rider/route-taxi/live?id=${hailJson.hail.id}`,
+            );
+            return;
+          }
+        }
+        if (!rideRes.ok) return;
+        const json = (await rideRes.json()) as {
+          ride: { id: string } | null;
+        };
         if (!cancelled && json.ride) {
           router.replace("/rider/live-trip");
           return;

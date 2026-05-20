@@ -6,6 +6,7 @@ import { calculateRouteFare } from "@/lib/fare-engine";
 import { isWithinJamaica } from "@/lib/jamaica";
 import { notifyRouteTaxiDrivers } from "@/lib/notify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
+import { sendRiderHailRequestedEmail } from "@/lib/email-templates";
 
 /**
  * POST /api/rider/route-taxi/hail
@@ -214,6 +215,26 @@ export async function POST(request: Request) {
       { error: hailError?.message ?? "failed to create hail" },
       { status: 500 },
     );
+  }
+
+  // Rider confirmation email — symmetrical with the private-ride
+  // "we're finding your driver" send. Best-effort: don't roll back
+  // the hail if email delivery hiccups.
+  if (user.email) {
+    const { data: riderProfile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+    void sendRiderHailRequestedEmail(user.email, {
+      riderFirstName: riderProfile?.full_name ?? null,
+      hailId: hail.id,
+      routeOrigin: route.origin_name,
+      routeDestination: route.destination_name,
+      pickup: pickupName,
+      dropoff: dropoffName,
+      fareJMD: fareJmd,
+    }).catch(() => null);
   }
 
   // Broadcast to every driver currently on this route. First one to

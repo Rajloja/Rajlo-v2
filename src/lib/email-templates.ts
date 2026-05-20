@@ -1083,3 +1083,481 @@ export async function sendWalletTransferOtpEmail(
   const t = walletTransferOtpTemplate(args);
   return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ROUTE TAXI (Mode B) — parity with private-ride emails above.
+
+   Six transactional emails — three for the rider, three for the driver.
+   The rider sees: hail requested → driver matched → trip receipt, plus
+   a cancellation note when either side bails. The driver sees: hail
+   accepted (confirmation of their tap) → earnings receipt.
+
+   Copy is route-taxi-aware: we call out the corridor, mention the
+   shared-vehicle nature, and point CTAs at /rider/route-taxi/live
+   (not /rider/live-trip) so the recipient lands on the right surface.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── R1. Rider — hail requested ── */
+
+export function riderHailRequestedTemplate(args: {
+  riderFirstName?: string | null;
+  hailId: string;
+  routeOrigin: string;
+  routeDestination: string;
+  pickup: string;
+  dropoff: string;
+  fareJMD: number;
+}) {
+  const first = firstNameOf(args.riderFirstName);
+  const subject = `Looking for a route taxi · ${args.routeOrigin} → ${args.routeDestination}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, your route taxi hail is live. We're broadcasting it to every driver currently running the ${args.routeOrigin} → ${args.routeDestination} corridor.`,
+    },
+    {
+      type: "card",
+      title: "Hail",
+      rows: [
+        { label: "Corridor", value: `${args.routeOrigin} → ${args.routeDestination}` },
+        { label: "Pickup", value: args.pickup },
+        { label: "Dropoff", value: args.dropoff },
+        { label: "Fare", value: JMD(args.fareJMD), emphasize: true },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "What happens next",
+      text: "The first driver on the corridor to tap accept wins the hail. You'll get a notification with their plate + vehicle so you can flag them at the kerbside.",
+    },
+    {
+      type: "cta",
+      href: `${APP_URL}/rider/route-taxi/live?id=${args.hailId}`,
+      label: "View live status",
+    },
+    {
+      type: "footnote",
+      text: "Route taxis seat multiple riders — your fare is flat per corridor, not per minute.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `Hailing a route taxi on the ${args.routeOrigin} → ${args.routeDestination} corridor.`,
+    eyebrow: "Route taxi hailed",
+    title: "Looking for a driver.",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, route taxi hailed.`,
+    `${args.routeOrigin} → ${args.routeDestination} · ${JMD(args.fareJMD)}`,
+    `Track live: ${APP_URL}/rider/route-taxi/live?id=${args.hailId}`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendRiderHailRequestedEmail(
+  to: string,
+  args: Parameters<typeof riderHailRequestedTemplate>[0],
+) {
+  const t = riderHailRequestedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── R2. Rider — driver accepted the hail ── */
+
+export function riderHailAcceptedTemplate(args: {
+  riderFirstName?: string | null;
+  hailId: string;
+  driverName: string;
+  vehicle?: string | null;
+  plate?: string | null;
+  pickup: string;
+  dropoff: string;
+}) {
+  const first = firstNameOf(args.riderFirstName);
+  const driverFirst = args.driverName.split(" ")[0] || "Your driver";
+  const subject = `${driverFirst} is coming through your corridor`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, a driver picked up your route taxi hail. They're already on the corridor — wave them down at ${args.pickup} when you spot the plate.`,
+    },
+    {
+      type: "card",
+      title: "Driver",
+      rows: [
+        { label: "Name", value: args.driverName },
+        ...(args.vehicle ? [{ label: "Vehicle", value: args.vehicle }] : []),
+        ...(args.plate ? [{ label: "Plate", value: args.plate, emphasize: true }] : []),
+      ],
+    },
+    {
+      type: "card",
+      title: "Trip",
+      rows: [
+        { label: "Pickup", value: args.pickup },
+        { label: "Dropoff", value: args.dropoff },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "Spotting tip",
+      text: "Route taxis are shared — there may be other riders onboard. Confirm the plate before stepping in.",
+    },
+    {
+      type: "cta",
+      href: `${APP_URL}/rider/route-taxi/live?id=${args.hailId}`,
+      label: "Track on map",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `${args.driverName} is heading to ${args.pickup}.`,
+    eyebrow: "Driver matched",
+    title: "Your route taxi is on the way.",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, ${args.driverName} accepted your hail.`,
+    args.plate ? `Plate: ${args.plate}` : "",
+    `Track: ${APP_URL}/rider/route-taxi/live?id=${args.hailId}`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendRiderHailAcceptedEmail(
+  to: string,
+  args: Parameters<typeof riderHailAcceptedTemplate>[0],
+) {
+  const t = riderHailAcceptedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── R3. Rider — trip completed (receipt) ── */
+
+export function riderHailCompletedTemplate(args: {
+  riderFirstName?: string | null;
+  hailId: string;
+  pickup: string;
+  dropoff: string;
+  fareJMD: number;
+  distanceKm?: number | null;
+  driverName?: string | null;
+  completedAt?: string | Date | null;
+}) {
+  const first = firstNameOf(args.riderFirstName);
+  const subject = `Route taxi receipt · ${JMD(args.fareJMD)} · ${args.dropoff}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Thanks for riding with Rajlo, ${first}. Your route taxi trip is wrapped — here's your receipt.`,
+    },
+    {
+      type: "card",
+      title: "Receipt",
+      rows: [
+        { label: "From", value: args.pickup },
+        { label: "To", value: args.dropoff },
+        ...(args.driverName ? [{ label: "Driver", value: args.driverName }] : []),
+        ...(args.distanceKm != null
+          ? [{ label: "Distance", value: `${args.distanceKm.toFixed(1)} km` }]
+          : []),
+        ...(args.completedAt
+          ? [{ label: "Completed", value: fmtDateTime(args.completedAt) }]
+          : []),
+        { label: "Total", value: JMD(args.fareJMD), emphasize: true },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "Cashless trip",
+      text: "Your wallet was charged the flat corridor fare — no haggling, no change, no surprises.",
+    },
+    {
+      type: "cta",
+      href: `${APP_URL}/rider/route-taxi/history/${args.hailId}`,
+      label: "View trip details",
+    },
+    {
+      type: "footnote",
+      text: `Need a corrected receipt for expenses? Reply with hail ID ${args.hailId}.`,
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `Receipt for ${JMD(args.fareJMD)} · ${args.pickup} → ${args.dropoff}`,
+    eyebrow: "Trip complete",
+    title: "Thanks for riding with Rajlo.",
+    sections,
+  });
+
+  const text = plaintext([
+    `Thanks ${first}.`,
+    `${args.pickup} → ${args.dropoff}`,
+    `Total: ${JMD(args.fareJMD)}`,
+    `Receipt: ${APP_URL}/rider/route-taxi/history/${args.hailId}`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendRiderHailCompletedEmail(
+  to: string,
+  args: Parameters<typeof riderHailCompletedTemplate>[0],
+) {
+  const t = riderHailCompletedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── R4. Rider — hail cancelled (by self or driver) ── */
+
+export function riderHailCancelledTemplate(args: {
+  riderFirstName?: string | null;
+  hailId: string;
+  pickup: string;
+  dropoff: string;
+  cancelledBy: "rider" | "driver" | "system";
+  reason?: string | null;
+  cancellationFeeJmd?: number | null;
+}) {
+  const first = firstNameOf(args.riderFirstName);
+  const subject =
+    args.cancelledBy === "rider"
+      ? "Route taxi cancelled — confirmation"
+      : args.cancelledBy === "driver"
+        ? "Your route taxi driver had to cancel"
+        : "Route taxi cancelled";
+
+  const headline =
+    args.cancelledBy === "rider"
+      ? "We've cancelled your route taxi hail."
+      : args.cancelledBy === "driver"
+        ? "Your route taxi driver cancelled."
+        : "Your route taxi was cancelled.";
+
+  const introBody =
+    args.cancelledBy === "rider"
+      ? args.cancellationFeeJmd && args.cancellationFeeJmd > 0
+        ? `Hi ${first}, we've cancelled your hail as requested. A ${JMD(args.cancellationFeeJmd)} cancellation fee was charged because a driver had already accepted.`
+        : `Hi ${first}, we've cancelled your hail as requested. No charge.`
+      : args.cancelledBy === "driver"
+        ? `Hi ${first}, sorry — your driver had to cancel before pickup. Re-hail any time and we'll find you another route taxi on the same corridor. No charge.`
+        : `Hi ${first}, your hail was cancelled. No charge.`;
+
+  const sections: EmailSection[] = [
+    { type: "intro", text: introBody },
+    {
+      type: "card",
+      title: "Hail",
+      rows: [
+        { label: "From", value: args.pickup },
+        { label: "To", value: args.dropoff },
+        {
+          label: "Cancelled by",
+          value:
+            args.cancelledBy === "rider"
+              ? "You"
+              : args.cancelledBy === "driver"
+                ? "Driver"
+                : "Rajlo",
+        },
+        ...(args.cancellationFeeJmd && args.cancellationFeeJmd > 0
+          ? [
+              {
+                label: "Cancellation fee",
+                value: JMD(args.cancellationFeeJmd),
+                emphasize: true,
+              },
+            ]
+          : []),
+      ],
+    },
+    ...(args.reason
+      ? [
+          {
+            type: "highlight" as const,
+            tone: "neutral" as const,
+            eyebrow: "Reason",
+            text: args.reason,
+          },
+        ]
+      : []),
+    { type: "cta", href: `${APP_URL}/rider/request`, label: "Hail another route taxi" },
+  ];
+
+  const html = renderEmail({
+    preheader: "No charge — re-hail whenever you're ready.",
+    eyebrow: "Hail cancelled",
+    title: headline,
+    sections,
+  });
+
+  const text = plaintext([
+    headline,
+    `${args.pickup} → ${args.dropoff}`,
+    args.reason ? `Reason: ${args.reason}` : "",
+    args.cancellationFeeJmd && args.cancellationFeeJmd > 0
+      ? `Cancellation fee: ${JMD(args.cancellationFeeJmd)}`
+      : "",
+    `Re-hail: ${APP_URL}/rider/request`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendRiderHailCancelledEmail(
+  to: string,
+  args: Parameters<typeof riderHailCancelledTemplate>[0],
+) {
+  const t = riderHailCancelledTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── D1. Driver — hail accepted (confirmation of their own tap) ── */
+
+export function driverHailAcceptedTemplate(args: {
+  driverName: string;
+  hailId: string;
+  riderFirstName?: string | null;
+  pickup: string;
+  dropoff: string;
+  fareJMD: number;
+}) {
+  const first = firstNameOf(args.driverName);
+  const riderLabel = args.riderFirstName?.trim() || "your rider";
+  const subject = `Hail accepted · ${args.pickup} → ${args.dropoff}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Heads up, ${first} — you've claimed a route taxi hail. Pick the rider up at ${args.pickup} on your way through the corridor.`,
+    },
+    {
+      type: "card",
+      title: "Hail details",
+      rows: [
+        { label: "Rider", value: riderLabel },
+        { label: "Pickup", value: args.pickup },
+        { label: "Dropoff", value: args.dropoff },
+        { label: "Fare", value: JMD(args.fareJMD), emphasize: true },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "On pickup",
+      text: "Tap 'Picked up' the moment they're onboard so the rider's app reflects the change and the seat counter updates.",
+    },
+    { type: "cta", href: `${APP_URL}/driver/route-taxi`, label: "Open route session" },
+  ];
+
+  const html = renderEmail({
+    preheader: `Route taxi hail · ${args.pickup} → ${args.dropoff} · ${JMD(args.fareJMD)}`,
+    eyebrow: "Hail accepted",
+    title: `${args.pickup} → ${args.dropoff}`,
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, you accepted a route taxi hail.`,
+    `${args.pickup} → ${args.dropoff} · ${JMD(args.fareJMD)}`,
+    `Open session: ${APP_URL}/driver/route-taxi`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendDriverHailAcceptedEmail(
+  to: string,
+  args: Parameters<typeof driverHailAcceptedTemplate>[0],
+) {
+  const t = driverHailAcceptedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── D2. Driver — trip completed (earnings receipt) ── */
+
+export function driverHailCompletedTemplate(args: {
+  driverName: string;
+  hailId: string;
+  pickup: string;
+  dropoff: string;
+  fareJMD: number;
+  driverEarningsJMD: number;
+  commissionJMD: number;
+  distanceKm?: number | null;
+  riderFirstName?: string | null;
+  completedAt?: string | Date | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Route taxi earnings · ${JMD(args.driverEarningsJMD)} · ${args.dropoff}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Nice work, ${first}. The route taxi trip wrapped — here's your earnings record.`,
+    },
+    {
+      type: "card",
+      title: "Earnings",
+      rows: [
+        { label: "Earned", value: JMD(args.driverEarningsJMD), emphasize: true },
+        { label: "From", value: args.pickup },
+        { label: "To", value: args.dropoff },
+        ...(args.riderFirstName ? [{ label: "Rider", value: args.riderFirstName }] : []),
+        ...(args.distanceKm != null
+          ? [{ label: "Distance", value: `${args.distanceKm.toFixed(1)} km` }]
+          : []),
+        ...(args.completedAt
+          ? [{ label: "Completed", value: fmtDateTime(args.completedAt) }]
+          : []),
+        { label: "Gross fare", value: JMD(args.fareJMD) },
+        { label: "Rajlo commission", value: `− ${JMD(args.commissionJMD)}` },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "positive",
+      eyebrow: "Logged",
+      text: "This trip is in your earnings dashboard. Payouts run weekly — Friday cut-off, money lands the next business day.",
+    },
+    { type: "cta", href: `${APP_URL}/driver/earnings`, label: "Open earnings" },
+    {
+      type: "footnote",
+      text: `Need a corrected receipt? Reply with hail ID ${args.hailId}.`,
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `${JMD(args.driverEarningsJMD)} earned · ${args.pickup} → ${args.dropoff}`,
+    eyebrow: "Trip complete",
+    title: `${JMD(args.driverEarningsJMD)} earned`,
+    sections,
+  });
+
+  const text = plaintext([
+    `Route taxi done. Earned ${JMD(args.driverEarningsJMD)}.`,
+    `${args.pickup} → ${args.dropoff}`,
+    `Open earnings: ${APP_URL}/driver/earnings`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendDriverHailCompletedEmail(
+  to: string,
+  args: Parameters<typeof driverHailCompletedTemplate>[0],
+) {
+  const t = driverHailCompletedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}

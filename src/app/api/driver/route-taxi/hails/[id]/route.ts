@@ -4,6 +4,14 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { creditWallet, debitWallet } from "@/lib/wallet";
 import { splitFare } from "@/lib/fare-engine";
 import { notifyRider } from "@/lib/notify";
+import {
+  sendDriverHailAcceptedEmail,
+  sendDriverHailCompletedEmail,
+  sendRiderHailAcceptedEmail,
+  sendRiderHailCancelledEmail,
+  sendRiderHailCompletedEmail,
+} from "@/lib/email-templates";
+import { resolveDriverEmail } from "@/lib/driver-email-resolver";
 
 /**
  * PATCH /api/driver/route-taxi/hails/[id]
@@ -44,6 +52,35 @@ const ALLOWED: Record<string, string[]> = {
   cancelled: [],
   no_show: [],
 };
+
+/**
+ * Resolve a rider's email + first name in one round trip. Returns null
+ * for either field when the lookup fails — callers should skip the
+ * send rather than throw, since email failure must not block the trip
+ * state machine.
+ */
+async function resolveRiderContact(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  riderId: string,
+): Promise<{ email: string | null; firstName: string | null }> {
+  if (!supabase) return { email: null, firstName: null };
+  try {
+    const [profileRes, authRes] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", riderId)
+        .maybeSingle(),
+      supabase.auth.admin.getUserById(riderId),
+    ]);
+    return {
+      email: authRes.data.user?.email ?? null,
+      firstName: profileRes.data?.full_name ?? null,
+    };
+  } catch {
+    return { email: null, firstName: null };
+  }
+}
 
 export async function PATCH(
   request: Request,
@@ -222,6 +259,39 @@ export async function PATCH(
       pushRenotify: true,
     }).catch(() => null);
 
+    // Email parity with private rides: rider gets the driver-matched
+    // email, driver gets a confirmation of their own tap.
+    const driverFullName =
+      [driver.first_name, driver.last_name].filter(Boolean).join(" ") ||
+      "Driver";
+    void (async () => {
+      const rider = await resolveRiderContact(supabase, hail.rider_id);
+      if (rider.email) {
+        void sendRiderHailAcceptedEmail(rider.email, {
+          riderFirstName: rider.firstName,
+          hailId: hail.id,
+          driverName: driverFullName,
+          vehicle: vehicleDesc || null,
+          plate: driver.plate_number,
+          pickup: hail.pickup_name,
+          dropoff: hail.dropoff_name,
+        }).catch(() => null);
+      }
+      const driverEmail = await resolveDriverEmail(supabase, {
+        user_id: user.id,
+      });
+      if (driverEmail) {
+        void sendDriverHailAcceptedEmail(driverEmail, {
+          driverName: driverFullName,
+          hailId: hail.id,
+          riderFirstName: rider.firstName,
+          pickup: hail.pickup_name,
+          dropoff: hail.dropoff_name,
+          fareJMD: hail.fare_jmd as number,
+        }).catch(() => null);
+      }
+    })();
+
     return NextResponse.json({ ok: true, status: "accepted" });
   }
 
@@ -340,6 +410,48 @@ export async function PATCH(
       pushRenotify: true,
     }).catch(() => null);
 
+    // Rider receipt + driver earnings emails.
+    const driverFullName =
+      [driver.first_name, driver.last_name].filter(Boolean).join(" ") ||
+      "Driver";
+    const distanceKm =
+      typeof hail.distance_km === "number"
+        ? hail.distance_km
+        : Number(hail.distance_km);
+    const completedAt = new Date().toISOString();
+    void (async () => {
+      const rider = await resolveRiderContact(supabase, hail.rider_id);
+      if (rider.email) {
+        void sendRiderHailCompletedEmail(rider.email, {
+          riderFirstName: rider.firstName,
+          hailId: hail.id,
+          pickup: hail.pickup_name,
+          dropoff: hail.dropoff_name,
+          fareJMD: fareJmd,
+          distanceKm: Number.isFinite(distanceKm) ? distanceKm : null,
+          driverName: driverFullName,
+          completedAt,
+        }).catch(() => null);
+      }
+      const driverEmail = await resolveDriverEmail(supabase, {
+        user_id: user.id,
+      });
+      if (driverEmail) {
+        void sendDriverHailCompletedEmail(driverEmail, {
+          driverName: driverFullName,
+          hailId: hail.id,
+          pickup: hail.pickup_name,
+          dropoff: hail.dropoff_name,
+          fareJMD: fareJmd,
+          driverEarningsJMD: driverEarningsJmd,
+          commissionJMD: commissionJmd,
+          distanceKm: Number.isFinite(distanceKm) ? distanceKm : null,
+          riderFirstName: rider.firstName,
+          completedAt,
+        }).catch(() => null);
+      }
+    })();
+
     return NextResponse.json({
       ok: true,
       status: "completed",
@@ -377,6 +489,21 @@ export async function PATCH(
       pushTag: `route-hail-${hail.id}`,
       pushRenotify: true,
     }).catch(() => null);
+
+    void (async () => {
+      const rider = await resolveRiderContact(supabase, hail.rider_id);
+      if (rider.email) {
+        void sendRiderHailCancelledEmail(rider.email, {
+          riderFirstName: rider.firstName,
+          hailId: hail.id,
+          pickup: hail.pickup_name,
+          dropoff: hail.dropoff_name,
+          cancelledBy: "driver",
+          reason: body.reason ?? null,
+          cancellationFeeJmd: null,
+        }).catch(() => null);
+      }
+    })();
 
     return NextResponse.json({ ok: true, status: "cancelled" });
   }
