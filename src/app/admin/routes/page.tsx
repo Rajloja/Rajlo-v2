@@ -35,12 +35,19 @@ type RoutesResponse = {
   routes: RouteRow[];
   totalCount: number;
   activeCount: number;
+  pagination?: { hasMore: boolean };
 };
+
+const PAGE_SIZE = 200;
 
 export default function AdminRoutesPage() {
   const [data, setData] = useState<RoutesResponse | null>(null);
+  const [extra, setExtra] = useState<RouteRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [parishFilter, setParishFilter] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">(
@@ -50,39 +57,79 @@ export default function AdminRoutesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
+  const buildUrl = useCallback(
+    (offset: number) => {
       const params = new URLSearchParams();
       if (parishFilter) params.set("parish", parishFilter);
       if (activeFilter !== "all") params.set("active", activeFilter);
       if (search.trim()) params.set("q", search.trim());
-      const res = await fetch(`/api/admin/routes?${params.toString()}`);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(offset));
+      return `/api/admin/routes?${params.toString()}`;
+    },
+    [parishFilter, activeFilter, search],
+  );
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(buildUrl(0));
       if (!res.ok) throw new Error("Failed to load routes");
       const json = (await res.json()) as RoutesResponse;
       setData(json);
+      setExtra([]);
+      setHasMore(json.pagination?.hasMore ?? false);
+      setLoadMoreError(null);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load routes.");
     } finally {
       setLoading(false);
     }
-  }, [parishFilter, activeFilter, search]);
+  }, [buildUrl]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const parishes = useMemo(() => {
+  const allRoutes: RouteRow[] = useMemo(() => {
     if (!data) return [];
+    const firstIds = new Set(data.routes.map((r) => r.id));
+    return [...data.routes, ...extra.filter((r) => !firstIds.has(r.id))];
+  }, [data, extra]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(buildUrl(allRoutes.length));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as RoutesResponse;
+      setExtra((prev) => {
+        const seen = new Set([
+          ...(data?.routes ?? []).map((r) => r.id),
+          ...prev.map((r) => r.id),
+        ]);
+        return [...prev, ...json.routes.filter((r) => !seen.has(r.id))];
+      });
+      setHasMore(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const parishes = useMemo(() => {
     const set = new Set<string>();
-    for (const r of data.routes) if (r.parish) set.add(r.parish);
+    for (const r of allRoutes) if (r.parish) set.add(r.parish);
     return Array.from(set).sort();
-  }, [data]);
+  }, [allRoutes]);
 
   const grouped = useMemo(() => {
-    if (!data) return [];
     const groups = new Map<string, RouteRow[]>();
-    for (const r of data.routes) {
+    for (const r of allRoutes) {
       const key = r.parish ?? "Unassigned";
       const arr = groups.get(key) ?? [];
       arr.push(r);
@@ -91,7 +138,7 @@ export default function AdminRoutesPage() {
     return Array.from(groups.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([parish, rows]) => ({ parish, rows }));
-  }, [data]);
+  }, [allRoutes]);
 
   return (
     <div className="space-y-6">
@@ -228,6 +275,9 @@ export default function AdminRoutesPage() {
 
       {!loading && grouped.length > 0 && (
         <div className="space-y-6">
+          <p className="text-[11px] font-semibold text-muted">
+            Showing {allRoutes.length} of {data?.totalCount ?? allRoutes.length} routes
+          </p>
           {grouped.map((g) => (
             <section key={g.parish}>
               <p className="font-secondary mb-2 text-[10px] font-bold uppercase tracking-wider text-muted">
@@ -280,6 +330,26 @@ export default function AdminRoutesPage() {
               </ul>
             </section>
           ))}
+          {hasMore && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="text-center text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </div>
       )}
 

@@ -36,6 +36,43 @@ export async function GET(request: NextRequest) {
   const q = url.searchParams.get("q")?.trim();
   const parish = url.searchParams.get("parish")?.trim();
   const activeParam = url.searchParams.get("active");
+  const limit = Math.min(
+    500,
+    Math.max(20, parseInt(url.searchParams.get("limit") ?? "200", 10) || 200),
+  );
+  const offset = Math.max(
+    0,
+    parseInt(url.searchParams.get("offset") ?? "0", 10) || 0,
+  );
+
+  // Catalogue-wide active/total counts come from a separate count
+  // query so pagination doesn't distort the header — admins want
+  // "X of Y active" across the full filtered set, not the page.
+  let countQuery = supabase
+    .from("routes")
+    .select("active", { count: "exact" });
+  let activeCountQuery = supabase
+    .from("routes")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true);
+  if (parish) {
+    countQuery = countQuery.eq("origin_parish", parish);
+    activeCountQuery = activeCountQuery.eq("origin_parish", parish);
+  }
+  if (activeParam === "true") {
+    countQuery = countQuery.eq("active", true);
+  } else if (activeParam === "false") {
+    countQuery = countQuery.eq("active", false);
+  }
+  if (q) {
+    const safe = q.replace(/[,()]/g, "");
+    countQuery = countQuery.or(
+      `origin_name.ilike.%${safe}%,destination_name.ilike.%${safe}%`,
+    );
+    activeCountQuery = activeCountQuery.or(
+      `origin_name.ilike.%${safe}%,destination_name.ilike.%${safe}%`,
+    );
+  }
 
   let query = supabase
     .from("routes")
@@ -43,7 +80,8 @@ export async function GET(request: NextRequest) {
       "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd, slug, active, created_at, updated_at",
     )
     .order("origin_parish", { ascending: true, nullsFirst: false })
-    .order("origin_name", { ascending: true });
+    .order("origin_name", { ascending: true })
+    .range(offset, offset + limit);
 
   if (parish) query = query.eq("origin_parish", parish);
   if (activeParam === "true") query = query.eq("active", true);
@@ -55,12 +93,20 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { data, error } = await query.limit(800);
+  const [{ data, error }, totalRes, activeRes] = await Promise.all([
+    query,
+    countQuery,
+    activeCountQuery,
+  ]);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const routes: RouteRow[] = (data ?? []).map((r) => {
+  const fetched = data ?? [];
+  const hasMore = fetched.length > limit;
+  const page = hasMore ? fetched.slice(0, limit) : fetched;
+
+  const routes: RouteRow[] = page.map((r) => {
     const distance = Number(r.distance_km);
     return {
       id: r.id,
@@ -77,12 +123,11 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  // Surface the count the admin sees for context (active vs total).
-  const activeCount = routes.filter((r) => r.active).length;
   return NextResponse.json({
     routes,
-    totalCount: routes.length,
-    activeCount,
+    totalCount: totalRes.count ?? routes.length,
+    activeCount: activeRes.count ?? routes.filter((r) => r.active).length,
+    pagination: { hasMore },
   });
 }
 

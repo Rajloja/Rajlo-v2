@@ -47,7 +47,13 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
     driverRowId = (drv as { id: string } | null)?.id ?? null;
     if (!driverRowId) {
-      return NextResponse.json({ rides: [], total: 0, limit, offset });
+      return NextResponse.json({
+        rides: [],
+        total: 0,
+        limit,
+        offset,
+        pagination: { hasMore: false },
+      });
     }
   }
 
@@ -196,5 +202,8 @@ export async function GET(request: NextRequest) {
     total: count ?? rides.length,
     limit,
     offset,
+    pagination: {
+      hasMore: (count ?? rides.length) > offset + rides.length,
+    },
   });
 }

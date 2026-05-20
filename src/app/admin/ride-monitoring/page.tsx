@@ -90,23 +90,77 @@ export default function AdminRideMonitoringPage() {
   // Build the URL the filtered feed query depends on. Whenever any
   // of the filter inputs flip, the URL changes and useLiveQuery
   // resets the loading state + re-fetches.
+  const PAGE_SIZE = 100;
   const filteredUrl = (() => {
     const params = new URLSearchParams();
     params.set("status", status);
     if (parish) params.set("parish", parish);
     if (debouncedSearch) params.set("q", debouncedSearch);
     params.set("days", String(days));
-    params.set("limit", "100");
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", "0");
     return `/api/admin/rides?${params.toString()}`;
   })();
 
   // Main filtered feed — refresh every 20s (this is the historical
   // browse view, not the live strip).
-  const filteredQuery = useLiveQuery<{ rides: RideRow[] }>(filteredUrl, {
-    interval: 20_000,
-  });
-  const rides = filteredQuery.data?.rides ?? [];
+  const filteredQuery = useLiveQuery<{
+    rides: RideRow[];
+    total: number;
+    pagination?: { hasMore: boolean };
+  }>(filteredUrl, { interval: 20_000 });
+  const firstPageRides = filteredQuery.data?.rides ?? [];
+  const total = filteredQuery.data?.total ?? 0;
+
+  const [extraRides, setExtraRides] = useState<RideRow[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtraRides([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [filteredUrl]);
+
+  const firstIds = new Set(firstPageRides.map((r) => r.id));
+  const rides: RideRow[] = [
+    ...firstPageRides,
+    ...extraRides.filter((r) => !firstIds.has(r.id)),
+  ];
+  const canLoadMore =
+    extraRides.length === 0
+      ? (filteredQuery.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
   const loading = filteredQuery.loading;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(filteredUrl, window.location.origin);
+      next.searchParams.set("offset", String(rides.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        rides: RideRow[];
+        pagination?: { hasMore: boolean };
+      };
+      setExtraRides((prev) => {
+        const seen = new Set([
+          ...firstPageRides.map((r) => r.id),
+          ...prev.map((r) => r.id),
+        ]);
+        return [...prev, ...json.rides.filter((r) => !seen.has(r.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Live in-flight strip — 8s cadence so new bookings + accept/arrive
   // transitions appear with minimal lag.
@@ -306,50 +360,75 @@ export default function AdminRideMonitoringPage() {
               <p className="mt-3 text-sm font-bold">No rides match these filters</p>
             </div>
           ) : (
-            <ul className="divide-y divide-line">
-              {rides.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    href={`/admin/rides/${r.id}`}
-                    className="grid grid-cols-1 gap-3 px-4 py-4 transition-colors hover:bg-surface-soft md:grid-cols-[1fr,1.5fr,1fr,auto] md:items-center md:px-5"
+            <>
+              <ul className="divide-y divide-line">
+                {rides.map((r) => (
+                  <li key={r.id}>
+                    <Link
+                      href={`/admin/rides/${r.id}`}
+                      className="grid grid-cols-1 gap-3 px-4 py-4 transition-colors hover:bg-surface-soft md:grid-cols-[1fr,1.5fr,1fr,auto] md:items-center md:px-5"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-extrabold uppercase tracking-wider text-muted">
+                          Ride
+                        </p>
+                        <p className="mt-0.5 truncate text-sm font-bold">
+                          {r.id.slice(0, 8)}
+                        </p>
+                        <StatusBadge status={r.status} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold tracking-tight">
+                          {r.pickup.name}{" "}
+                          <span className="text-muted">→</span> {r.dropoff.name}
+                        </p>
+                        <p className="truncate text-xs text-muted">
+                          {(r.pickup.parish ?? "?")} → {(r.dropoff.parish ?? "?")} ·{" "}
+                          {r.seats} seat{r.seats === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold">
+                          {r.driverName ?? <span className="text-muted">No driver yet</span>}
+                        </p>
+                        <p className="truncate text-[11px] text-muted">
+                          {r.driverPlate ?? "—"} · rider {r.riderName}
+                        </p>
+                      </div>
+                      <div className="text-xs text-muted md:text-right">
+                        <p className="font-extrabold text-rajlo-red">
+                          {r.fare !== null ? formatJMD(r.fare) : "—"}
+                        </p>
+                        <p>{ago(r.requestedAt)}</p>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-soft px-4 py-3 md:px-5">
+                <p className="text-[11px] font-semibold text-muted">
+                  Showing {rides.length} of {total}
+                </p>
+                {canLoadMore && (
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <div className="min-w-0">
-                      <p className="text-xs font-extrabold uppercase tracking-wider text-muted">
-                        Ride
-                      </p>
-                      <p className="mt-0.5 truncate text-sm font-bold">
-                        {r.id.slice(0, 8)}
-                      </p>
-                      <StatusBadge status={r.status} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-extrabold tracking-tight">
-                        {r.pickup.name}{" "}
-                        <span className="text-muted">→</span> {r.dropoff.name}
-                      </p>
-                      <p className="truncate text-xs text-muted">
-                        {(r.pickup.parish ?? "?")} → {(r.dropoff.parish ?? "?")} ·{" "}
-                        {r.seats} seat{r.seats === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-bold">
-                        {r.driverName ?? <span className="text-muted">No driver yet</span>}
-                      </p>
-                      <p className="truncate text-[11px] text-muted">
-                        {r.driverPlate ?? "—"} · rider {r.riderName}
-                      </p>
-                    </div>
-                    <div className="text-xs text-muted md:text-right">
-                      <p className="font-extrabold text-rajlo-red">
-                        {r.fare !== null ? formatJMD(r.fare) : "—"}
-                      </p>
-                      <p>{ago(r.requestedAt)}</p>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                    {loadingMore ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                    ) : null}
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                )}
+              </div>
+              {loadMoreError && (
+                <p className="border-t border-line bg-primary-soft px-5 py-2 text-xs font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+            </>
           )}
         </div>
       </FadeUp>
