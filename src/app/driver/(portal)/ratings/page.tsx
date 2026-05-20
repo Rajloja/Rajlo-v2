@@ -10,7 +10,8 @@ import {
   setCachedDriverData,
 } from "@/lib/driver-prefetch";
 
-const RATINGS_URL = "/api/driver/ratings";
+const PAGE_SIZE = 20;
+const RATINGS_URL = `/api/driver/ratings?limit=${PAGE_SIZE}&offset=0`;
 
 /**
  * Driver "my ratings" page. Read-only window into how riders are
@@ -44,6 +45,7 @@ type Response = {
   distribution: Distribution;
   last30Days: { total: number; average: number | null };
   recent: RecentRating[];
+  pagination?: { hasMore: boolean };
 };
 
 export default function DriverRatingsPage() {
@@ -54,6 +56,15 @@ export default function DriverRatingsPage() {
   const [data, setData] = useState<Response | null>(cached);
   const [loading, setLoading] = useState(cached == null);
   const [error, setError] = useState<string | null>(null);
+  // Pagination state for the "recent" list. Aggregates (summary,
+  // distribution, last30Days) are still computed across the full
+  // history server-side regardless of which page is loaded.
+  const [extraRecent, setExtraRecent] = useState<RecentRating[]>([]);
+  const [hasMoreRecent, setHasMoreRecent] = useState(
+    cached?.pagination?.hasMore ?? false,
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +78,7 @@ export default function DriverRatingsPage() {
         const json = (await res.json()) as Response;
         if (!cancelled) {
           setData(json);
+          setHasMoreRecent(json.pagination?.hasMore ?? false);
           setCachedDriverData(RATINGS_URL, json);
         }
       } catch (e) {
@@ -80,6 +92,34 @@ export default function DriverRatingsPage() {
       cancelled = true;
     };
   }, []);
+
+  const loadMoreRecent = async () => {
+    if (!data) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const offset = data.recent.length + extraRecent.length;
+      const res = await fetch(
+        `/api/driver/ratings?limit=${PAGE_SIZE}&offset=${offset}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as Response;
+      setExtraRecent((prev) => {
+        const seen = new Set([
+          ...data.recent.map((r) => r.id),
+          ...prev.map((r) => r.id),
+        ]);
+        return [...prev, ...json.recent.filter((r) => !seen.has(r.id))];
+      });
+      setHasMoreRecent(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -111,7 +151,15 @@ export default function DriverRatingsPage() {
     );
   }
 
-  const { summary, distribution, last30Days, recent } = data;
+  const { summary, distribution, last30Days, recent: firstPageRecent } = data;
+  // Combined view: server's first page + any older pages the driver
+  // has loaded via "Load more." Dedupe by id in case a server refresh
+  // overlaps a page we already have.
+  const firstPageIds = new Set(firstPageRecent.map((r) => r.id));
+  const recent = [
+    ...firstPageRecent,
+    ...extraRecent.filter((r) => !firstPageIds.has(r.id)),
+  ];
   const maxBar = Math.max(1, ...Object.values(distribution));
   const noRatings = summary.total === 0;
 
@@ -236,6 +284,26 @@ export default function DriverRatingsPage() {
             {recent.map((r) => (
               <ReviewCard key={r.id} r={r} />
             ))}
+            {hasMoreRecent && (
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={loadMoreRecent}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  ) : null}
+                  {loadingMore ? "Loading…" : "Load more reviews"}
+                </button>
+              </div>
+            )}
+            {loadMoreError && (
+              <p className="pt-1 text-center text-[11px] font-semibold text-rajlo-red">
+                {loadMoreError}
+              </p>
+            )}
           </div>
         </FadeUp>
       )}

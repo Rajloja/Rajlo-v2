@@ -8,6 +8,7 @@ import {
   AuthSubmit,
   AuthPhoneField,
   GoogleAuthButton,
+  AppleAuthButton,
   AuthDivider,
 } from "@/components/auth-shell";
 import { LegalConsent } from "@/components/legal-consent";
@@ -153,6 +154,11 @@ export default function DriverSignupPage() {
           intent="driver"
           next="/driver/onboarding"
           label="Sign up with Google"
+        />
+        <AppleAuthButton
+          intent="driver"
+          next="/driver/onboarding"
+          label="Sign up with Apple"
         />
         <AuthDivider label="or sign up with email" />
 

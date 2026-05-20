@@ -67,6 +67,15 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "system", label: "System" },
 ];
 
+const PAGE_SIZE = 30;
+const FIRST_PAGE_URL = `/api/rider/notifications?limit=${PAGE_SIZE}&offset=0`;
+
+type NotifsResponse = {
+  notifications: RiderNotification[];
+  pagination?: { hasMore: boolean };
+  unreadCount: number;
+};
+
 export default function RiderNotificationsPage() {
   const { t } = useT();
   const [items, setItems] = useState<RiderNotification[]>([]);
@@ -74,25 +83,43 @@ export default function RiderNotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
+  // Pagination state. `hasMore` is seeded from the first-page fetch
+  // and re-set after each "Load more" round-trip.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // Initial fetch + Realtime subscription. Re-fetch on every push
-  // (rather than parse the postgres_changes payload) so we always
-  // see the same shape the API returns. RLS scopes the stream to the
-  // calling rider's own rows.
+  // Initial fetch + Realtime subscription. Realtime MERGES the new
+  // first page into the existing list — a naive replace would wipe
+  // any older pages the rider already loaded via "Load more".
   useEffect(() => {
     let cancelled = false;
+    let firstLoadDone = false;
 
     const refresh = async () => {
       try {
-        const res = await fetch("/api/rider/notifications");
+        const res = await fetch(FIRST_PAGE_URL);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as {
-          notifications: RiderNotification[];
-          unreadCount: number;
-        };
+        const json = (await res.json()) as NotifsResponse;
         if (cancelled) return;
-        setItems(json.notifications);
+        setItems((prev) => {
+          if (prev.length === 0) return json.notifications;
+          const existingIds = new Set(prev.map((n) => n.id));
+          const incoming = json.notifications.filter(
+            (n) => !existingIds.has(n.id),
+          );
+          const incomingById = new Map(
+            json.notifications.map((n) => [n.id, n] as const),
+          );
+          const updated = prev.map((n) => incomingById.get(n.id) ?? n);
+          return [...incoming, ...updated];
+        });
         setUnreadFromServer(json.unreadCount);
+        // Only trust the first page's hasMore until the rider has
+        // tapped Load more at least once; after that loadMore owns it.
+        if (!firstLoadDone) {
+          setHasMore(json.pagination?.hasMore ?? false);
+          firstLoadDone = true;
+        }
         setError(null);
       } catch (e) {
         if (!cancelled)
@@ -122,6 +149,26 @@ export default function RiderNotificationsPage() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/rider/notifications?limit=${PAGE_SIZE}&offset=${items.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as NotifsResponse;
+      setItems((prev) => {
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...json.notifications.filter((n) => !seen.has(n.id))];
+      });
+      setHasMore(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Local unread count is the source of truth for the header badge:
   // it stays in sync as we optimistically flip rows. unreadFromServer
@@ -321,6 +368,26 @@ export default function RiderNotificationsPage() {
           </section>
         </FadeUp>
       ))}
+
+      {/* Load more — only on the All tab; the tabs filter a fixed
+         subset of the loaded items, so paging older items inside a
+         specific tab would need a server-side kind filter we don't
+         have. Switching to All gives the rider the full back-history. */}
+      {!loading && tab === "all" && hasMore && (
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMore ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+            ) : null}
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
 
       {/* Settings hint */}
       <FadeUp delay={0.2}>

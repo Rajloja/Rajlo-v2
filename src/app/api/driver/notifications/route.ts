@@ -6,12 +6,15 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
  * GET /api/driver/notifications
  *
  * Returns the driver's notification feed, most-recent first.
- * Pagination via `?limit=` (1..50, default 30). Includes an
+ *
+ * Pagination: `?limit=` (1..50, default 30) + `?offset=` (default 0).
+ * Response carries `pagination.hasMore` so the page can show / hide
+ * the Load-more button without a separate count query. Includes
  * `unreadCount` so the inbox header can render the badge without a
  * second round-trip.
  *
  * Mirrors `/api/rider/notifications` exactly so the two inbox UIs
- * can share the same shape and component patterns.
+ * share the same shape.
  */
 
 const DEFAULT_LIMIT = 30;
@@ -39,14 +42,18 @@ export async function GET(request: Request) {
     MAX_LIMIT,
     Math.max(1, Number(url.searchParams.get("limit")) || DEFAULT_LIMIT),
   );
+  const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
 
-  const [{ data: rows, error }, { count }] = await Promise.all([
+  // Over-fetch by one to compute `hasMore` without a separate count
+  // query. If we get back `limit + 1` rows we know there's another
+  // page; we return the first `limit` of them to the client.
+  const [{ data: rowsRaw, error }, { count }] = await Promise.all([
     supabase
       .from("driver_notifications")
       .select("id, kind, title, body, href, cta, read_at, created_at")
       .eq("driver_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(limit),
+      .range(offset, offset + limit),
     supabase
       .from("driver_notifications")
       .select("id", { count: "exact", head: true })
@@ -58,8 +65,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const rows = rowsRaw ?? [];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
   return NextResponse.json({
-    notifications: (rows ?? []).map((n) => ({
+    notifications: page.map((n) => ({
       id: n.id,
       kind: n.kind,
       title: n.title,
@@ -69,6 +80,7 @@ export async function GET(request: Request) {
       read: n.read_at !== null,
       at: n.created_at,
     })),
+    pagination: { hasMore },
     unreadCount: count ?? 0,
   });
 }

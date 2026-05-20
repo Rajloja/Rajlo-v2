@@ -6,12 +6,13 @@ import { getWalletBalance } from "@/lib/wallet";
 /**
  * GET /api/wallet
  *
- * Returns the calling user's wallet — balance plus their most
- * recent transactions. Used by both the rider and driver wallet
- * pages — wallet shape is identical, only the kinds of transactions
- * differ.
+ * Returns the calling user's wallet — balance plus a page of their
+ * transactions. Used by both rider and driver wallet pages; shape is
+ * identical, only the kinds of transactions differ.
  *
- * `?limit=` controls how many transactions come back (default 30).
+ * `?limit=` page size (default 30, capped at 100).
+ * `?offset=` (default 0) drives "Load more"; response carries
+ * `pagination.hasMore` so callers don't need a count query.
  */
 
 export async function GET(request: NextRequest) {
@@ -35,20 +36,31 @@ export async function GET(request: NextRequest) {
     100,
     Math.max(5, parseInt(request.nextUrl.searchParams.get("limit") ?? "30", 10) || 30),
   );
+  const offset = Math.max(
+    0,
+    parseInt(request.nextUrl.searchParams.get("offset") ?? "0", 10) || 0,
+  );
 
   const balance = await getWalletBalance(supabase, user.id);
 
-  const { data: txns } = await supabase
+  // Over-fetch by one row so we can return `hasMore` without a
+  // separate count query. If the DB returns limit+1, we slice off the
+  // probe row before sending the page back.
+  const { data: txnsRaw } = await supabase
     .from("wallet_transactions")
     .select(
       "id, direction, amount_jmd, kind, ride_id, related_user_id, deposit_id, withdrawal_id, transfer_id, description, balance_after_jmd, created_at",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
+
+  const txns = txnsRaw ?? [];
+  const hasMore = txns.length > limit;
 
   return NextResponse.json({
     balanceJmd: balance,
-    transactions: txns ?? [],
+    transactions: hasMore ? txns.slice(0, limit) : txns,
+    pagination: { hasMore },
   });
 }

@@ -13,10 +13,12 @@ import {
   setCachedDriverData,
 } from "@/lib/driver-prefetch";
 
-const NOTIFS_URL = "/api/driver/notifications";
+const PAGE_SIZE = 30;
+const FIRST_PAGE_URL = `/api/driver/notifications?limit=${PAGE_SIZE}&offset=0`;
 
 type NotifsResponse = {
   notifications: DriverNotification[];
+  pagination?: { hasMore: boolean };
   unreadCount: number;
 };
 
@@ -152,7 +154,7 @@ export default function DriverNotificationsPage() {
   // Seed from the prefetch cache so opening Notifications from the
   // drawer lands on the real list instantly. The refresh below + the
   // Supabase Realtime channel keep things live.
-  const cachedNotifs = getCachedDriverData<NotifsResponse>(NOTIFS_URL);
+  const cachedNotifs = getCachedDriverData<NotifsResponse>(FIRST_PAGE_URL);
   const [items, setItems] = useState<DriverNotification[]>(
     cachedNotifs?.notifications ?? [],
   );
@@ -162,6 +164,12 @@ export default function DriverNotificationsPage() {
   const [loading, setLoading] = useState(cachedNotifs == null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
+  // Pagination state. `hasMore` comes from the API (over-fetch by one
+  // trick); `loadingMore` drives the spinner on the Load-more button.
+  const [hasMore, setHasMore] = useState(
+    cachedNotifs?.pagination?.hasMore ?? false,
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Compliance reminders (separate fetch — not stored in
   // driver_notifications because they're computed from expiry dates).
@@ -169,19 +177,47 @@ export default function DriverNotificationsPage() {
   const [reminderError, setReminderError] = useState<string | null>(null);
 
   // Initial fetch + Realtime subscription on driver_notifications.
+  // Realtime carefully MERGES the first-page fetch into the existing
+  // accumulated list — naively replacing would wipe any older pages
+  // the driver already loaded via "Load more".
   useEffect(() => {
     let cancelled = false;
 
     const refresh = async () => {
       try {
-        const res = await fetch(NOTIFS_URL);
+        const res = await fetch(FIRST_PAGE_URL);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as NotifsResponse;
         if (cancelled) return;
-        setItems(json.notifications);
+        setItems((prev) => {
+          // Merge the freshly-fetched first page into the current
+          // list: take any rows from the server that aren't in the
+          // current list (new arrivals via realtime), prepend them.
+          // Then keep any older pages the driver has already loaded.
+          // This avoids the "load more then a realtime event drops
+          // your older pages" bug.
+          if (prev.length === 0) return json.notifications;
+          const existingIds = new Set(prev.map((n) => n.id));
+          const incoming = json.notifications.filter(
+            (n) => !existingIds.has(n.id),
+          );
+          // Also reconcile read-state updates the server returned for
+          // ids we already have (someone marked them read elsewhere).
+          const incomingById = new Map(
+            json.notifications.map((n) => [n.id, n] as const),
+          );
+          const updated = prev.map((n) => incomingById.get(n.id) ?? n);
+          return [...incoming, ...updated];
+        });
         setUnreadFromServer(json.unreadCount);
+        // Only trust hasMore from the FIRST page fetch when no older
+        // pages have been loaded yet — once the driver taps Load more
+        // it's the loadMore call below that owns hasMore.
+        if (cachedNotifs == null) {
+          setHasMore(json.pagination?.hasMore ?? false);
+        }
         setError(null);
-        setCachedDriverData(NOTIFS_URL, json);
+        setCachedDriverData(FIRST_PAGE_URL, json);
       } catch (e) {
         if (!cancelled)
           setError(
@@ -209,7 +245,34 @@ export default function DriverNotificationsPage() {
       cancelled = true;
       supabase.removeChannel(channel);
     };
+    // cachedNotifs is read once on mount — exhaustive-deps would
+    // re-run this whole effect on every render otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/driver/notifications?limit=${PAGE_SIZE}&offset=${items.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as NotifsResponse;
+      setItems((prev) => {
+        // Append, deduping by id in case a realtime insert raced us.
+        const existingIds = new Set(prev.map((n) => n.id));
+        const extra = json.notifications.filter(
+          (n) => !existingIds.has(n.id),
+        );
+        return [...prev, ...extra];
+      });
+      setHasMore(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Compliance reminders — fetched against the auth-gated endpoint
   // (no `?driverId=...` query) so each driver sees THEIR own document
@@ -556,6 +619,27 @@ export default function DriverNotificationsPage() {
           </section>
         </FadeUp>
       ))}
+
+      {/* Load-more — only renders on the "All" tab (other tabs filter
+         a fixed subset, so paging older items there would require a
+         server-side filter param which we don't have. The All tab
+         drives back-history; if a driver wants to see older items in
+         a specific category they can switch tabs after loading.) */}
+      {!loading && tab === "all" && hasMore && (
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMore ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+            ) : null}
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
 
       {/* Settings hint — drives drivers to the profile page where the
           push toggle lives. */}

@@ -24,17 +24,23 @@ import { formatJMD } from "@/lib/jamaica";
  * transfer flow takes a two-step OTP confirmation entirely in-page.
  */
 
+const PAGE_SIZE = 40;
+const WALLET_URL = `/api/wallet?limit=${PAGE_SIZE}&offset=0`;
+
+type WalletTxn = {
+  id: string;
+  direction: "credit" | "debit";
+  amount_jmd: number;
+  kind: string;
+  description: string | null;
+  balance_after_jmd: number;
+  created_at: string;
+};
+
 type WalletResponse = {
   balanceJmd: number;
-  transactions: Array<{
-    id: string;
-    direction: "credit" | "debit";
-    amount_jmd: number;
-    kind: string;
-    description: string | null;
-    balance_after_jmd: number;
-    created_at: string;
-  }>;
+  transactions: WalletTxn[];
+  pagination?: { hasMore: boolean };
 };
 
 const KIND_META: Record<
@@ -69,11 +75,50 @@ export default function RiderWalletPage() {
     return null;
   });
 
-  const wallet = useLiveQuery<WalletResponse>("/api/wallet?limit=40", {
+  const wallet = useLiveQuery<WalletResponse>(WALLET_URL, {
     interval: 15_000,
   });
   const balance = wallet.data?.balanceJmd ?? 0;
-  const txns = wallet.data?.transactions ?? [];
+  // Pagination state — first page lives in `wallet` (auto-refreshed
+  // every 15s); older pages loaded via "Load more" accumulate here
+  // separately so the refresh doesn't wipe them.
+  const [extraTxns, setExtraTxns] = useState<WalletTxn[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  const firstPage = wallet.data?.transactions ?? [];
+  const firstPageIds = new Set(firstPage.map((t) => t.id));
+  const txns: WalletTxn[] = [
+    ...firstPage,
+    ...extraTxns.filter((t) => !firstPageIds.has(t.id)),
+  ];
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/wallet?limit=${PAGE_SIZE}&offset=${txns.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as WalletResponse;
+      setExtraTxns((prev) => {
+        const seen = new Set([
+          ...firstPage.map((t) => t.id),
+          ...prev.map((t) => t.id),
+        ]);
+        return [...prev, ...json.transactions.filter((t) => !seen.has(t.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Initial composer state — opens "deposit" pre-expanded when the
   // URL carries `?deposit=open`. That contract is set by the
@@ -215,11 +260,39 @@ export default function RiderWalletPage() {
               No transactions yet — top up your wallet to get started.
             </p>
           ) : (
-            <ul className="divide-y divide-line">
-              {txns.map((t) => (
-                <TransactionRow key={t.id} tx={t} />
-              ))}
-            </ul>
+            <>
+              <ul className="divide-y divide-line">
+                {txns.map((t) => (
+                  <TransactionRow key={t.id} tx={t} />
+                ))}
+              </ul>
+              {/* Load more — same dual-source rule as the driver
+                 wallet: the live first-page's `hasMore` drives the
+                 button until the rider has expanded once; after that
+                 the loadMore response's `hasMoreOlder` takes over. */}
+              {(extraTxns.length === 0
+                ? (wallet.data?.pagination?.hasMore ?? false)
+                : hasMoreOlder) && (
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingMore ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                    ) : null}
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                </div>
+              )}
+              {loadMoreError && (
+                <p className="mt-2 text-center text-[11px] font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+            </>
           )}
         </div>
       </FadeUp>

@@ -8,6 +8,7 @@ import {
   AuthField,
   AuthSubmit,
   GoogleAuthButton,
+  AppleAuthButton,
   AuthDivider,
 } from "@/components/auth-shell";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -104,6 +105,7 @@ function RiderLoginInner() {
         )}
 
         <GoogleAuthButton intent="rider" next={next} />
+        <AppleAuthButton intent="rider" next={next} />
         <AuthDivider label="or sign in with email" />
 
         <AuthField

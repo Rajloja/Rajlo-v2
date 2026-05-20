@@ -6,11 +6,12 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
  * GET /api/rider/notifications
  *
  * Returns the rider's notification feed, most-recent first.
- * Pagination via `?limit=` (1..50, default 30) — feed pages use the
- * default and can re-fetch if they need more.
  *
- * Includes an `unreadCount` so the inbox header can render the badge
- * without a second round-trip.
+ * Pagination: `?limit=` (1..50, default 30) + `?offset=` (default 0).
+ * Response carries `pagination.hasMore` so the page can show / hide
+ * the Load-more button without a separate count query. Includes
+ * `unreadCount` so the inbox header renders the badge without a
+ * second round-trip.
  */
 
 const DEFAULT_LIMIT = 30;
@@ -38,14 +39,16 @@ export async function GET(request: Request) {
     MAX_LIMIT,
     Math.max(1, Number(url.searchParams.get("limit")) || DEFAULT_LIMIT),
   );
+  const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
 
-  const [{ data: rows, error }, { count }] = await Promise.all([
+  // Over-fetch by one to surface `hasMore` without a count query.
+  const [{ data: rowsRaw, error }, { count }] = await Promise.all([
     supabase
       .from("rider_notifications")
       .select("id, kind, title, body, href, cta, read_at, created_at")
       .eq("rider_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(limit),
+      .range(offset, offset + limit),
     supabase
       .from("rider_notifications")
       .select("id", { count: "exact", head: true })
@@ -57,8 +60,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const rows = rowsRaw ?? [];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
   return NextResponse.json({
-    notifications: (rows ?? []).map((n) => ({
+    notifications: page.map((n) => ({
       id: n.id,
       kind: n.kind,
       title: n.title,
@@ -68,6 +75,7 @@ export async function GET(request: Request) {
       read: n.read_at !== null,
       at: n.created_at,
     })),
+    pagination: { hasMore },
     unreadCount: count ?? 0,
   });
 }

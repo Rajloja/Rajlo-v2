@@ -639,6 +639,88 @@ export function GoogleAuthButton({
 }
 
 /**
+ * "Continue with Apple" button — mirrors GoogleAuthButton.
+ *
+ * Apple requires "Sign in with Apple" any time an app offers a
+ * third-party sign-in option (in our case Google). Submitting an iOS
+ * app with Google sign-in but no Apple sign-in is an automatic
+ * guideline-4.8 rejection. The same button is shown on the web for
+ * symmetry — Apple OAuth via Supabase works the same as Google.
+ *
+ * Apple OAuth only returns the user's name on the FIRST authorization
+ * — subsequent sign-ins don't include it. Supabase stores whatever
+ * Apple sends; our profile rows pick up the name from user_metadata
+ * the same way they do for Google.
+ */
+export function AppleAuthButton({
+  intent,
+  next,
+  label,
+}: {
+  intent: "rider" | "driver";
+  next?: string;
+  label?: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Hidden until Apple Sign In is wired up end-to-end: the Apple
+  // Services ID configured at developer.apple.com AND the Apple
+  // provider enabled in Supabase Auth. Without those, the button
+  // would render but Supabase returns "provider not enabled" the
+  // moment a user taps it — broken UX for every visitor. Flip
+  // `NEXT_PUBLIC_APPLE_AUTH_ENABLED=1` on Vercel once configuration
+  // is complete and the button comes back on the next deploy.
+  if (process.env.NEXT_PUBLIC_APPLE_AUTH_ENABLED !== "1") {
+    return null;
+  }
+
+  const handleClick = async () => {
+    setLoading(true);
+    setError(null);
+    const supabase = createSupabaseBrowserClient();
+    const params = new URLSearchParams({ role_intent: intent });
+    if (next) params.set("next", next);
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: "apple",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?${params.toString()}`,
+      },
+    });
+    if (oauthError) {
+      setError(oauthError.message);
+      setLoading(false);
+    }
+    // On success the browser is redirected to Apple — no further action.
+  };
+
+  return (
+    <StaggerItem>
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={handleClick}
+          disabled={loading}
+          className="group flex w-full items-center justify-center gap-3 rounded-full border border-line bg-surface px-6 py-3 text-sm font-semibold text-foreground transition-all hover:border-rajlo-red/30 hover:bg-surface-soft hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-[2px] border-rajlo-red border-t-transparent" />
+          ) : (
+            <AppleLogoIcon />
+          )}
+          <span>
+            {loading ? "Redirecting…" : (label ?? "Continue with Apple")}
+          </span>
+        </button>
+        {error && (
+          <p className="text-center text-xs text-rajlo-red">{error}</p>
+        )}
+      </div>
+    </StaggerItem>
+  );
+}
+
+/**
  * Horizontal "or continue with email" divider — pairs with GoogleAuthButton.
  */
 export function AuthDivider({ label = "or" }: { label?: string }) {
@@ -818,6 +900,22 @@ function TrustBadge({
 }
 
 /** Multi-color Google "G" logo. */
+function AppleLogoIcon() {
+  // Standard Apple logomark. Inherits the surrounding text color
+  // (foreground), so on a light button it renders near-black and on
+  // dark themes it flips automatically.
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5 text-foreground"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path d="M17.05 12.04c-.03-2.78 2.27-4.11 2.37-4.18-1.29-1.89-3.31-2.15-4.03-2.18-1.71-.17-3.34 1-4.21 1-.87 0-2.21-.98-3.64-.95-1.87.03-3.6 1.09-4.56 2.77-1.94 3.36-.5 8.34 1.39 11.07.93 1.34 2.04 2.84 3.5 2.79 1.4-.05 1.93-.91 3.62-.91 1.69 0 2.17.91 3.64.88 1.51-.03 2.46-1.36 3.38-2.7 1.07-1.55 1.51-3.05 1.54-3.13-.03-.01-2.95-1.13-2.99-4.47zM14.69 4.5c.77-.94 1.29-2.24 1.15-3.54-1.11.04-2.46.74-3.26 1.67-.71.83-1.34 2.16-1.18 3.43 1.24.1 2.51-.63 3.29-1.56z" />
+    </svg>
+  );
+}
+
 function GoogleLogoIcon() {
   return (
     <svg

@@ -11,7 +11,8 @@ import { useLiveQuery } from "@/lib/use-live-query";
 import { formatJMD } from "@/lib/jamaica";
 import { getCachedDriverData } from "@/lib/driver-prefetch";
 
-const WALLET_URL = "/api/wallet?limit=40";
+const PAGE_SIZE = 40;
+const WALLET_URL = `/api/wallet?limit=${PAGE_SIZE}&offset=0`;
 const WITHDRAWALS_URL = "/api/wallet/withdraw";
 
 /**
@@ -24,17 +25,20 @@ const WITHDRAWALS_URL = "/api/wallet/withdraw";
  *   3. Transactions + withdrawals history side by side
  */
 
+type WalletTxn = {
+  id: string;
+  direction: "credit" | "debit";
+  amount_jmd: number;
+  kind: string;
+  description: string | null;
+  balance_after_jmd: number;
+  created_at: string;
+};
+
 type WalletResponse = {
   balanceJmd: number;
-  transactions: Array<{
-    id: string;
-    direction: "credit" | "debit";
-    amount_jmd: number;
-    kind: string;
-    description: string | null;
-    balance_after_jmd: number;
-    created_at: string;
-  }>;
+  transactions: WalletTxn[];
+  pagination?: { hasMore: boolean };
 };
 
 type WithdrawalsResponse = {
@@ -85,7 +89,50 @@ export default function DriverWalletPage() {
     initialData: getCachedDriverData<WithdrawalsResponse>(WITHDRAWALS_URL),
   });
   const balance = wallet.data?.balanceJmd ?? 0;
-  const txns = wallet.data?.transactions ?? [];
+  // Pagination state — `useLiveQuery` owns the first page (and
+  // refreshes it on its interval). Older pages loaded via "Load more"
+  // live here separately so the auto-refresh doesn't wipe them.
+  const [extraTxns, setExtraTxns] = useState<WalletTxn[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  // Merge first-page (live) + older accumulated pages, dedupe by id
+  // in case a refresh shifts a row that was the boundary into the
+  // older list.
+  const firstPage = wallet.data?.transactions ?? [];
+  const firstPageIds = new Set(firstPage.map((t) => t.id));
+  const txns: WalletTxn[] = [
+    ...firstPage,
+    ...extraTxns.filter((t) => !firstPageIds.has(t.id)),
+  ];
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/wallet?limit=${PAGE_SIZE}&offset=${txns.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as WalletResponse;
+      setExtraTxns((prev) => {
+        const seen = new Set([
+          ...firstPage.map((t) => t.id),
+          ...prev.map((t) => t.id),
+        ]);
+        const incoming = json.transactions.filter((t) => !seen.has(t.id));
+        return [...prev, ...incoming];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const lifetimeEarned = txns
     .filter((t) => t.kind === "ride_earning" && t.direction === "credit")
@@ -204,11 +251,39 @@ export default function DriverWalletPage() {
               No transactions yet — complete a trip to see earnings here.
             </p>
           ) : (
-            <ul className="mt-3 divide-y divide-line">
-              {txns.map((t) => (
-                <TransactionRow key={t.id} tx={t} />
-              ))}
-            </ul>
+            <>
+              <ul className="mt-3 divide-y divide-line">
+                {txns.map((t) => (
+                  <TransactionRow key={t.id} tx={t} />
+                ))}
+              </ul>
+              {/* Load more — use the live first-page's hasMore until
+                 the driver has expanded once; after that the stored
+                 hasMoreOlder (from the last loadMore response) takes
+                 over. */}
+              {(extraTxns.length === 0
+                ? (wallet.data?.pagination?.hasMore ?? false)
+                : hasMoreOlder) && (
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingMore ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                    ) : null}
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                </div>
+              )}
+              {loadMoreError && (
+                <p className="mt-2 text-center text-[11px] font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+            </>
           )}
         </div>
       </FadeUp>

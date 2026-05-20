@@ -8,6 +8,7 @@ import {
   AuthField,
   AuthSubmit,
   GoogleAuthButton,
+  AppleAuthButton,
   AuthDivider,
 } from "@/components/auth-shell";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -110,6 +111,7 @@ function DriverLoginInner() {
         )}
 
         <GoogleAuthButton intent="driver" next={next} />
+        <AppleAuthButton intent="driver" next={next} />
         <AuthDivider label="or sign in with email" />
 
         <AuthField

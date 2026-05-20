@@ -8,6 +8,7 @@ import {
   AuthSubmit,
   AuthPhoneField,
   GoogleAuthButton,
+  AppleAuthButton,
   AuthDivider,
 } from "@/components/auth-shell";
 import { LegalConsent } from "@/components/legal-consent";
@@ -143,6 +144,7 @@ export default function RiderSignupPage() {
         )}
 
         <GoogleAuthButton intent="rider" label="Sign up with Google" />
+        <AppleAuthButton intent="rider" label="Sign up with Apple" />
         <AuthDivider label="or sign up with email" />
 
         <AuthField label="Full name" placeholder="Your name" value={name} onChange={setName} autoComplete="name" icon="user" required />

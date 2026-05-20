@@ -8,18 +8,28 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
  * The signed-in driver's rating profile.
  *
  * Returns:
- *   summary    - lifetime average + total count + 5-star %
+ *   summary      - lifetime average + total count + 5-star %
  *   distribution - count per star (1..5) for the histogram
- *   last30Days - average + count over the trailing 30 days
- *   recent     - the 20 most recent ratings + the rider's first name
- *                + the rider's optional written comment + the trip's
- *                pickup→dropoff (so the driver knows which trip it
- *                refers to without bouncing into history)
+ *   last30Days   - average + count over the trailing 30 days
+ *   recent       - a page of recent ratings + the rider's first name
+ *                  + the rider's optional written comment + the
+ *                  trip's pickup→dropoff (so the driver knows which
+ *                  trip the rating is for without bouncing into the
+ *                  history list)
+ *   pagination   - { hasMore } for the `recent` list
+ *
+ * `?limit=` + `?offset=` paginate the recent list (default 20, max
+ * 50). The aggregate stats stay computed across the driver's full
+ * history (capped at 500 ratings to keep the histogram query cheap)
+ * regardless of the recent page being viewed — they describe
+ * lifetime performance, not the loaded slice.
  */
 
 const MS_DAY = 24 * 60 * 60 * 1000;
+const DEFAULT_RECENT_LIMIT = 20;
+const MAX_RECENT_LIMIT = 50;
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await createSupabaseAuthServerClient();
   const {
     data: { user },
@@ -74,8 +84,27 @@ export async function GET() {
   const last30Average =
     last30.length === 0 ? null : Math.round((last30Sum / last30.length) * 10) / 10;
 
-  /* ─── Recent (top 20 with comments and trip context) ─── */
-  const recentRaw = all.slice(0, 20);
+  /* ─── Recent (page with comments and trip context) ─── */
+  const url = new URL(request.url);
+  const recentLimit = Math.min(
+    MAX_RECENT_LIMIT,
+    Math.max(
+      1,
+      Number(url.searchParams.get("limit")) || DEFAULT_RECENT_LIMIT,
+    ),
+  );
+  const recentOffset = Math.max(
+    0,
+    Number(url.searchParams.get("offset")) || 0,
+  );
+  // Slice the requested page out of `all` (which is the aggregate set,
+  // already ordered most-recent first). One row beyond the page tells
+  // us whether to surface `hasMore` on the response.
+  const recentSlice = all.slice(recentOffset, recentOffset + recentLimit + 1);
+  const recentHasMore = recentSlice.length > recentLimit;
+  const recentRaw = recentHasMore
+    ? recentSlice.slice(0, recentLimit)
+    : recentSlice;
   const riderIds = Array.from(new Set(recentRaw.map((r) => r.rater_id)));
   const rideIds = Array.from(new Set(recentRaw.map((r) => r.ride_id)));
 
@@ -129,5 +158,6 @@ export async function GET() {
       average: last30Average,
     },
     recent,
+    pagination: { hasMore: recentHasMore },
   });
 }
