@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
@@ -70,20 +70,72 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "All" },
 ];
 
+const PAGE_SIZE = 100;
+
 export default function AdminVehicleChangesPage() {
   const [filter, setFilter] = useState<StatusFilter>("pending");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // 20s cadence — vehicle change requests trickle in throughout the
   // day; this is enough to surface them quickly without spamming.
-  const query = useLiveQuery<{ requests: ChangeRequest[] }>(
-    `/api/admin/vehicle-changes?status=${filter}`,
-    { interval: 20_000 },
-  );
-  const requests = query.data?.requests ?? [];
+  const url = `/api/admin/vehicle-changes?status=${filter}&limit=${PAGE_SIZE}&offset=0`;
+  const query = useLiveQuery<{
+    requests: ChangeRequest[];
+    pagination?: { hasMore: boolean };
+  }>(url, { interval: 20_000 });
+
+  const [extra, setExtra] = useState<ChangeRequest[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPage = query.data?.requests ?? [];
+  const firstIds = new Set(firstPage.map((r) => r.id));
+  const requests: ChangeRequest[] = [
+    ...firstPage,
+    ...extra.filter((r) => !firstIds.has(r.id)),
+  ];
+  const canLoadMore =
+    extra.length === 0
+      ? (query.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
   const loading = query.loading;
   const error = query.error;
   const refresh = () => void query.refresh();
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(requests.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        requests: ChangeRequest[];
+        pagination?: { hasMore: boolean };
+      };
+      setExtra((prev) => {
+        const seen = new Set([
+          ...firstPage.map((r) => r.id),
+          ...prev.map((r) => r.id),
+        ]);
+        return [...prev, ...json.requests.filter((r) => !seen.has(r.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 px-2 py-6 md:px-3 md:py-8">
@@ -199,6 +251,26 @@ export default function AdminVehicleChangesPage() {
               onActed={refresh}
             />
           ))}
+          {canLoadMore && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="text-center text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </div>
       )}
 

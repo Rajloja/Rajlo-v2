@@ -32,7 +32,11 @@ type Hold = {
   createdBy: string;
   createdAt: string;
 };
-type Payload = { recentActions: Action[]; activeHolds: Hold[] };
+type Payload = {
+  recentActions: Action[];
+  activeHolds: Hold[];
+  pagination?: { hasMoreActions: boolean; hasMoreHolds: boolean };
+};
 
 function timeAgo(iso: string): string {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
@@ -146,6 +150,12 @@ export default function AdminModerationPage() {
                 </p>
               </li>
             ))}
+            {data?.pagination?.hasMoreHolds && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                More active holds not shown — release some to surface the
+                next batch.
+              </li>
+            )}
           </ul>
         )}
       </section>
@@ -188,6 +198,12 @@ export default function AdminModerationPage() {
                 <p className="mt-1 text-[11px] text-muted">by {a.admin}</p>
               </li>
             ))}
+            {data?.pagination?.hasMoreActions && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                Older enforcement actions not shown — see the audit log
+                for the full history.
+              </li>
+            )}
           </ul>
         )}
       </section>

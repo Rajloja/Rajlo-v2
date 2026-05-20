@@ -49,7 +49,10 @@ type Response = {
   totalSeatsTaken: number;
   totalCapacity: number;
   activeSessions: number;
+  pagination?: { hasMore: boolean };
 };
+
+const PAGE_SIZE = 200;
 
 export default function AdminRouteSessionsPage() {
   const [data, setData] = useState<Response | null>(null);
@@ -59,10 +62,19 @@ export default function AdminRouteSessionsPage() {
     "active",
   );
 
+  const [extra, setExtra] = useState<SessionRow[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    setExtra([]);
+    setHasMoreOlder(true);
+  }, [statusFilter]);
+
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/admin/route-sessions?status=${statusFilter}`,
+        `/api/admin/route-sessions?status=${statusFilter}&limit=${PAGE_SIZE}&offset=0`,
       );
       if (!res.ok) throw new Error("Failed to load sessions");
       const json = (await res.json()) as Response;
@@ -81,6 +93,40 @@ export default function AdminRouteSessionsPage() {
 
   // Live polling — only when active filter is on (ended sessions don't move).
   useBackgroundRefresh(refresh, 5000, { enabled: statusFilter === "active" });
+
+  const firstPage = data?.sessions ?? [];
+  const firstIds = new Set(firstPage.map((s) => s.id));
+  const mergedSessions: SessionRow[] = [
+    ...firstPage,
+    ...extra.filter((s) => !firstIds.has(s.id)),
+  ];
+  const canLoadMore =
+    extra.length === 0
+      ? (data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/admin/route-sessions?status=${statusFilter}&limit=${PAGE_SIZE}&offset=${mergedSessions.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as Response;
+      setExtra((prev) => {
+        const seen = new Set([
+          ...firstPage.map((s) => s.id),
+          ...prev.map((s) => s.id),
+        ]);
+        return [...prev, ...json.sessions.filter((s) => !seen.has(s.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const utilization = useMemo(() => {
     if (!data || data.totalCapacity === 0) return 0;
@@ -168,7 +214,7 @@ export default function AdminRouteSessionsPage() {
         </div>
       )}
 
-      {!loading && data && data.sessions.length === 0 && (
+      {!loading && data && mergedSessions.length === 0 && (
         <div className="rounded-2xl border border-dashed border-line bg-surface-soft p-10 text-center">
           <p className="text-sm font-bold">
             {statusFilter === "active"
@@ -183,14 +229,14 @@ export default function AdminRouteSessionsPage() {
         </div>
       )}
 
-      {!loading && data && data.sessions.length > 0 && (
+      {!loading && data && mergedSessions.length > 0 && (
         <>
           {/* Mobile: stacked cards. Tables don't fit phone widths
              without horizontal scroll — admins doing a quick on-the-go
              check shouldn't have to swipe sideways to see the seat
              counter. */}
           <ul className="space-y-2.5 md:hidden">
-            {data.sessions.map((s) => (
+            {mergedSessions.map((s) => (
               <li
                 key={s.id}
                 className="rounded-2xl border border-line bg-surface p-4"
@@ -265,7 +311,7 @@ export default function AdminRouteSessionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.sessions.map((s, i) => (
+                {mergedSessions.map((s, i) => (
                   <tr
                     key={s.id}
                     className={i > 0 ? "border-t border-line" : ""}
@@ -338,6 +384,21 @@ export default function AdminRouteSessionsPage() {
               </tbody>
             </table>
           </div>
+          {canLoadMore && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

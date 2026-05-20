@@ -72,11 +72,13 @@ export default function AdminDriversPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const PAGE_SIZE = 200;
   const url = useMemo(() => {
     const params = new URLSearchParams();
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (debouncedSearch) params.set("q", debouncedSearch);
-    params.set("limit", "200");
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", "0");
     return `/api/admin/drivers?${params.toString()}`;
   }, [statusFilter, debouncedSearch]);
 
@@ -85,8 +87,53 @@ export default function AdminDriversPage() {
     { interval: 30_000 },
   );
 
-  const drivers = driversQuery.data?.drivers ?? [];
+  // Pagination — same dual-source pattern as the other live-queried
+  // admin lists. `extraDrivers` holds older pages the admin loaded
+  // via "Load more"; the live first page refreshes every 30s without
+  // wiping them. Reset whenever the underlying URL changes.
+  const [extraDrivers, setExtraDrivers] = useState<DriverRow[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtraDrivers([]);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPage = driversQuery.data?.drivers ?? [];
+  const firstPageIds = new Set(firstPage.map((d) => d.id));
+  const drivers: DriverRow[] = [
+    ...firstPage,
+    ...extraDrivers.filter((d) => !firstPageIds.has(d.id)),
+  ];
+  const total = driversQuery.data?.total ?? drivers.length;
+  const hasMore =
+    statusFilter !== "needs_review" && drivers.length < total;
   const loading = !driversQuery.data && !driversQuery.error;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(drivers.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { drivers: DriverRow[] };
+      setExtraDrivers((prev) => {
+        const seen = new Set([
+          ...firstPage.map((d) => d.id),
+          ...prev.map((d) => d.id),
+        ]);
+        return [...prev, ...json.drivers.filter((d) => !seen.has(d.id))];
+      });
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Compute the "Needs review" badge count for the tab so admin sees
   // the queue depth at a glance even when on a different filter.
@@ -231,6 +278,33 @@ export default function AdminDriversPage() {
               </tbody>
             </table>
           </div>
+          {/* Pagination footer — shows page count + load-more for the
+             ranged status modes. needs_review skips it (single-shot). */}
+          {drivers.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-3 text-xs font-semibold text-muted">
+              <span>
+                Showing {drivers.length} of {total} drivers
+              </span>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  ) : null}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="px-1 pt-2 text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </>
       )}
     </div>

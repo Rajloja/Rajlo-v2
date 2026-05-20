@@ -152,13 +152,57 @@ export default function AdminMessagesPage() {
   /* ─────────── History (live-polled) ─────────── */
   // 30s cadence — admins won't be sending dozens of broadcasts per
   // minute, so this keeps the feed current without busywork.
-  const historyQuery = useLiveQuery<{ messages: HistoryRow[] }>(
-    "/api/admin/messages?limit=20",
-    { interval: 30_000 },
-  );
-  const history = historyQuery.data?.messages ?? [];
+  const HISTORY_PAGE_SIZE = 20;
+  const historyUrl = `/api/admin/messages?limit=${HISTORY_PAGE_SIZE}&offset=0`;
+  const historyQuery = useLiveQuery<{
+    messages: HistoryRow[];
+    pagination?: { hasMore: boolean };
+  }>(historyUrl, { interval: 30_000 });
+  const historyFirstPage = historyQuery.data?.messages ?? [];
+  const [historyExtra, setHistoryExtra] = useState<HistoryRow[]>([]);
+  const [hasMoreOlderHistory, setHasMoreOlderHistory] = useState(true);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  useEffect(() => {
+    setHistoryExtra([]);
+    setHasMoreOlderHistory(true);
+  }, [historyUrl]);
+  const historyFirstIds = new Set(historyFirstPage.map((h) => h.id));
+  const history: HistoryRow[] = [
+    ...historyFirstPage,
+    ...historyExtra.filter((h) => !historyFirstIds.has(h.id)),
+  ];
+  const canLoadMoreHistory =
+    historyExtra.length === 0
+      ? (historyQuery.data?.pagination?.hasMore ?? false)
+      : hasMoreOlderHistory;
   const historyLoading = historyQuery.loading;
   const reloadHistory = historyQuery.refresh;
+
+  const loadMoreHistory = async () => {
+    setLoadingMoreHistory(true);
+    try {
+      const next = new URL(historyUrl, window.location.origin);
+      next.searchParams.set("offset", String(history.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        messages: HistoryRow[];
+        pagination?: { hasMore: boolean };
+      };
+      setHistoryExtra((prev) => {
+        const seen = new Set([
+          ...historyFirstPage.map((h) => h.id),
+          ...prev.map((h) => h.id),
+        ]);
+        return [...prev, ...json.messages.filter((h) => !seen.has(h.id))];
+      });
+      setHasMoreOlderHistory(json.pagination?.hasMore ?? false);
+    } catch {
+      // Silent failure for history — admin can retry.
+    } finally {
+      setLoadingMoreHistory(false);
+    }
+  };
 
   const submit = async () => {
     setSending(true);
@@ -555,6 +599,21 @@ export default function AdminMessagesPage() {
                   {history.map((h) => (
                     <HistoryRowItem key={h.id} row={h} />
                   ))}
+                  {canLoadMoreHistory && (
+                    <li className="pt-1 text-center">
+                      <button
+                        type="button"
+                        onClick={loadMoreHistory}
+                        disabled={loadingMoreHistory}
+                        className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {loadingMoreHistory ? (
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                        ) : null}
+                        {loadingMoreHistory ? "Loading…" : "Load more"}
+                      </button>
+                    </li>
+                  )}
                 </ul>
               )}
             </Section>

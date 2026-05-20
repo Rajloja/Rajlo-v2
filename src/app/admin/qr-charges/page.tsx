@@ -39,7 +39,13 @@ type Totals = {
   commissionJmd: number;
 };
 
-type Response = { charges: ChargeRow[]; totals: Totals };
+type Response = {
+  charges: ChargeRow[];
+  pagination?: { hasMore: boolean };
+  totals: Totals;
+};
+
+const PAGE_SIZE = 200;
 
 const STATUS_FILTERS = [
   { value: "all", label: "All" },
@@ -58,30 +64,83 @@ export default function AdminQrChargesPage() {
   );
   const [days, setDays] = useState<number>(7);
   const [search, setSearch] = useState("");
+  // Pagination — older pages loaded via "Load more" accumulate here so
+  // a refresh of page 0 doesn't wipe them. Refresh resets the stack.
+  const [extraCharges, setExtraCharges] = useState<ChargeRow[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
+  const buildParams = useCallback(
+    (offset: number) => {
       const params = new URLSearchParams({ status });
       if (days > 0) {
         const since = new Date(Date.now() - days * 86400_000).toISOString();
         params.set("since", since);
       }
       if (search.trim()) params.set("q", search.trim());
-      const res = await fetch(`/api/admin/qr-charges?${params.toString()}`);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(offset));
+      return params;
+    },
+    [status, days, search],
+  );
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/admin/qr-charges?${buildParams(0).toString()}`,
+      );
       if (!res.ok) throw new Error("Failed to load QR charges");
       const json = (await res.json()) as Response;
       setData(json);
+      setExtraCharges([]);
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+      setLoadMoreError(null);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load charges");
     } finally {
       setLoading(false);
     }
-  }, [status, days, search]);
+  }, [buildParams]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const firstPageCharges = data?.charges ?? [];
+  const firstPageIds = new Set(firstPageCharges.map((c) => c.id));
+  const charges: ChargeRow[] = [
+    ...firstPageCharges,
+    ...extraCharges.filter((c) => !firstPageIds.has(c.id)),
+  ];
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/qr-charges?${buildParams(charges.length).toString()}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as Response;
+      setExtraCharges((prev) => {
+        const seen = new Set([
+          ...firstPageCharges.map((c) => c.id),
+          ...prev.map((c) => c.id),
+        ]);
+        return [...prev, ...json.charges.filter((c) => !seen.has(c.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -196,19 +255,19 @@ export default function AdminQrChargesPage() {
         </div>
       )}
 
-      {!loading && data && data.charges.length === 0 && (
+      {!loading && data && charges.length === 0 && (
         <div className="rounded-2xl border border-dashed border-line bg-surface-soft p-10 text-center">
           <p className="text-sm font-bold">No QR charges match those filters</p>
         </div>
       )}
 
-      {!loading && data && data.charges.length > 0 && (
+      {!loading && data && charges.length > 0 && (
         <>
           {/* Mobile: stacked cards. Each charge gets its own card so
              the gross / driver / commission split is readable without
              horizontal scrolling. */}
           <ul className="space-y-2.5 md:hidden">
-            {data.charges.map((c) => (
+            {charges.map((c) => (
               <li
                 key={c.id}
                 className="rounded-2xl border border-line bg-surface p-4"
@@ -305,7 +364,7 @@ export default function AdminQrChargesPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.charges.map((c, i) => (
+                {charges.map((c, i) => (
                   <tr key={c.id} className={i > 0 ? "border-t border-line" : ""}>
                     <td className="px-4 py-3">
                       <p className="font-mono text-xs font-bold tracking-wider">
@@ -361,6 +420,27 @@ export default function AdminQrChargesPage() {
               </tbody>
             </table>
           </div>
+
+          {hasMoreOlder && (
+            <div className="pt-3 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="pt-2 text-center text-[11px] font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </>
       )}
     </div>

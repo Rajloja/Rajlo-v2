@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Skeleton } from "@/components/skeleton";
 import { useLiveQuery } from "@/lib/use-live-query";
 
@@ -39,13 +39,65 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+const PAGE_SIZE = 80;
+
 export default function AdminIncidentsPage() {
   const [scope, setScope] = useState<"open" | "all">("open");
-  const query = useLiveQuery<{ incidents: Incident[] }>(
-    `/api/admin/incidents?scope=${scope}`,
-    { interval: 30_000 },
-  );
-  const incidents = query.data?.incidents ?? [];
+  const url = `/api/admin/incidents?scope=${scope}&limit=${PAGE_SIZE}&offset=0`;
+  const query = useLiveQuery<{
+    incidents: Incident[];
+    pagination?: { hasMore: boolean };
+  }>(url, { interval: 30_000 });
+
+  const [extra, setExtra] = useState<Incident[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPage = query.data?.incidents ?? [];
+  const firstIds = new Set(firstPage.map((i) => i.id));
+  const incidents: Incident[] = [
+    ...firstPage,
+    ...extra.filter((i) => !firstIds.has(i.id)),
+  ];
+  const canLoadMore =
+    extra.length === 0
+      ? (query.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(incidents.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        incidents: Incident[];
+        pagination?: { hasMore: boolean };
+      };
+      setExtra((prev) => {
+        const seen = new Set([
+          ...firstPage.map((i) => i.id),
+          ...prev.map((i) => i.id),
+        ]);
+        return [...prev, ...json.incidents.filter((i) => !seen.has(i.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-3xl px-2 py-2 md:px-3 md:py-8">
@@ -114,6 +166,26 @@ export default function AdminIncidentsPage() {
               </Link>
             </li>
           ))}
+          {canLoadMore && (
+            <li className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </li>
+          )}
+          {loadMoreError && (
+            <li className="text-center text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </li>
+          )}
         </ul>
       )}
     </div>

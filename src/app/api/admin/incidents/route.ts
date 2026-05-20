@@ -25,6 +25,14 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope"); // "open" | "all"
+  const limit = Math.min(
+    200,
+    Math.max(10, parseInt(url.searchParams.get("limit") ?? "80", 10) || 80),
+  );
+  const offset = Math.max(
+    0,
+    parseInt(url.searchParams.get("offset") ?? "0", 10) || 0,
+  );
 
   let q = supabase
     .from("incidents")
@@ -32,16 +40,19 @@ export async function GET(request: Request) {
       "id, incident_type, severity_level, status, title, reporter_user_id, reporter_role, reported_at",
     )
     .order("reported_at", { ascending: false })
-    .limit(80);
+    .range(offset, offset + limit);
   if (scope !== "all") {
     q = q.in("status", OPEN_STATUSES);
   }
   const { data: incidents } = await q;
+  const fetched = incidents ?? [];
+  const hasMore = fetched.length > limit;
+  const page = hasMore ? fetched.slice(0, limit) : fetched;
 
   // Resolve reporter names.
   const ids = [
     ...new Set(
-      (incidents ?? [])
+      page
         .map((i) => i.reporter_user_id as string | null)
         .filter((v): v is string => Boolean(v)),
     ),
@@ -58,7 +69,7 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    incidents: (incidents ?? []).map((i) => ({
+    incidents: page.map((i) => ({
       id: i.id,
       incidentType: i.incident_type,
       severity: i.severity_level,
@@ -70,5 +81,6 @@ export async function GET(request: Request) {
       reporterRole: i.reporter_role,
       reportedAt: i.reported_at,
     })),
+    pagination: { hasMore },
   });
 }

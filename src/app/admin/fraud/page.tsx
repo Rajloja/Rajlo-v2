@@ -42,6 +42,11 @@ type Payload = {
   riskUsers: RiskUser[];
   openFlags: Flag[];
   openInvestigations: Investigation[];
+  pagination?: {
+    hasMoreRiskUsers: boolean;
+    hasMoreFlags: boolean;
+    hasMoreInvestigations: boolean;
+  };
 };
 
 const LEVEL_STYLE: Record<string, string> = {
@@ -115,6 +120,12 @@ export default function AdminFraudPage() {
                 </Link>
               </li>
             ))}
+            {data?.pagination?.hasMoreRiskUsers && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                More risk accounts not shown — resolve some to surface
+                next batch.
+              </li>
+            )}
           </ul>
         )}
       </section>
@@ -155,6 +166,12 @@ export default function AdminFraudPage() {
                 </Link>
               </li>
             ))}
+            {data?.pagination?.hasMoreFlags && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                More open flags not shown — resolve some to surface
+                next batch.
+              </li>
+            )}
           </ul>
         )}
       </section>
@@ -188,6 +205,12 @@ export default function AdminFraudPage() {
                 </Link>
               </li>
             ))}
+            {data?.pagination?.hasMoreInvestigations && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                More open investigations not shown — resolve some to
+                surface next batch.
+              </li>
+            )}
           </ul>
         )}
       </section>

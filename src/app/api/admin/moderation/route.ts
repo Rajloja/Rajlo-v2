@@ -17,6 +17,12 @@ export async function GET() {
   if (gate.error) return gate.error;
   const { supabase } = gate;
 
+  // Two-bucket dashboard. Recent actions over-fetch by one so we can
+  // surface "more available" without paginating inline; active holds
+  // stay unbounded but unresolved-only.
+  const ACTIONS_CAP = 60;
+  const HOLDS_CAP = 100;
+
   const [{ data: actions }, { data: holds }] = await Promise.all([
     supabase
       .from("moderation_actions")
@@ -24,31 +30,44 @@ export async function GET() {
         "id, admin_label, target_user_id, target_label, action_type, reason, created_at",
       )
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(ACTIONS_CAP + 1),
     supabase
       .from("payout_holds")
       .select(
         "id, driver_user_id, reason, hold_amount, created_by_label, created_at",
       )
       .is("released_at", null)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .limit(HOLDS_CAP + 1),
   ]);
 
+  const actionRows = actions ?? [];
+  const holdRowsAll = holds ?? [];
+  const hasMoreActions = actionRows.length > ACTIONS_CAP;
+  const hasMoreHolds = holdRowsAll.length > HOLDS_CAP;
+  const trimmedActions = hasMoreActions
+    ? actionRows.slice(0, ACTIONS_CAP)
+    : actionRows;
+  const trimmedHolds = hasMoreHolds
+    ? holdRowsAll.slice(0, HOLDS_CAP)
+    : holdRowsAll;
+
   // Resolve driver names for the active holds.
-  const holdRows = holds ?? [];
   const nameById = new Map<string, string>();
-  if (holdRows.length > 0) {
+  if (trimmedHolds.length > 0) {
     const { data: names } = await supabase
       .from("profiles")
       .select("id, full_name")
-      .in("id", [...new Set(holdRows.map((h) => h.driver_user_id as string))]);
+      .in("id", [
+        ...new Set(trimmedHolds.map((h) => h.driver_user_id as string)),
+      ]);
     for (const p of (names ?? []) as ProfileRow[]) {
       nameById.set(p.id, p.full_name ?? "Unnamed driver");
     }
   }
 
   return NextResponse.json({
-    recentActions: (actions ?? []).map((a) => ({
+    recentActions: trimmedActions.map((a) => ({
       id: a.id,
       admin: a.admin_label ?? "Admin",
       targetUserId: a.target_user_id,
@@ -57,7 +76,7 @@ export async function GET() {
       reason: a.reason,
       createdAt: a.created_at,
     })),
-    activeHolds: holdRows.map((h) => ({
+    activeHolds: trimmedHolds.map((h) => ({
       id: h.id,
       driverUserId: h.driver_user_id,
       driverName: nameById.get(h.driver_user_id as string) ?? "Unnamed driver",
@@ -66,5 +85,9 @@ export async function GET() {
       createdBy: h.created_by_label ?? "Admin",
       createdAt: h.created_at,
     })),
+    pagination: {
+      hasMoreActions,
+      hasMoreHolds,
+    },
   });
 }

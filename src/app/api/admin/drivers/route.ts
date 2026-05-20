@@ -14,6 +14,12 @@ import { requireAdmin } from "@/lib/admin-auth";
  *   ?status=approved|pending_review|rejected|deactivated|needs_review|all
  *   ?q=<name | external_id | plate>
  *   ?limit=200 (max 500)
+ *   ?offset=0
+ *
+ * Returns `{ drivers, total }` where `total` is the real DB count
+ * matching the filters (not the page length). For the post-fetch
+ * `needs_review` filter, `total` is the count after the in-memory
+ * filter and pagination is single-shot (no load-more in that mode).
  */
 
 type DriverRow = {
@@ -56,34 +62,83 @@ export async function GET(request: NextRequest) {
     500,
     Math.max(1, Number(url.searchParams.get("limit") ?? 200)),
   );
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset") ?? 0) || 0,
+  );
 
-  let query = supabase
-    .from("drivers")
-    .select(
-      "id, user_id, external_id, first_name, last_name, email, phone, plate_number, vehicle_make, vehicle_model, vehicle_color, onboarding_status, activated, deactivated_at, created_at, submitted_at",
-    )
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  // `needs_review` filters AFTER hydrating per-row doc counts, so
+  // pagination by DB range would produce inconsistent page sizes.
+  // For that mode we fall back to single-shot: fetch a big batch,
+  // apply the in-memory filter, return everything matching — the page
+  // hides the Load-more button.
+  const isPostFilter = status === "needs_review";
 
-  if (status === "approved") {
-    query = query.eq("onboarding_status", "approved").eq("activated", true);
-  } else if (status === "pending_review") {
-    query = query.eq("onboarding_status", "pending_review");
-  } else if (status === "rejected") {
-    query = query.eq("onboarding_status", "rejected");
-  } else if (status === "deactivated") {
-    query = query.eq("activated", false).not("deactivated_at", "is", null);
-  }
-  // `needs_review` is a derived filter applied after we hydrate doc counts.
+  // Build the base query + matching count query in parallel. The
+  // count query is for the page-total chip + the page's `hasMore`
+  // calculation; without it the client would need to keep paging
+  // forever to discover the end.
+  const baseQuery = () => {
+    let q1 = supabase
+      .from("drivers")
+      .select(
+        "id, user_id, external_id, first_name, last_name, email, phone, plate_number, vehicle_make, vehicle_model, vehicle_color, onboarding_status, activated, deactivated_at, created_at, submitted_at",
+      )
+      .order("created_at", { ascending: false });
 
-  if (q) {
-    const safe = q.replace(/[,()]/g, "");
-    query = query.or(
-      `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,external_id.ilike.%${safe}%,plate_number.ilike.%${safe}%`,
-    );
-  }
+    if (status === "approved") {
+      q1 = q1.eq("onboarding_status", "approved").eq("activated", true);
+    } else if (status === "pending_review") {
+      q1 = q1.eq("onboarding_status", "pending_review");
+    } else if (status === "rejected") {
+      q1 = q1.eq("onboarding_status", "rejected");
+    } else if (status === "deactivated") {
+      q1 = q1.eq("activated", false).not("deactivated_at", "is", null);
+    }
+    if (q) {
+      const safe = q.replace(/[,()]/g, "");
+      q1 = q1.or(
+        `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,external_id.ilike.%${safe}%,plate_number.ilike.%${safe}%`,
+      );
+    }
+    return q1;
+  };
 
-  const { data: drivers, error } = await query;
+  // For the post-filter mode we pull a wide window then filter; the
+  // client gets `hasMore: false` either way. For ranged modes we slice
+  // [offset, offset+limit-1] and ask Postgres for the matching count.
+  const ranged = isPostFilter
+    ? baseQuery().limit(limit)
+    : baseQuery().range(offset, offset + limit - 1);
+
+  const countQuery = isPostFilter
+    ? Promise.resolve({ count: null as number | null })
+    : (async () => {
+        // Run the same WHERE clauses with head:true + exact count.
+        let c = supabase
+          .from("drivers")
+          .select("id", { count: "exact", head: true });
+        if (status === "approved") {
+          c = c.eq("onboarding_status", "approved").eq("activated", true);
+        } else if (status === "pending_review") {
+          c = c.eq("onboarding_status", "pending_review");
+        } else if (status === "rejected") {
+          c = c.eq("onboarding_status", "rejected");
+        } else if (status === "deactivated") {
+          c = c.eq("activated", false).not("deactivated_at", "is", null);
+        }
+        if (q) {
+          const safe = q.replace(/[,()]/g, "");
+          c = c.or(
+            `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,external_id.ilike.%${safe}%,plate_number.ilike.%${safe}%`,
+          );
+        }
+        const { count } = await c;
+        return { count };
+      })();
+
+  const [{ data: drivers, error }, { count: countedTotal }] =
+    await Promise.all([ranged, countQuery]);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -168,5 +223,10 @@ export async function GET(request: NextRequest) {
     rows = rows.filter((r) => r.needsReview);
   }
 
-  return NextResponse.json({ drivers: rows, total: rows.length });
+  // For ranged modes the true total is the count query result; for
+  // the post-filter mode we report the filtered length so the chip on
+  // the page still shows an accurate number.
+  const total = isPostFilter ? rows.length : (countedTotal ?? rows.length);
+
+  return NextResponse.json({ drivers: rows, total });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { useLiveQuery } from "@/lib/use-live-query";
@@ -81,12 +81,66 @@ export default function AdminSafetyPage() {
   const [kind, setKind] = useState<"all" | Alert["kind"]>("all");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const url = `/api/admin/safety-alerts?status=${status}&kind=${kind}&days=30`;
-  const query = useLiveQuery<{ alerts: Alert[]; total: number }>(url, {
+  const PAGE_SIZE = 100;
+  const url = `/api/admin/safety-alerts?status=${status}&kind=${kind}&days=30&limit=${PAGE_SIZE}&offset=0`;
+  const query = useLiveQuery<{
+    alerts: Alert[];
+    total: number;
+    pagination?: { hasMore: boolean };
+  }>(url, {
     interval: 12_000,
   });
-  const alerts = query.data?.alerts ?? [];
+
+  const [extra, setExtra] = useState<Alert[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPage = query.data?.alerts ?? [];
+  const firstIds = new Set(firstPage.map((a) => a.id));
+  const alerts: Alert[] = [
+    ...firstPage,
+    ...extra.filter((a) => !firstIds.has(a.id)),
+  ];
   const total = query.data?.total ?? 0;
+  const canLoadMore =
+    extra.length === 0
+      ? (query.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(alerts.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        alerts: Alert[];
+        pagination?: { hasMore: boolean };
+      };
+      setExtra((prev) => {
+        const seen = new Set([
+          ...firstPage.map((a) => a.id),
+          ...prev.map((a) => a.id),
+        ]);
+        return [...prev, ...json.alerts.filter((a) => !seen.has(a.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const decide = async (
     alert: Alert,
@@ -190,6 +244,26 @@ export default function AdminSafetyPage() {
               onResolve={(note) => decide(a, "resolved", note)}
             />
           ))}
+          {canLoadMore && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="text-center text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </div>
       )}
     </div>

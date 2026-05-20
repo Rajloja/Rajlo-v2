@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     500,
     Math.max(1, Number(url.searchParams.get("limit") ?? 200)),
   );
+  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0) || 0);
 
   let query = supabase
     .from("driver_sessions")
@@ -31,18 +32,26 @@ export async function GET(request: NextRequest) {
       "id, driver_id, route_id, direction, vehicle_capacity, seats_taken, status, started_at, ended_at, current_lat, current_lng, last_position_at",
     )
     .order("started_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
 
   if (statusFilter !== "all") {
     query = query.eq("status", statusFilter);
   }
 
-  const { data: sessions, error } = await query;
+  const { data: rawSessions, error } = await query;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  if (!sessions || sessions.length === 0) {
-    return NextResponse.json({ sessions: [], totalSeatsTaken: 0, totalCapacity: 0 });
+  const fetched = rawSessions ?? [];
+  const hasMore = fetched.length > limit;
+  const sessions = hasMore ? fetched.slice(0, limit) : fetched;
+  if (sessions.length === 0) {
+    return NextResponse.json({
+      sessions: [],
+      totalSeatsTaken: 0,
+      totalCapacity: 0,
+      pagination: { hasMore: false },
+    });
   }
 
   // Batch-load route + driver lookups so we render names not UUIDs.
@@ -140,5 +149,6 @@ export async function GET(request: NextRequest) {
     totalSeatsTaken,
     totalCapacity,
     activeSessions: enriched.filter((s) => s.status === "active").length,
+    pagination: { hasMore },
   });
 }

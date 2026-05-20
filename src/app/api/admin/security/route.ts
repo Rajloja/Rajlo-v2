@@ -28,27 +28,41 @@ export async function GET() {
     .eq("role", "admin")
     .order("full_name", { ascending: true });
 
-  // Recent access logs + security events.
+  // Recent access logs + security events. Over-fetch each by one to
+  // surface "more available" hints without inline pagination — the
+  // audit log is the canonical archive for older entries.
+  const ACCESS_CAP = 60;
+  const EVENT_CAP = 60;
   const [{ data: accessRows }, { data: eventRows }] = await Promise.all([
     supabase
       .from("admin_access_logs")
       .select("id, admin_user_id, ip_address, user_agent, created_at")
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(ACCESS_CAP + 1),
     supabase
       .from("admin_security_events")
       .select(
         "id, admin_user_id, event_type, severity, description, created_at",
       )
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(EVENT_CAP + 1),
   ]);
+  const accessFetched = accessRows ?? [];
+  const eventFetched = eventRows ?? [];
+  const hasMoreAccess = accessFetched.length > ACCESS_CAP;
+  const hasMoreEvents = eventFetched.length > EVENT_CAP;
+  const trimmedAccess = hasMoreAccess
+    ? accessFetched.slice(0, ACCESS_CAP)
+    : accessFetched;
+  const trimmedEvents = hasMoreEvents
+    ? eventFetched.slice(0, EVENT_CAP)
+    : eventFetched;
 
   // Resolve admin names for every id referenced by logs/events.
   const ids = new Set<string>();
-  for (const r of accessRows ?? [])
+  for (const r of trimmedAccess)
     if (r.admin_user_id) ids.add(r.admin_user_id as string);
-  for (const r of eventRows ?? [])
+  for (const r of trimmedEvents)
     if (r.admin_user_id) ids.add(r.admin_user_id as string);
   const nameById = new Map<string, string>();
   if (ids.size > 0) {
@@ -68,7 +82,7 @@ export async function GET() {
       adminRole: asAdminRole(a.admin_role as string | null),
       suspended: Boolean(a.admin_suspended),
     })),
-    accessLogs: (accessRows ?? []).map((r) => ({
+    accessLogs: trimmedAccess.map((r) => ({
       id: r.id,
       admin: r.admin_user_id
         ? (nameById.get(r.admin_user_id as string) ?? "Admin")
@@ -77,7 +91,7 @@ export async function GET() {
       userAgent: r.user_agent,
       createdAt: r.created_at,
     })),
-    securityEvents: (eventRows ?? []).map((r) => ({
+    securityEvents: trimmedEvents.map((r) => ({
       id: r.id,
       admin: r.admin_user_id
         ? (nameById.get(r.admin_user_id as string) ?? "Admin")
@@ -87,5 +101,9 @@ export async function GET() {
       description: r.description,
       createdAt: r.created_at,
     })),
+    pagination: {
+      hasMoreAccessLogs: hasMoreAccess,
+      hasMoreSecurityEvents: hasMoreEvents,
+    },
   });
 }

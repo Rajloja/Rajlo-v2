@@ -78,10 +78,12 @@ export async function GET(request: NextRequest) {
   if (gate.error) return gate.error;
   const { supabase } = gate;
 
+  const sp = request.nextUrl.searchParams;
   const limit = Math.min(
     100,
-    Math.max(5, parseInt(request.nextUrl.searchParams.get("limit") ?? "30", 10) || 30),
+    Math.max(5, parseInt(sp.get("limit") ?? "30", 10) || 30),
   );
+  const offset = Math.max(0, parseInt(sp.get("offset") ?? "0", 10) || 0);
 
   const { data, error } = await supabase
     .from("admin_messages")
@@ -89,12 +91,18 @@ export async function GET(request: NextRequest) {
       "id, actor_label, audience_kind, audience_size, audience_meta, channels, subject, body, href, cta, results, created_at",
     )
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ messages: data ?? [] });
+  const fetched = data ?? [];
+  const hasMore = fetched.length > limit;
+  const messages = hasMore ? fetched.slice(0, limit) : fetched;
+  return NextResponse.json({
+    messages,
+    pagination: { hasMore },
+  });
 }
 
 export async function POST(request: Request) {

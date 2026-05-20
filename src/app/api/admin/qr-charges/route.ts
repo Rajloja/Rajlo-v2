@@ -16,6 +16,12 @@ import { requireAdmin } from "@/lib/admin-auth";
  *   ?driverId=<external_id>
  *   ?q=<rider name|driver name|code>
  *   ?limit=200 (max 500)
+ *   ?offset=0
+ *
+ * Response includes `pagination.hasMore` for the charges list. Totals
+ * are computed across the LOADED page slice — pair with tight filters
+ * (status / date range) for reconciliation that matches what's on
+ * screen.
  */
 
 export async function GET(request: NextRequest) {
@@ -33,14 +39,19 @@ export async function GET(request: NextRequest) {
     500,
     Math.max(1, Number(url.searchParams.get("limit") ?? 200)),
   );
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset") ?? 0) || 0,
+  );
 
+  // Over-fetch by one to surface `hasMore`.
   let query = supabase
     .from("qr_charges")
     .select(
       "id, code, amount_jmd, description, status, expires_at, confirmed_at, cancelled_at, commission_jmd, driver_earnings_jmd, created_at, driver_id, driver_user_id, rider_user_id",
     )
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
 
   if (status !== "all") query = query.eq("status", status);
   if (since) query = query.gte("created_at", since);
@@ -63,18 +74,26 @@ export async function GET(request: NextRequest) {
     if (!driver) {
       return NextResponse.json({
         charges: [],
+        pagination: { hasMore: false },
         totals: emptyTotals(),
       });
     }
     query = query.eq("driver_id", driver.id);
   }
 
-  const { data: charges, error } = await query;
+  const { data: chargesRaw, error } = await query;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  if (!charges || charges.length === 0) {
-    return NextResponse.json({ charges: [], totals: emptyTotals() });
+  const fetched = chargesRaw ?? [];
+  const hasMore = fetched.length > limit;
+  const charges = hasMore ? fetched.slice(0, limit) : fetched;
+  if (charges.length === 0) {
+    return NextResponse.json({
+      charges: [],
+      pagination: { hasMore: false },
+      totals: emptyTotals(),
+    });
   }
 
   // Hydrate driver + rider names. One query each, indexed by user id.
@@ -152,7 +171,11 @@ export async function GET(request: NextRequest) {
     commissionJmd: settled.reduce((s, c) => s + (c.commissionJmd ?? 0), 0),
   };
 
-  return NextResponse.json({ charges: enriched, totals });
+  return NextResponse.json({
+    charges: enriched,
+    pagination: { hasMore },
+    totals,
+  });
 }
 
 function emptyTotals() {

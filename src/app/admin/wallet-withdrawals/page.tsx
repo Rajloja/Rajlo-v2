@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
@@ -60,13 +60,65 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "All" },
 ];
 
+const PAGE_SIZE = 100;
+
 export default function AdminWithdrawalsPage() {
   const [status, setStatus] = useState<StatusFilter>("pending");
-  const query = useLiveQuery<{ withdrawals: Withdrawal[] }>(
-    `/api/admin/wallet-withdrawals?status=${status}`,
-    { interval: 20_000 },
-  );
-  const list = query.data?.withdrawals ?? [];
+  const url = `/api/admin/wallet-withdrawals?status=${status}&limit=${PAGE_SIZE}&offset=0`;
+  const query = useLiveQuery<{
+    withdrawals: Withdrawal[];
+    pagination?: { hasMore: boolean };
+  }>(url, { interval: 20_000 });
+
+  const [extra, setExtra] = useState<Withdrawal[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPage = query.data?.withdrawals ?? [];
+  const firstIds = new Set(firstPage.map((w) => w.id));
+  const list: Withdrawal[] = [
+    ...firstPage,
+    ...extra.filter((w) => !firstIds.has(w.id)),
+  ];
+  const canLoadMore =
+    extra.length === 0
+      ? (query.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(list.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        withdrawals: Withdrawal[];
+        pagination?: { hasMore: boolean };
+      };
+      setExtra((prev) => {
+        const seen = new Set([
+          ...firstPage.map((w) => w.id),
+          ...prev.map((w) => w.id),
+        ]);
+        return [...prev, ...json.withdrawals.filter((w) => !seen.has(w.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 px-2 py-4 md:px-3 md:py-8">
@@ -137,6 +189,26 @@ export default function AdminWithdrawalsPage() {
           {list.map((w) => (
             <WithdrawalRow key={w.id} w={w} onAction={() => query.refresh()} />
           ))}
+          {canLoadMore && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="text-center text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </div>
       )}
     </div>

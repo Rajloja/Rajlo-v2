@@ -18,6 +18,14 @@ import { requireAdmin } from "@/lib/admin-auth";
  *   ?direction=credit|debit|all
  *   ?q=<user name>                 (matches profiles.full_name)
  *   ?limit=200                      (max 500)
+ *   ?offset=0                       (paginates the list only — the
+ *                                    aggregates/series/top-users are
+ *                                    always computed over the full
+ *                                    window so they don't shift as
+ *                                    the admin pages)
+ *
+ * Response includes `pagination: { hasMore }` for the transactions
+ * list so the page can show / hide a Load-more button.
  */
 
 const RANGE_DAYS: Record<string, number> = {
@@ -42,6 +50,10 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(
     500,
     Math.max(1, Number(url.searchParams.get("limit") ?? 200)),
+  );
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset") ?? 0) || 0,
   );
 
   const days = RANGE_DAYS[range] ?? 30;
@@ -151,14 +163,16 @@ export async function GET(request: NextRequest) {
     count: userTotals.get(id)?.count ?? 0,
   }));
 
-  // ─── Filterable transactions list.
+  // ─── Filterable transactions list — paged via offset.
+  // Over-fetch by one row so we can surface `hasMore` without a
+  // separate count query against the same filtered set.
   let listQuery = supabase
     .from("wallet_transactions")
     .select(
       "id, user_id, direction, amount_jmd, kind, ride_id, related_user_id, description, balance_after_jmd, created_at",
     )
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
   if (sinceIso) listQuery = listQuery.gte("created_at", sinceIso);
   if (kindFilter !== "all") listQuery = listQuery.eq("kind", kindFilter);
   if (directionFilter === "credit" || directionFilter === "debit") {
@@ -180,20 +194,24 @@ export async function GET(request: NextRequest) {
         topSpenders,
         topEarners,
         transactions: [],
+        pagination: { hasMore: false },
         usersById: {},
       });
     }
     listQuery = listQuery.in("user_id", ids);
   }
 
-  const { data: txns, error: listError } = await listQuery;
+  const { data: txnsRaw, error: listError } = await listQuery;
+  const txns = txnsRaw ?? [];
+  const hasMore = txns.length > limit;
+  const pageTxns = hasMore ? txns.slice(0, limit) : txns;
   if (listError) {
     return NextResponse.json({ error: listError.message }, { status: 500 });
   }
 
   // Hydrate user names + roles for the list.
   const listUserIds = Array.from(
-    new Set((txns ?? []).map((t) => t.user_id as string)),
+    new Set(pageTxns.map((t) => t.user_id as string)),
   );
   const { data: listProfiles } = listUserIds.length
     ? await supabase
@@ -214,7 +232,7 @@ export async function GET(request: NextRequest) {
     dailySeries,
     topSpenders,
     topEarners,
-    transactions: (txns ?? []).map((t) => ({
+    transactions: pageTxns.map((t) => ({
       id: t.id,
       userId: t.user_id,
       direction: t.direction,
@@ -224,6 +242,7 @@ export async function GET(request: NextRequest) {
       balanceAfterJmd: t.balance_after_jmd,
       createdAt: t.created_at,
     })),
+    pagination: { hasMore },
     usersById,
   });
 }

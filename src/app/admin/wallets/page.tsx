@@ -29,6 +29,7 @@ type WalletRow = {
 
 type WalletsResponse = {
   wallets: WalletRow[];
+  pagination?: { hasMore: boolean };
   totals: {
     total: number;
     riders: number;
@@ -52,17 +53,67 @@ export default function AdminWalletsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const PAGE_SIZE = 200;
   const url = (() => {
     const sp = new URLSearchParams();
     if (role !== "all") sp.set("role", role);
     if (debouncedSearch) sp.set("q", debouncedSearch);
     sp.set("sort", sort);
-    sp.set("limit", "200");
+    sp.set("limit", String(PAGE_SIZE));
+    sp.set("offset", "0");
     return `/api/admin/wallets?${sp.toString()}`;
   })();
 
   const query = useLiveQuery<WalletsResponse>(url, { interval: 30_000 });
   const totals = query.data?.totals;
+
+  // Pagination state — same pattern as other admin lists.
+  const [extraWallets, setExtraWallets] = useState<WalletRow[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtraWallets([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPageWallets = query.data?.wallets ?? [];
+  const firstPageIds = new Set(firstPageWallets.map((w) => w.userId));
+  const wallets: WalletRow[] = [
+    ...firstPageWallets,
+    ...extraWallets.filter((w) => !firstPageIds.has(w.userId)),
+  ];
+  const canLoadMore =
+    extraWallets.length === 0
+      ? (query.data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(wallets.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as WalletsResponse;
+      setExtraWallets((prev) => {
+        const seen = new Set([
+          ...firstPageWallets.map((w) => w.userId),
+          ...prev.map((w) => w.userId),
+        ]);
+        return [...prev, ...json.wallets.filter((w) => !seen.has(w.userId))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-2 py-4 md:px-3 md:py-8">
@@ -166,39 +217,61 @@ export default function AdminWalletsPage() {
                 <Skeleton key={i} className="h-16 w-full" rounded="xl" />
               ))}
             </div>
-          ) : (query.data?.wallets ?? []).length === 0 ? (
+          ) : wallets.length === 0 ? (
             <p className="py-16 text-center text-sm font-bold text-muted">
               No wallets match those filters.
             </p>
           ) : (
-            <ul className="divide-y divide-line">
-              {(query.data?.wallets ?? []).map((w) => (
-                <li key={w.userId}>
-                  <Link
-                    href={`/admin/wallets/${w.userId}`}
-                    className="grid grid-cols-1 items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-soft md:grid-cols-[2fr,1fr,auto] md:px-5 md:py-4"
+            <>
+              <ul className="divide-y divide-line">
+                {wallets.map((w) => (
+                  <li key={w.userId}>
+                    <Link
+                      href={`/admin/wallets/${w.userId}`}
+                      className="grid grid-cols-1 items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-soft md:grid-cols-[2fr,1fr,auto] md:px-5 md:py-4"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold tracking-tight">
+                          {w.fullName}
+                        </p>
+                        <p className="truncate text-[11px] text-muted">
+                          {w.email ?? "no email"} ·{" "}
+                          <span className="font-bold uppercase">{w.role}</span>
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted md:text-right">
+                        {w.updatedAt
+                          ? `Active ${ago(w.updatedAt)}`
+                          : "No transactions"}
+                      </p>
+                      <p className="text-right text-base font-extrabold tracking-tight text-rajlo-red md:text-lg">
+                        {formatJMD(w.balanceJmd)}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {canLoadMore && (
+                <div className="border-t border-line bg-surface-soft py-3 text-center">
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-extrabold tracking-tight">
-                        {w.fullName}
-                      </p>
-                      <p className="truncate text-[11px] text-muted">
-                        {w.email ?? "no email"} ·{" "}
-                        <span className="font-bold uppercase">{w.role}</span>
-                      </p>
-                    </div>
-                    <p className="text-xs text-muted md:text-right">
-                      {w.updatedAt
-                        ? `Active ${ago(w.updatedAt)}`
-                        : "No transactions"}
-                    </p>
-                    <p className="text-right text-base font-extrabold tracking-tight text-rajlo-red md:text-lg">
-                      {formatJMD(w.balanceJmd)}
-                    </p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                    {loadingMore ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                    ) : null}
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                </div>
+              )}
+              {loadMoreError && (
+                <p className="border-t border-line bg-primary-soft px-5 py-2 text-xs font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+            </>
           )}
         </div>
       </FadeUp>

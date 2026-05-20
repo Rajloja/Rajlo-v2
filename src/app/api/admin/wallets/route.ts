@@ -12,6 +12,11 @@ import { requireAdmin } from "@/lib/admin-auth";
  *   ?q=<search>                matches name or email
  *   ?sort=balance|newest        default: balance desc
  *   ?limit=100 (max 200)
+ *   ?offset=0
+ *
+ * Response carries `pagination.hasMore` (the page slice doesn't
+ * exhaust the in-memory result set) and `totals` computed across the
+ * full filtered set, not just the page.
  */
 
 type WalletRow = {
@@ -36,6 +41,7 @@ export async function GET(request: NextRequest) {
     200,
     Math.max(10, parseInt(sp.get("limit") ?? "100", 10) || 100),
   );
+  const offset = Math.max(0, parseInt(sp.get("offset") ?? "0", 10) || 0);
 
   // Pull profiles + wallets — outer-join so users without a wallet
   // row yet (haven't transacted) still surface with balance 0.
@@ -126,8 +132,12 @@ export async function GET(request: NextRequest) {
       .reduce((s, r) => s + r.balanceJmd, 0),
   };
 
+  const page = rows.slice(offset, offset + limit);
+  const hasMore = rows.length > offset + limit;
+
   return NextResponse.json({
-    wallets: rows.slice(0, limit),
+    wallets: page,
+    pagination: { hasMore },
     totals,
   });
 }

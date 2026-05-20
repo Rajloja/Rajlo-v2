@@ -40,6 +40,10 @@ export async function GET(request: Request) {
     MAX_LIMIT,
     Math.max(1, Number(url.searchParams.get("limit")) || DEFAULT_LIMIT),
   );
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset")) || 0,
+  );
 
   const { data: ratings, error } = await supabase
     .from("ride_ratings")
@@ -47,13 +51,15 @@ export async function GET(request: Request) {
     .eq("rater_id", user.id)
     .eq("rater_role", "rider")
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const list = ratings ?? [];
+  const fetched = ratings ?? [];
+  const hasMore = fetched.length > limit;
+  const list = hasMore ? fetched.slice(0, limit) : fetched;
 
   // Bulk-enrich with the trip + driver context. Two cheap lookups,
   // not N+1 — we resolve all ride_ids in one query and all rated user
@@ -135,5 +141,6 @@ export async function GET(request: Request) {
         tripCompletedAt: ride?.completed_at ?? null,
       };
     }),
+    pagination: { hasMore },
   });
 }

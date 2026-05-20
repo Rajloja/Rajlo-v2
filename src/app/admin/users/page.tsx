@@ -66,12 +66,14 @@ export default function AdminUsersPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const PAGE_SIZE = 100;
   const usersUrl = (() => {
     const params = new URLSearchParams();
     params.set("role", roleFilter);
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (debouncedSearch) params.set("q", debouncedSearch);
-    params.set("limit", "100");
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", "0");
     return `/api/admin/users?${params.toString()}`;
   })();
 
@@ -81,16 +83,58 @@ export default function AdminUsersPage() {
     usersUrl,
     { interval: 30_000 },
   );
-  // Memoise the derived array so downstream useMemo (counts) gets a
-  // stable reference and only recomputes when the query data flips.
-  const users = useMemo(
-    () => usersQuery.data?.users ?? [],
-    [usersQuery.data?.users],
-  );
+
+  // Pagination — `usersQuery` owns the live first page; older rows
+  // loaded via "Load more" accumulate in `extraUsers` so the 30-second
+  // refresh doesn't wipe them. Reset whenever the underlying URL
+  // (filters, search) changes — those are a different result set.
+  const [extraUsers, setExtraUsers] = useState<UserRow[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtraUsers([]);
+    setLoadMoreError(null);
+  }, [usersUrl]);
+
+  // Merge live first-page + accumulated extras, dedupe by id in case
+  // a refresh shifts a boundary row into both halves.
+  const firstPage = usersQuery.data?.users ?? [];
+  const users = useMemo(() => {
+    const firstIds = new Set(firstPage.map((u) => u.id));
+    return [...firstPage, ...extraUsers.filter((u) => !firstIds.has(u.id))];
+    // Recompute when the live first page or the extras change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usersQuery.data?.users, extraUsers]);
   const total = usersQuery.data?.total ?? users.length;
+  const hasMore = users.length < total;
   const loading = usersQuery.loading;
   const error = usersQuery.error;
   const reload = usersQuery.refresh;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(usersUrl, window.location.origin);
+      next.searchParams.set("offset", String(users.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { users: UserRow[] };
+      setExtraUsers((prev) => {
+        const seen = new Set([
+          ...firstPage.map((u) => u.id),
+          ...prev.map((u) => u.id),
+        ]);
+        return [...prev, ...json.users.filter((u) => !seen.has(u.id))];
+      });
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const counts = useMemo(() => {
     return {
@@ -321,9 +365,29 @@ export default function AdminUsersPage() {
             </ul>
           )}
           {!loading && users.length > 0 && (
-            <div className="border-t border-line bg-surface-soft px-5 py-3 text-xs font-semibold text-muted">
-              Showing {users.length} of {total} matching users
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface-soft px-5 py-3 text-xs font-semibold text-muted">
+              <span>
+                Showing {users.length} of {total} matching users
+              </span>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  ) : null}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
             </div>
+          )}
+          {loadMoreError && (
+            <p className="border-t border-line bg-primary-soft px-5 py-2 text-xs font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
           )}
         </div>
       </FadeUp>

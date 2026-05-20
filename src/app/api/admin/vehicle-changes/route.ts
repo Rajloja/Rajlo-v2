@@ -41,13 +41,25 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get("status") ?? "pending";
+  const limit = Math.min(
+    200,
+    Math.max(
+      10,
+      parseInt(url.searchParams.get("limit") ?? "100", 10) || 100,
+    ),
+  );
+  const offset = Math.max(
+    0,
+    parseInt(url.searchParams.get("offset") ?? "0", 10) || 0,
+  );
 
   let query = supabase
     .from("vehicle_change_requests")
     .select(
       "id, driver_id, status, requested_type, requested_brand, requested_model, requested_year, requested_color, requested_plate, note, admin_note, submitted_at, reviewed_at, insurance_path, registration_path, cof_path",
     )
-    .order("submitted_at", { ascending: true });
+    .order("submitted_at", { ascending: true })
+    .range(offset, offset + limit);
   if (statusFilter !== "all") {
     query = query.eq("status", statusFilter);
   }
@@ -58,7 +70,9 @@ export async function GET(request: Request) {
   }
 
   // Bulk-enrich with driver names + current vehicle.
-  const list = requests ?? [];
+  const fetched = requests ?? [];
+  const hasMore = fetched.length > limit;
+  const list = hasMore ? fetched.slice(0, limit) : fetched;
   const driverIds = Array.from(new Set(list.map((r) => r.driver_id)));
   const driversById = new Map<
     string,
@@ -127,5 +141,6 @@ export async function GET(request: Request) {
           : null,
       };
     }),
+    pagination: { hasMore },
   });
 }

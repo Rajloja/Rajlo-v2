@@ -7,13 +7,21 @@ import { requireAdmin } from "@/lib/admin-auth";
  * Withdrawal queue for the admin's payouts page. Defaults to
  * pending requests; pass `?status=` to widen the view (paid,
  * rejected, all).
+ *
+ * Pagination: over-fetches by one to surface `pagination.hasMore`.
  */
 export async function GET(request: NextRequest) {
   const gate = await requireAdmin();
   if (gate.error) return gate.error;
   const { supabase } = gate;
 
-  const status = request.nextUrl.searchParams.get("status") ?? "pending";
+  const sp = request.nextUrl.searchParams;
+  const status = sp.get("status") ?? "pending";
+  const limit = Math.min(
+    200,
+    Math.max(10, parseInt(sp.get("limit") ?? "100", 10) || 100),
+  );
+  const offset = Math.max(0, parseInt(sp.get("offset") ?? "0", 10) || 0);
 
   let query = supabase
     .from("wallet_withdrawals")
@@ -21,7 +29,7 @@ export async function GET(request: NextRequest) {
       "id, user_id, amount_jmd, bank_name, bank_account_number, account_holder_name, status, admin_note, reviewed_by, reviewed_at, paid_at, created_at",
     )
     .order("created_at", { ascending: false })
-    .limit(100);
+    .range(offset, offset + limit);
 
   if (status !== "all") query = query.eq("status", status);
 
@@ -40,7 +48,9 @@ export async function GET(request: NextRequest) {
     paid_at: string | null;
     created_at: string;
   };
-  const list = (rows ?? []) as Row[];
+  const fetched = (rows ?? []) as Row[];
+  const hasMore = fetched.length > limit;
+  const list = hasMore ? fetched.slice(0, limit) : fetched;
 
   // Hydrate the driver display name + email + driver external id.
   const userIds = Array.from(new Set(list.map((r) => r.user_id)));
@@ -82,5 +92,6 @@ export async function GET(request: NextRequest) {
       paidAt: r.paid_at,
       createdAt: r.created_at,
     })),
+    pagination: { hasMore },
   });
 }

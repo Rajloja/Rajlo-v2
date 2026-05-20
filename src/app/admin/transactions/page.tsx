@@ -61,6 +61,7 @@ type Response = {
   topSpenders: UserStat[];
   topEarners: UserStat[];
   transactions: Txn[];
+  pagination?: { hasMore: boolean };
   usersById: Record<string, { name: string; role: string }>;
 };
 
@@ -102,12 +103,15 @@ export default function AdminTransactionsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const PAGE_SIZE = 200;
   const url = useMemo(() => {
     const params = new URLSearchParams();
     params.set("range", range);
     if (kindFilter !== "all") params.set("kind", kindFilter);
     if (directionFilter !== "all") params.set("direction", directionFilter);
     if (debouncedSearch) params.set("q", debouncedSearch);
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", "0");
     return `/api/admin/transactions?${params.toString()}`;
   }, [range, kindFilter, directionFilter, debouncedSearch]);
 
@@ -115,6 +119,59 @@ export default function AdminTransactionsPage() {
   const query = useLiveQuery<Response>(url, { interval: 30_000 });
   const data = query.data;
   const loading = !data && !query.error;
+
+  // Pagination — `extraTxns` holds older pages loaded via "Load more"
+  // so the 30s live refresh of the first page doesn't wipe them.
+  // Reset whenever the underlying URL (filters / range / search)
+  // changes — that's a different result set.
+  const [extraTxns, setExtraTxns] = useState<Txn[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtraTxns([]);
+    setHasMoreOlder(true);
+    setLoadMoreError(null);
+  }, [url]);
+
+  const firstPageTxns: Txn[] = data?.transactions ?? [];
+  const firstPageIds = new Set(firstPageTxns.map((t) => t.id));
+  const mergedTxns: Txn[] = [
+    ...firstPageTxns,
+    ...extraTxns.filter((t) => !firstPageIds.has(t.id)),
+  ];
+  // First page's hasMore drives the button until older pages are
+  // loaded; after that the last loadMore response's value takes over.
+  const canLoadMore =
+    extraTxns.length === 0
+      ? (data?.pagination?.hasMore ?? false)
+      : hasMoreOlder;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = new URL(url, window.location.origin);
+      next.searchParams.set("offset", String(mergedTxns.length));
+      const res = await fetch(next.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as Response;
+      setExtraTxns((prev) => {
+        const seen = new Set([
+          ...firstPageTxns.map((t) => t.id),
+          ...prev.map((t) => t.id),
+        ]);
+        return [...prev, ...json.transactions.filter((t) => !seen.has(t.id))];
+      });
+      setHasMoreOlder(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const inSeries: AreaPoint[] = useMemo(
     () =>
@@ -367,17 +424,17 @@ export default function AdminTransactionsPage() {
         </div>
       )}
 
-      {data && data.transactions.length === 0 && !loading && (
+      {data && mergedTxns.length === 0 && !loading && (
         <div className="rounded-2xl border border-dashed border-line bg-surface-soft p-10 text-center">
           <p className="text-sm font-bold">No transactions match these filters</p>
         </div>
       )}
 
-      {data && data.transactions.length > 0 && (
+      {data && mergedTxns.length > 0 && (
         <>
           {/* Mobile: cards */}
           <ul className="space-y-2.5 md:hidden">
-            {data.transactions.map((t) => (
+            {mergedTxns.map((t) => (
               <li
                 key={t.id}
                 className="rounded-2xl border border-line bg-surface p-4"
@@ -424,7 +481,7 @@ export default function AdminTransactionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.transactions.map((t, i) => (
+                {mergedTxns.map((t, i) => (
                   <tr key={t.id} className={i > 0 ? "border-t border-line" : ""}>
                     <td className="px-4 py-3 text-[11px] text-muted">
                       {ago(t.createdAt)}
@@ -463,6 +520,28 @@ export default function AdminTransactionsPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Load more — common to both mobile + desktop renders. */}
+          {canLoadMore && (
+            <div className="pt-3 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMore ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                ) : null}
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+          {loadMoreError && (
+            <p className="pt-2 text-center text-[11px] font-semibold text-rajlo-red">
+              {loadMoreError}
+            </p>
+          )}
         </>
       )}
     </div>

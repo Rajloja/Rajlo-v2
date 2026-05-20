@@ -45,6 +45,10 @@ type Payload = {
   admins: Admin[];
   accessLogs: AccessLog[];
   securityEvents: SecurityEvent[];
+  pagination?: {
+    hasMoreAccessLogs: boolean;
+    hasMoreSecurityEvents: boolean;
+  };
 };
 
 const SEVERITY_STYLE: Record<string, string> = {
@@ -315,6 +319,12 @@ export default function AdminSecurityPage() {
                 <p className="mt-1.5 text-sm">{ev.description}</p>
               </li>
             ))}
+            {data?.pagination?.hasMoreSecurityEvents && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                Older security events not shown — see the audit log for
+                the full history.
+              </li>
+            )}
           </ul>
         )}
       </section>
@@ -348,6 +358,12 @@ export default function AdminSecurityPage() {
                 </span>
               </li>
             ))}
+            {data?.pagination?.hasMoreAccessLogs && (
+              <li className="px-4 py-2 text-center text-[11px] font-semibold text-muted">
+                Older access entries not shown — see the audit log for
+                the full history.
+              </li>
+            )}
           </ul>
         )}
       </section>

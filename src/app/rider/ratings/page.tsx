@@ -36,25 +36,34 @@ type RatingRow = {
   tripCompletedAt: string | null;
 };
 
+const PAGE_SIZE = 30;
+
 export default function RiderRatingsPage() {
   const [summary, setSummary] = useState<RatingsSummary | null>(null);
   const [ratings, setRatings] = useState<RatingRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/rider/ratings");
+        const res = await fetch(
+          `/api/rider/ratings?limit=${PAGE_SIZE}&offset=0`,
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as {
           summary: RatingsSummary;
           ratings: RatingRow[];
+          pagination?: { hasMore: boolean };
         };
         if (cancelled) return;
         setSummary(json.summary);
         setRatings(json.ratings);
+        setHasMore(json.pagination?.hasMore ?? false);
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Couldn't load ratings");
@@ -66,6 +75,32 @@ export default function RiderRatingsPage() {
       cancelled = true;
     };
   }, []);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/rider/ratings?limit=${PAGE_SIZE}&offset=${ratings.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        ratings: RatingRow[];
+        pagination?: { hasMore: boolean };
+      };
+      setRatings((prev) => {
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...json.ratings.filter((r) => !seen.has(r.id))];
+      });
+      setHasMore(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (loading) {
     // Hero + distribution chart placeholder + recent-ratings list
@@ -264,6 +299,26 @@ export default function RiderRatingsPage() {
                 <RatingRow row={r} />
               </FadeUp>
             ))}
+            {hasMore && (
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  ) : null}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              </div>
+            )}
+            {loadMoreError && (
+              <p className="text-center text-xs font-semibold text-rajlo-red">
+                {loadMoreError}
+              </p>
+            )}
           </div>
         </div>
       )}

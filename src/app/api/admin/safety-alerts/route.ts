@@ -51,8 +51,14 @@ export async function GET(request: NextRequest) {
   }
 
   const alerts = rows ?? [];
+  const total = count ?? 0;
+  const hasMore = offset + alerts.length < total;
   if (alerts.length === 0) {
-    return NextResponse.json({ alerts: [], total: count ?? 0 });
+    return NextResponse.json({
+      alerts: [],
+      total,
+      pagination: { hasMore: false },
+    });
   }
 
   // Hydrate rider display names + ride context in two batched queries.
@@ -99,5 +105,9 @@ export async function GET(request: NextRequest) {
     ride: rideMap.get(a.ride_id as string) ?? null,
   }));
 
-  return NextResponse.json({ alerts: hydrated, total: count ?? 0 });
+  return NextResponse.json({
+    alerts: hydrated,
+    total,
+    pagination: { hasMore },
+  });
 }
