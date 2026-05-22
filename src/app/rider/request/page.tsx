@@ -1002,7 +1002,10 @@ export default function RiderRequestPage() {
                         <Icon name="navigation" className="h-4 w-4" />
                       </span>
                       <span className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                        Route Taxi · {journeyQuote.legCount} legs
+                        Route Taxi
+                        {journeyQuote.legCount > 1
+                          ? ` · ${journeyQuote.legCount} legs`
+                          : ""}
                       </span>
                     </div>
                     <p className="text-base font-extrabold tracking-tight">
@@ -1018,15 +1021,58 @@ export default function RiderRequestPage() {
                         → {journeyQuote.legs[journeyQuote.legs.length - 1].destination}
                       </span>
                       <br />
-                      {journeyQuote.totalDistanceKm.toFixed(1)} km · scan to
-                      transfer between legs
+                      {journeyQuote.totalDistanceKm.toFixed(1)} km
+                      {journeyQuote.legCount > 1
+                        ? " · scan to transfer between legs"
+                        : ""}
                     </p>
+                    {/* Snap-distance hints — surface the gap between
+                        what the rider TYPED and where the route taxi
+                        actually boards / alights. Without this the
+                        rider could pick a JMD $410 route-taxi vs a
+                        JMD $14,950 private-ride card thinking they
+                        cover the same trip — but the route taxi may
+                        be heading to a different parish entirely. */}
+                    {(journeyQuote.pickupSnap || journeyQuote.dropoffSnap) && (
+                      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200">
+                        <Icon
+                          name="alert-triangle"
+                          className="mr-1 inline h-2.5 w-2.5"
+                        />
+                        {journeyQuote.pickupSnap && (
+                          <>
+                            Walk {journeyQuote.pickupSnap.walkKm.toFixed(1)} km
+                            to board at{" "}
+                            <span className="font-extrabold">
+                              {journeyQuote.pickupSnap.endpoint}
+                            </span>
+                          </>
+                        )}
+                        {journeyQuote.pickupSnap &&
+                          journeyQuote.dropoffSnap &&
+                          " · "}
+                        {journeyQuote.dropoffSnap && (
+                          <>
+                            walk{" "}
+                            {journeyQuote.dropoffSnap.walkKm.toFixed(1)} km
+                            from{" "}
+                            <span className="font-extrabold">
+                              {journeyQuote.dropoffSnap.endpoint}
+                            </span>{" "}
+                            to dropoff
+                          </>
+                        )}
+                      </p>
+                    )}
                   </button>
                 )}
             </div>
 
             {/* Hint when neither a direct corridor nor a multi-leg
-                path can serve this trip — Private is the only option. */}
+                path can serve this trip — Private is the only option.
+                Different copy for "matcher returned nothing AND
+                pathfinder snap failed" so the rider knows it isn't a
+                bug, it's geography. */}
             {filledStops.length === 0 &&
               !matching &&
               !journeyQuoting &&
@@ -1034,8 +1080,8 @@ export default function RiderRequestPage() {
               matches.length === 0 &&
               !journeyQuote && (
                 <p className="mt-2 rounded-xl bg-surface-soft px-3 py-2 text-[11px] text-muted">
-                  No route taxi covers this trip yet — Private Ride is your
-                  option.
+                  No TA route taxi corridor reaches that pickup or dropoff
+                  within walking distance — Private Ride is your option.
                 </p>
               )}
 

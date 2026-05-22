@@ -27,8 +27,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculateRouteFare, calculateConcessionFare } from "@/lib/fare-engine";
 import { haversineKm } from "@/lib/jamaica";
 
-/** Snap radius — how far a rider may walk to reach a corridor head. */
-export const MAX_SNAP_KM = 5;
+/** Snap radius — how far a rider may walk to reach a corridor head.
+ *  8 km is the realistic upper bound for "walk to the route taxi
+ *  stand": rural Hanover/Westmoreland have endpoints sparsely spaced
+ *  and 5 km would silently fail trips where the rider is reasonably
+ *  close to a corridor head but just outside the tight radius. */
+export const MAX_SNAP_KM = 8;
 
 /** Hard cap on path length so we don't return absurd 6-transfer chains. */
 export const MAX_LEGS = 4;
@@ -346,8 +350,15 @@ export async function findRouteTaxiPath(
 
   for (const start of startCandidates) {
     for (const end of endCandidates) {
+      // Skip degenerate "stand still" candidates. When pickup and
+      // dropoff snap to the same endpoint, Dijkstra returns an empty
+      // path which scores below every real path and silently wins —
+      // the rider then sees a 0-leg, $0 journey, which is useless.
+      // A rider hailing for transport must actually ride at least
+      // one corridor.
+      if (start.key === end.key) continue;
       const path = dijkstra(graph, start.key, end.key, maxLegs);
-      if (!path) continue;
+      if (!path || path.length === 0) continue;
       const fareJmd = path.reduce((s, e) => s + e.fareJmd, 0);
       // Penalise the walk slightly so a 100m-walk + 1-leg trip beats
       // a 4km-walk + 1-leg trip if both fares match. ~$50 per walked
