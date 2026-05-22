@@ -3,6 +3,10 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { notifyDriver } from "@/lib/notify";
 import { sendRiderHailAcceptedEmail } from "@/lib/email-templates";
+import {
+  findActiveSessionByPickupCode,
+  normalizePickupCode,
+} from "@/lib/route-taxi-pickup-code";
 
 /**
  * POST /api/rider/route-taxi/hails/[id]/scan
@@ -33,7 +37,7 @@ import { sendRiderHailAcceptedEmail } from "@/lib/email-templates";
  * second write returns 0 rows and we 409 the loser.
  */
 
-type Body = { sessionId?: unknown };
+type Body = { sessionId?: unknown; code?: unknown };
 
 export async function POST(
   request: Request,
@@ -49,11 +53,15 @@ export async function POST(
   }
 
   const body = (await request.json().catch(() => ({}))) as Body;
-  const sessionId =
+  const rawSessionId =
     typeof body.sessionId === "string" ? body.sessionId.trim() : "";
-  if (!sessionId) {
+  const rawCode = typeof body.code === "string" ? body.code.trim() : "";
+  if (!rawSessionId && !rawCode) {
     return NextResponse.json(
-      { error: "sessionId is required (from the driver's QR)." },
+      {
+        error:
+          "Provide `sessionId` (from the driver's QR) or `code` (the 4-character pickup code).",
+      },
       { status: 400 },
     );
   }
@@ -64,6 +72,40 @@ export async function POST(
       { error: "Service role not configured" },
       { status: 500 },
     );
+  }
+
+  // Resolve a session id — either passed directly from a QR scan, or
+  // looked up from the 4-character manual-entry code. The code path
+  // queries by `(pickup_code, status='active')` so an ended session's
+  // recycled code can't accidentally claim a hail.
+  let sessionId = rawSessionId;
+  if (!sessionId && rawCode) {
+    const normalized = normalizePickupCode(rawCode);
+    if (!normalized) {
+      return NextResponse.json(
+        {
+          error: "invalid_code",
+          message:
+            "Pickup codes are 4 characters, letters or numbers — check the driver's screen.",
+        },
+        { status: 400 },
+      );
+    }
+    const sessionByCode = await findActiveSessionByPickupCode(
+      supabase,
+      normalized,
+    );
+    if (!sessionByCode) {
+      return NextResponse.json(
+        {
+          error: "code_not_found",
+          message:
+            "No active driver matches that code — confirm it with the driver and try again.",
+        },
+        { status: 404 },
+      );
+    }
+    sessionId = sessionByCode.id;
   }
 
   // 1. Load the hail. Ownership-gated so a stale id from another

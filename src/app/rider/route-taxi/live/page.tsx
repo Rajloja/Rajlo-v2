@@ -10,6 +10,8 @@ import { Skeleton } from "@/components/skeleton";
 import { MapView } from "@/components/map-view";
 import { HailChatSheet } from "@/components/hail-chat-sheet";
 import { extractSessionId } from "@/components/session-qr";
+import { playScanBeep } from "@/lib/play-scan-beep";
+import { normalizePickupCode } from "@/lib/route-taxi-pickup-code";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useSelfGpsPosition } from "@/lib/use-self-gps";
 import { formatJMD, type Place } from "@/lib/jamaica";
@@ -1331,7 +1333,7 @@ function ScanToStartPanel({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const scan = useCallback(
-    async (sessionId: string) => {
+    async (input: { sessionId?: string; code?: string }) => {
       setSubmitting(true);
       setErrorMessage(null);
       try {
@@ -1340,7 +1342,7 @@ function ScanToStartPanel({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId }),
+            body: JSON.stringify(input),
           },
         );
         const json = (await res.json().catch(() => ({}))) as {
@@ -1353,6 +1355,10 @@ function ScanToStartPanel({
             json.message ?? json.error ?? "Couldn't start the trip.",
           );
         }
+        // Both phones chirp the same tone — driver's pickup modal
+        // hears the matching beep when their status flips, so the
+        // handshake is audibly confirmed on both ends.
+        playScanBeep();
         setScannerOpen(false);
         setManualId("");
         onStarted();
@@ -1419,20 +1425,36 @@ function ScanToStartPanel({
             <input
               type="text"
               value={manualId}
-              onChange={(e) => setManualId(e.target.value)}
-              placeholder="Session UUID from driver's screen"
-              className="rounded-xl border border-line bg-white px-3 py-2 text-xs"
+              onChange={(e) =>
+                setManualId(e.target.value.toUpperCase().slice(0, 4))
+              }
+              placeholder="4-char code · e.g. AB7K"
+              autoComplete="off"
+              autoCapitalize="characters"
+              maxLength={4}
+              className="rounded-xl border border-line bg-white px-3 py-2 text-center font-mono text-base font-extrabold tracking-[0.4em] uppercase"
             />
             <button
               type="button"
               disabled={submitting || !manualId.trim()}
               onClick={() => {
+                // Two paths: rider may paste a full session UUID
+                // (debug / power user), or type the 4-char code
+                // from the driver's modal. Try the code first
+                // since that's the documented happy path.
+                const code = normalizePickupCode(manualId);
+                if (code) {
+                  void scan({ code });
+                  return;
+                }
                 const sid = extractSessionId(manualId);
-                if (sid) void scan(sid);
-                else
-                  setErrorMessage(
-                    "That doesn't look like a session code.",
-                  );
+                if (sid) {
+                  void scan({ sessionId: sid });
+                  return;
+                }
+                setErrorMessage(
+                  "That doesn't look like a valid 4-character pickup code.",
+                );
               }}
               className="rounded-full bg-rajlo-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
             >
@@ -1445,7 +1467,7 @@ function ScanToStartPanel({
         <SessionScannerModal
           onClose={() => setScannerOpen(false)}
           onDetected={(sid) => {
-            void scan(sid);
+            void scan({ sessionId: sid });
           }}
           claiming={submitting}
         />

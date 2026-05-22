@@ -11,6 +11,7 @@ import { FadeUp, Stagger, StaggerItem } from "@/components/anim";
 import { ListRowSkeleton, Skeleton } from "@/components/skeleton";
 import { SessionQr } from "@/components/session-qr";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
+import { playScanBeep } from "@/lib/play-scan-beep";
 import { formatJMD } from "@/lib/jamaica";
 
 /**
@@ -54,6 +55,10 @@ type ActiveSession = {
   seatsRemaining: number;
   status: string;
   startedAt: string;
+  /** 4-char manual-entry code for riders whose camera can't scan
+   *  the session QR. Null on legacy sessions started before the
+   *  pickup_code column was added — those still work via QR scan. */
+  pickupCode?: string | null;
   route: {
     id: string;
     origin: string;
@@ -921,6 +926,13 @@ function ActiveSessionMonitor({
     riderAvatarUrl: string | null;
   } | null>(null);
 
+  // One pickup-QR modal, opens for the accepted hail the driver is
+  // about to board. Hold just the hail id; the modal reads the rest
+  // (status, rider info) off the live `accepted`/`onboard` arrays so
+  // it auto-flips to the success state the moment the rider's scan
+  // moves the row from accepted → onboard.
+  const [pickupHailId, setPickupHailId] = useState<string | null>(null);
+
   // Pick the next-action target so the driver always sees ONE clear
   // pin to head toward (matches the live-trip page's single-driver-
   // single-rider model). Priority:
@@ -1120,34 +1132,88 @@ function ActiveSessionMonitor({
         </section>
       </FadeUp>
 
-      {/* Boarding QR — every rider scans this to start their trip,
-         not just multi-leg transfer riders. Driver self-tap on
-         "picked up" is gone; the rider's scan is the only path to
-         `picked_up` state. Hidden when the vehicle is full because
-         no one new can board. */}
-      {session.seatsTaken < session.vehicleCapacity && (
-        <FadeUp delay={0.04}>
-          <section className="rounded-3xl border border-line bg-surface">
-            <div className="grid gap-4 p-5 md:grid-cols-[auto_1fr] md:items-center md:gap-6 md:p-6">
-              <SessionQr sessionId={session.id} size={140} />
-              <div className="min-w-0">
-                <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                  Boarding
-                </p>
-                <h2 className="mt-1 text-lg font-extrabold tracking-tight">
-                  Every rider scans this to start the trip
-                </h2>
-                <p className="mt-2 text-sm text-muted">
-                  Show this code when a rider opens your door. Their
-                  scan starts the trip and you get a notification —
-                  no &quot;picked up&quot; button to tap. Wallet only
-                  moves at trip completion.
-                </p>
-              </div>
-            </div>
+      {/* ACCEPTED — hails the driver has claimed but the rider hasn't
+         scanned yet. Sits directly under the corridor's pending list
+         so the driver's eye flows: "who's available → who am I
+         already going to pick up". Each row carries the
+         "Waiting for rider to scan" pill since drivers no longer
+         self-confirm pickup. */}
+      {accepted.length > 0 && (
+        <FadeUp delay={0.03}>
+          <section>
+            <SectionHeader
+              eyebrow="On the way"
+              title={`${accepted.length} pickup${accepted.length === 1 ? "" : "s"} pending`}
+            />
+            <ul className="mt-3 space-y-2.5">
+              {accepted.map((h) => (
+                <li
+                  key={h.id}
+                  className="rounded-2xl border border-amber-200 bg-amber-50 p-4"
+                >
+                  {h.rider && (
+                    <RiderBadge
+                      rider={h.rider}
+                      pickupLat={h.pickupLat}
+                      pickupLng={h.pickupLng}
+                      tone="amber"
+                      onMessage={() =>
+                        setChatHail({
+                          id: h.id,
+                          riderName: h.rider?.name ?? null,
+                          riderAvatarUrl: h.rider?.avatarUrl ?? null,
+                        })
+                      }
+                    />
+                  )}
+                  <div className="mt-3 space-y-3 sm:flex sm:flex-wrap sm:items-start sm:justify-between sm:gap-3 sm:space-y-0">
+                    <div className="min-w-0 sm:flex-1">
+                      <p className="text-sm font-bold text-amber-900">
+                        Pick up at {h.pickup}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-amber-800/80">
+                        Going to {h.dropoff} · {h.distanceKm.toFixed(1)} km ·{" "}
+                        {formatJMD(h.fareJmd)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {/* Tapping "Pick up rider" pops the QR modal.
+                          The rider scans, both phones chirp, and the
+                          modal swaps to a "Start trip" confirmation.
+                          Driver self-tap to picked_up is gone —
+                          the rider's scan is still the only path
+                          into picked_up state on the server. */}
+                      <button
+                        type="button"
+                        onClick={() => setPickupHailId(h.id)}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-amber-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-amber-600/25 transition-all hover:-translate-y-0.5 hover:bg-amber-700 sm:flex-none"
+                      >
+                        <Icon name="check-circle" className="h-3.5 w-3.5" />
+                        Pick up rider
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onTransition(h.id, "cancelled")}
+                        disabled={isPending(h.id, "cancelled")}
+                        className="rounded-full border border-amber-700/30 bg-white px-4 py-2.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </section>
         </FadeUp>
       )}
+
+      {/* Boarding QR is no longer rendered standalone on the page.
+         The QR pops up on demand inside the PickupModal when the
+         driver taps "Pick up rider" on an accepted hail — keeps the
+         session screen clean and makes the action sequence explicit
+         on both ends (driver acts → modal opens → rider scans →
+         beep on both phones → trip starts). */}
 
       {/* Live map — shows the driver's GPS pin + the next-action
          pickup/dropoff so they always know where to head. Mirrors
@@ -1280,75 +1346,6 @@ function ActiveSessionMonitor({
         </FadeUp>
       )}
 
-      {/* ACCEPTED — heading to pickup */}
-      {accepted.length > 0 && (
-        <FadeUp delay={0.06}>
-          <section>
-            <SectionHeader
-              eyebrow="On the way"
-              title={`${accepted.length} pickup${accepted.length === 1 ? "" : "s"} pending`}
-            />
-            <ul className="mt-3 space-y-2.5">
-              {accepted.map((h) => (
-                <li
-                  key={h.id}
-                  className="rounded-2xl border border-amber-200 bg-amber-50 p-4"
-                >
-                  {h.rider && (
-                    <RiderBadge
-                      rider={h.rider}
-                      pickupLat={h.pickupLat}
-                      pickupLng={h.pickupLng}
-                      tone="amber"
-                      onMessage={() =>
-                        setChatHail({
-                          id: h.id,
-                          riderName: h.rider?.name ?? null,
-                          riderAvatarUrl: h.rider?.avatarUrl ?? null,
-                        })
-                      }
-                    />
-                  )}
-                  <div className="mt-3 space-y-3 sm:flex sm:flex-wrap sm:items-start sm:justify-between sm:gap-3 sm:space-y-0">
-                    <div className="min-w-0 sm:flex-1">
-                      <p className="text-sm font-bold text-amber-900">
-                        Pick up at {h.pickup}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-amber-800/80">
-                        Going to {h.dropoff} · {h.distanceKm.toFixed(1)} km ·{" "}
-                        {formatJMD(h.fareJmd)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {/* Drivers no longer self-confirm pickup. The
-                          rider scans the session QR to start the
-                          trip — see the QR card above the hail list.
-                          Status pill here just tells the driver
-                          what they're waiting on. */}
-                      <span
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-amber-700/30 bg-white px-4 py-2.5 text-xs font-bold text-amber-900 sm:flex-none"
-                        title="The rider scans your session QR to start the trip — money only moves at completion."
-                      >
-                        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-                        Waiting for rider to scan
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onTransition(h.id, "cancelled")}
-                        disabled={isPending(h.id, "cancelled")}
-                        className="rounded-full border border-amber-700/30 bg-white px-4 py-2.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </FadeUp>
-      )}
-
       {/* Chat sheet — single instance, opens for whichever hail the
          driver tapped. RLS ensures the driver can only see + send on
          hails attached to their session. */}
@@ -1361,6 +1358,44 @@ function ActiveSessionMonitor({
           counterpartAvatarUrl={chatHail.riderAvatarUrl}
         />
       )}
+
+      {/* Pickup modal — pops up when the driver taps "Pick up rider"
+         on an accepted hail. Shows the session QR for the rider to
+         scan; auto-detects the status flip from accepted → picked_up
+         (via parent re-render) and swaps to the "Start trip" success
+         state with a beep. */}
+      {pickupHailId &&
+        (() => {
+          const acceptedHail = accepted.find((h) => h.id === pickupHailId);
+          const onboardHail = onboard.find((h) => h.id === pickupHailId);
+          // If the hail vanished (rider cancelled, journey aborted),
+          // close the modal next tick.
+          if (!acceptedHail && !onboardHail) {
+            return (
+              <PickupModal
+                sessionId={session.id}
+                pickupCode={session.pickupCode ?? null}
+                hailStatus="missing"
+                rider={null}
+                pickup={null}
+                dropoff={null}
+                onClose={() => setPickupHailId(null)}
+              />
+            );
+          }
+          const live = (onboardHail ?? acceptedHail)!;
+          return (
+            <PickupModal
+              sessionId={session.id}
+              pickupCode={session.pickupCode ?? null}
+              hailStatus={onboardHail ? "picked_up" : "accepted"}
+              rider={live.rider ?? null}
+              pickup={live.pickup}
+              dropoff={live.dropoff}
+              onClose={() => setPickupHailId(null)}
+            />
+          );
+        })()}
     </div>
   );
 }
@@ -1454,6 +1489,162 @@ function RouteTaxiSkeleton() {
         {[0, 1, 2, 3].map((i) => (
           <ListRowSkeleton key={i} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════ Pickup modal ════════════
+ *
+ * Pops up when the driver taps "Pick up rider" on an accepted hail.
+ * Two states:
+ *
+ *   1. `accepted` — rider hasn't scanned yet. Modal renders the
+ *      session QR + a "waiting for rider to scan" pulse.
+ *
+ *   2. `picked_up` — the parent's polling detected the status flip
+ *      (rider's scan endpoint moved the hail from accepted to
+ *      onboard). Modal swaps to a success state, fires a beep, and
+ *      shows a "Start trip" CTA the driver taps to dismiss.
+ *
+ * The actual money-moving + status-changing happens server-side via
+ * the rider's POST to /api/rider/route-taxi/hails/[id]/scan. The
+ * modal is purely a presentation surface — closing it doesn't undo
+ * the pickup.
+ */
+function PickupModal({
+  sessionId,
+  pickupCode,
+  hailStatus,
+  rider,
+  pickup,
+  dropoff,
+  onClose,
+}: {
+  sessionId: string;
+  pickupCode: string | null;
+  hailStatus: "accepted" | "picked_up" | "missing";
+  rider: { name: string | null; avatarUrl: string | null; phone: string | null } | null;
+  pickup: string | null;
+  dropoff: string | null;
+  onClose: () => void;
+}) {
+  // Fire the beep exactly once when status crosses from accepted to
+  // picked_up. A ref-flag guards against double-beeps from React
+  // re-renders.
+  const beepedRef = useRef(false);
+  useEffect(() => {
+    if (hailStatus === "picked_up" && !beepedRef.current) {
+      beepedRef.current = true;
+      playScanBeep();
+    }
+  }, [hailStatus]);
+
+  const success = hailStatus === "picked_up";
+  const missing = hailStatus === "missing";
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/80 px-4 py-8 backdrop-blur-sm"
+    >
+      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/10 bg-rajlo-black text-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+          <p className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
+            {success ? "Trip started" : missing ? "Pickup ended" : "Pick up rider"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close pickup modal"
+            className="grid h-8 w-8 place-items-center rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+
+        {missing ? (
+          <div className="px-6 py-8 text-center">
+            <p className="text-sm font-bold">
+              This pickup is no longer active.
+            </p>
+            <p className="mt-1 text-xs text-white/70">
+              The rider may have cancelled before scanning. Close to
+              continue.
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-5 inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold text-rajlo-black hover:bg-white/90"
+            >
+              Got it
+            </button>
+          </div>
+        ) : success ? (
+          <div className="px-6 py-8 text-center">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/40">
+              <Icon name="check-circle" className="h-7 w-7" />
+            </span>
+            <p className="mt-4 text-lg font-extrabold tracking-tight">
+              Rider scanned in
+            </p>
+            <p className="mt-1 text-xs text-white/70">
+              {rider?.name ?? "Your rider"} is onboard
+              {dropoff ? ` — heading to ${dropoff}` : ""}.
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-rajlo-red px-5 py-3 text-sm font-bold text-white shadow-md shadow-rajlo-red/30 hover:-translate-y-0.5 hover:bg-primary-hover"
+            >
+              Start trip
+              <Icon name="arrow-right" className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="px-6 py-6">
+            <div className="grid place-items-center">
+              <SessionQr sessionId={sessionId} size={220} />
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm font-bold">
+                {rider?.name ?? "Your rider"} scans this code to start
+              </p>
+              {pickup && (
+                <p className="mt-1 text-[11px] text-white/70">
+                  Pickup at {pickup}
+                  {dropoff ? ` → ${dropoff}` : ""}
+                </p>
+              )}
+            </div>
+
+            {/* Manual-entry fallback — surfaced inline so a rider
+                with a dead camera can read these 4 chars off the
+                screen and type them on their phone. The rider's
+                scan endpoint accepts either the QR's session UUID
+                or this code (active-only lookup). */}
+            {pickupCode && (
+              <div className="mt-5 rounded-2xl border border-white/15 bg-white/5 p-4">
+                <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-white/55">
+                  Camera not working? Read this code aloud
+                </p>
+                <p className="mt-1 text-center font-mono text-3xl font-extrabold tracking-[0.4em] text-white">
+                  {pickupCode}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-bold text-white/85">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+              Waiting for rider to scan
+            </div>
+            <p className="mt-3 text-center text-[10px] text-white/55">
+              No money moves until the rider scans. You&apos;ll hear a
+              beep on both phones the moment they do.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

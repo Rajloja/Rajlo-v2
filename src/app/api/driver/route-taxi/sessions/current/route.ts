@@ -47,7 +47,7 @@ export async function GET() {
   const { data: session } = await supabase
     .from("driver_sessions")
     .select(
-      "id, route_id, direction, vehicle_capacity, seats_taken, status, started_at, current_lat, current_lng, last_position_at",
+      "id, route_id, direction, vehicle_capacity, seats_taken, status, started_at, current_lat, current_lng, last_position_at, pickup_code",
     )
     .eq("driver_id", driver.id)
     .eq("status", "active")
@@ -120,6 +120,8 @@ export async function GET() {
       currentLat: session.current_lat,
       currentLng: session.current_lng,
       lastPositionAt: session.last_position_at,
+      pickupCode:
+        (session as { pickup_code?: string | null }).pickup_code ?? null,
       route: route
         ? {
             id: route.id,

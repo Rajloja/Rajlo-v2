@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
+import { allocateUniquePickupCode } from "@/lib/route-taxi-pickup-code";
 
 /**
  * POST /api/driver/route-taxi/sessions/start
@@ -94,6 +95,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "route not found" }, { status: 404 });
   }
 
+  // Allocate a short pickup code for the rider's manual-entry
+  // fallback. The partial-unique index on (pickup_code where
+  // status='active') guarantees no two live sessions share a code at
+  // any moment; the allocator retries on collision before insert.
+  // Falls through to null if we genuinely can't find a free code —
+  // session still starts, just without a manual fallback.
+  const pickupCode = await allocateUniquePickupCode(supabase);
+
   // Insert the session. The partial unique index
   // `ux_driver_sessions_one_active_per_driver` raises a unique-violation
   // (Postgres SQLSTATE 23505) if the driver already has an active session.
@@ -106,9 +115,10 @@ export async function POST(request: Request) {
       vehicle_capacity: capacity,
       seats_taken: 0,
       status: "active",
+      pickup_code: pickupCode,
     })
     .select(
-      "id, route_id, direction, vehicle_capacity, seats_taken, status, started_at",
+      "id, route_id, direction, vehicle_capacity, seats_taken, status, started_at, pickup_code",
     )
     .single();
 
@@ -135,6 +145,7 @@ export async function POST(request: Request) {
       seatsTaken: session.seats_taken,
       status: session.status,
       startedAt: session.started_at,
+      pickupCode: session.pickup_code ?? null,
       route: {
         origin: route.origin_name,
         destination: route.destination_name,
