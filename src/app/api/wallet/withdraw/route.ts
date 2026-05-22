@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
-import { debitWallet, getWalletBalance } from "@/lib/wallet";
+import { debitWallet } from "@/lib/wallet";
+import { getBalanceWithLock } from "@/lib/wallet-holds";
 import { hasActivePayoutHold } from "@/lib/payout-hold";
 
 /**
@@ -141,14 +142,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // Pre-check balance for a friendlier error message — the trigger
-  // would also catch this, but we'd like to surface 402 before
-  // touching the withdrawals table.
-  const balance = await getWalletBalance(supabase, user.id);
-  if (balance < amount) {
+  // Pre-check spendable balance (raw − any active hold). Withdrawing
+  // money that's reserved for an in-flight multi-leg journey would
+  // break the lock, so the available-balance gate covers both cases.
+  const { availableJmd, lockedJmd } = await getBalanceWithLock(
+    supabase,
+    user.id,
+  );
+  if (availableJmd < amount) {
     return NextResponse.json(
       {
-        error: `Insufficient balance — you have ${balance.toLocaleString("en-JM")} JMD available.`,
+        error: lockedJmd > 0
+          ? `Insufficient balance — you have ${availableJmd.toLocaleString("en-JM")} JMD available (JMD ${lockedJmd.toLocaleString("en-JM")} locked for an active trip).`
+          : `Insufficient balance — you have ${availableJmd.toLocaleString("en-JM")} JMD available.`,
       },
       { status: 402 },
     );

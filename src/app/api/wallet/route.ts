@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getWalletBalance } from "@/lib/wallet";
+import { getLockedAmount } from "@/lib/wallet-holds";
 
 /**
  * GET /api/wallet
@@ -41,7 +42,16 @@ export async function GET(request: NextRequest) {
     parseInt(request.nextUrl.searchParams.get("offset") ?? "0", 10) || 0,
   );
 
-  const balance = await getWalletBalance(supabase, user.id);
+  // Pull raw balance + the locked total in parallel. `locked` is the
+  // sum of every active wallet_holds row for this user — currently
+  // populated only by multi-leg route taxi journeys. The wallet UI
+  // shows "JMD $X available" (balance − locked) with a small hint
+  // when the lock is non-zero.
+  const [balance, locked] = await Promise.all([
+    getWalletBalance(supabase, user.id),
+    getLockedAmount(supabase, user.id),
+  ]);
+  const available = Math.max(0, balance - locked);
 
   // Over-fetch by one row so we can return `hasMore` without a
   // separate count query. If the DB returns limit+1, we slice off the
@@ -60,6 +70,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     balanceJmd: balance,
+    lockedJmd: locked,
+    availableJmd: available,
     transactions: hasMore ? txns.slice(0, limit) : txns,
     pagination: { hasMore },
   });

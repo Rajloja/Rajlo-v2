@@ -5,6 +5,7 @@ import { getWalletBalance } from "@/lib/wallet";
 import { getDriverSelfieUrl } from "@/lib/driver-selfie";
 import { riderCancellationFeeJmd, chargeFee } from "@/lib/cancellation-fees";
 import { sendRiderHailCancelledEmail } from "@/lib/email-templates";
+import { cancelJourney } from "@/lib/route-journey-progress";
 
 /**
  * /api/rider/route-taxi/hails/[id]
@@ -47,7 +48,7 @@ export async function GET(
   const { data: hail } = await supabase
     .from("route_hails")
     .select(
-      "id, route_id, session_id, status, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at, accepted_at, picked_up_at, completed_at, cancelled_at, cancellation_reason, commission_jmd, driver_earnings_jmd",
+      "id, route_id, session_id, status, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at, accepted_at, picked_up_at, completed_at, cancelled_at, cancellation_reason, commission_jmd, driver_earnings_jmd, journey_id, leg_order, is_transfer_leg",
     )
     .eq("id", id)
     .eq("rider_id", user.id)
@@ -161,6 +162,9 @@ export async function GET(
       cancellationReason: hail.cancellation_reason,
       commissionJmd: hail.commission_jmd,
       driverEarningsJmd: hail.driver_earnings_jmd,
+      journeyId: hail.journey_id ?? null,
+      legOrder: hail.leg_order ?? null,
+      isTransferLeg: hail.is_transfer_leg ?? false,
       session,
       route: route
         ? {
@@ -214,7 +218,7 @@ export async function PATCH(
   const { data: hail } = await supabase
     .from("route_hails")
     .select(
-      "id, status, requested_at, session_id, pickup_name, dropoff_name",
+      "id, status, requested_at, session_id, pickup_name, dropoff_name, journey_id",
     )
     .eq("id", id)
     .eq("rider_id", user.id)
@@ -248,6 +252,29 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // For a journey leg, cascade the cancel to the journey row and
+  // release the wallet hold (refunding the unspent portion to the
+  // rider's available balance). Already-settled legs stay debited.
+  // We do this BEFORE charging the cancellation fee so the rider's
+  // available balance is restored first — the fee charge comes off
+  // a healthy wallet, not one with a phantom lock against an already-
+  // dead journey.
+  let journeyRefundedJmd = 0;
+  if (hail.journey_id) {
+    const cancel = await cancelJourney(supabase, {
+      journeyId: hail.journey_id as string,
+      reason: body.reason?.slice(0, 200) ?? "Rider cancelled",
+      cancelledBy: "rider",
+    });
+    journeyRefundedJmd = cancel.refundedJmd;
+    if (cancel.warnings.length > 0) {
+      console.error(
+        `route-taxi journey ${hail.journey_id} cancel warnings:`,
+        cancel.warnings,
+      );
+    }
   }
 
   // ─── Charge the cancellation fee, if one applies ───
@@ -318,5 +345,6 @@ export async function PATCH(
     cancellationFeeJmd: feeJmd,
     feeCharged,
     feeUncollected,
+    journeyRefundedJmd: hail.journey_id ? journeyRefundedJmd : 0,
   });
 }

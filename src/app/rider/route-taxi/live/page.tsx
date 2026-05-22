@@ -9,6 +9,7 @@ import { FadeUp } from "@/components/anim";
 import { Skeleton } from "@/components/skeleton";
 import { MapView } from "@/components/map-view";
 import { HailChatSheet } from "@/components/hail-chat-sheet";
+import { extractSessionId } from "@/components/session-qr";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useSelfGpsPosition } from "@/lib/use-self-gps";
 import { formatJMD, type Place } from "@/lib/jamaica";
@@ -64,6 +65,11 @@ type Hail = {
   cancellationReason: string | null;
   commissionJmd: number | null;
   driverEarningsJmd: number | null;
+  /** Set when this hail is one leg of a multi-leg journey. Drives the
+   *  journey ladder + transfer-claim panel below. */
+  journeyId?: string | null;
+  legOrder?: number | null;
+  isTransferLeg?: boolean;
   session: null | {
     id: string;
     seatsTaken: number;
@@ -94,6 +100,34 @@ type Hail = {
 
 type Payload = { hail: Hail; walletBalanceJmd: number | null };
 
+/* Shape of /api/rider/route-taxi/journeys/[id] — only the pieces the
+ * live page consumes (progress ladder + transfer-claim panel). The
+ * server endpoint returns more; we ignore what we don't need. */
+type JourneyLegSummary = {
+  hailId: string;
+  legOrder: number | null;
+  isTransferLeg: boolean;
+  status: string;
+  pickup: { name: string };
+  dropoff: { name: string };
+  fareJmd: number;
+};
+type JourneyPayload = {
+  journey: {
+    id: string;
+    status: "planning" | "active" | "completed" | "cancelled";
+    origin: string;
+    destination: string;
+    totalFareJmd: number;
+    settledFareJmd: number;
+    refundedFareJmd: number;
+    plannedLegCount: number;
+    completedLegCount: number;
+  };
+  legs: JourneyLegSummary[];
+  currentLeg: { hailId: string; legOrder: number | null } | null;
+};
+
 export default function RiderRouteTaxiLivePage() {
   return (
     <Suspense fallback={<LoadingFrame />}>
@@ -108,6 +142,7 @@ function LiveInner() {
   const hailId = params.get("id");
 
   const [data, setData] = useState<Payload | null>(null);
+  const [journey, setJourney] = useState<JourneyPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelArmed, setCancelArmed] = useState(false);
@@ -126,12 +161,44 @@ function LiveInner() {
       const json = (await res.json()) as Payload;
       setData(json);
       setError(null);
+
+      // Multi-leg awareness: when the hail belongs to a journey, poll
+      // the journey endpoint in parallel for the progress ladder +
+      // transfer-claim panel. The page transparently redirects to the
+      // next leg's hail id once the journey advances.
+      const journeyId = json.hail.journeyId;
+      if (journeyId) {
+        try {
+          const jr = await fetch(
+            `/api/rider/route-taxi/journeys/${journeyId}`,
+          );
+          if (jr.ok) {
+            const jp = (await jr.json()) as JourneyPayload;
+            setJourney(jp);
+            if (
+              jp.journey.status === "active" &&
+              jp.currentLeg &&
+              jp.currentLeg.hailId !== hailId
+            ) {
+              // Leg advanced — bounce the URL to the new hail so
+              // subsequent polls fetch the correct row.
+              router.replace(
+                `/rider/route-taxi/live?id=${jp.currentLeg.hailId}`,
+              );
+            }
+          }
+        } catch {
+          /* journey fetch is best-effort — single-hail view still works */
+        }
+      } else {
+        setJourney(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network glitch — retrying.");
     } finally {
       setLoading(false);
     }
-  }, [hailId]);
+  }, [hailId, router]);
 
   // No id in URL → look up the rider's currently active hail and
   // redirect to ?id= form. Falls through to the catalogue if none.
@@ -225,6 +292,33 @@ function LiveInner() {
 
   return (
     <div className="space-y-5 pb-32">
+      {/* Journey progress ladder — only renders when this hail is one
+         leg of a multi-leg journey. Sits above the leg's own status
+         hero so the rider can always see where they are in the overall
+         A→B even while leg-N's driver is en route. */}
+      {journey && journey.journey.plannedLegCount > 1 && (
+        <FadeUp delay={0.02}>
+          <JourneyLadder journey={journey} currentHailId={hail.id} />
+        </FadeUp>
+      )}
+
+      {/* Transfer-claim panel — shown when this hail is a pending
+         transfer leg waiting on a driver. Lets the rider scan the
+         driver's QR code in person to lock in that specific car. */}
+      {journey &&
+        hail.isTransferLeg &&
+        hail.status === "requested" &&
+        journey.journey.status === "active" && (
+          <FadeUp delay={0.03}>
+            <TransferClaimPanel
+              journeyId={journey.journey.id}
+              pickupName={hail.pickup}
+              fareJmd={hail.fareJmd}
+              onClaimed={() => void refresh()}
+            />
+          </FadeUp>
+        )}
+
       <FadeUp>
         <StatusHero hail={hail} />
       </FadeUp>
@@ -236,8 +330,10 @@ function LiveInner() {
       {/* If we've been searching for a while with no driver, surface
          the "switch to a private ride" escape hatch. The route taxi
          flow respects the rider's time — five minutes of waiting is
-         long enough that the alternative deserves to be loud. */}
-      <HailTimeoutBanner hail={hail} />
+         long enough that the alternative deserves to be loud. For
+         multi-leg journeys the upgrade target is the journey's
+         destination, not the current corridor's end. */}
+      <HailTimeoutBanner hail={hail} journey={journey} />
 
       {hail.session?.driver && (
         <FadeUp delay={0.06}>
@@ -515,12 +611,22 @@ function SearchCountdown({ requestedAt }: { requestedAt: string }) {
 
 const HAIL_TIMEOUT_MINUTES = 5;
 
-function HailTimeoutBanner({ hail }: { hail: Hail }) {
+function HailTimeoutBanner({
+  hail,
+  journey,
+}: {
+  hail: Hail;
+  journey: JourneyPayload | null;
+}) {
   const router = useRouter();
   // Re-render every 15s so the "X min waiting" copy stays fresh
   // without coupling to the polling cadence above.
   const [now, setNow] = useState(() => Date.now());
   const [switching, setSwitching] = useState(false);
+  // Lets the rider snooze the banner once — "keep searching"
+  // suppresses it for another HAIL_TIMEOUT_MINUTES window so it
+  // doesn't immediately re-appear after they dismiss it.
+  const [snoozedUntil, setSnoozedUntil] = useState<number | null>(null);
   useEffect(() => {
     if (hail.status !== "requested") return;
     const id = setInterval(() => setNow(Date.now()), 15_000);
@@ -533,17 +639,39 @@ function HailTimeoutBanner({ hail }: { hail: Hail }) {
     (now - new Date(hail.requestedAt).getTime()) / 60_000,
   );
   if (waitedMin < HAIL_TIMEOUT_MINUTES) return null;
+  if (snoozedUntil && now < snoozedUntil) return null;
+
+  const isJourneyTransfer =
+    !!journey &&
+    !!hail.journeyId &&
+    journey.journey.plannedLegCount > 1;
 
   // Build the deep link back to /rider/request with both endpoints
-  // pre-filled. The request page already reads these params on mount
-  // (used by "Book again" today). Keeps the hand-off seamless.
+  // pre-filled. For a multi-leg journey we upgrade to a private ride
+  // covering THE REST OF THE TRIP — current transfer point to the
+  // journey's final destination. For a regular single-leg hail we use
+  // the hail's own endpoints (legacy behaviour, unchanged).
   const params = new URLSearchParams();
-  if (hail.pickup) params.set("from_name", hail.pickup);
-  if (hail.pickupLat) params.set("from_lat", String(hail.pickupLat));
-  if (hail.pickupLng) params.set("from_lng", String(hail.pickupLng));
-  if (hail.dropoff) params.set("to_name", hail.dropoff);
-  if (hail.dropoffLat) params.set("to_lat", String(hail.dropoffLat));
-  if (hail.dropoffLng) params.set("to_lng", String(hail.dropoffLng));
+  const fromName = hail.pickup;
+  const fromLat = hail.pickupLat;
+  const fromLng = hail.pickupLng;
+  if (fromName) params.set("from_name", fromName);
+  if (fromLat) params.set("from_lat", String(fromLat));
+  if (fromLng) params.set("from_lng", String(fromLng));
+  if (isJourneyTransfer && journey) {
+    params.set("to_name", journey.journey.destination);
+    // Journey destination coords aren't on JourneyPayload — fall back
+    // to the rider's typed dropoff (hail's own) which on the FINAL leg
+    // already is the destination. For mid-journey transfer legs the
+    // typed name is the only honest hint we can pass; the request
+    // page autocompletes it on focus.
+    if (hail.dropoffLat) params.set("to_lat", String(hail.dropoffLat));
+    if (hail.dropoffLng) params.set("to_lng", String(hail.dropoffLng));
+  } else {
+    if (hail.dropoff) params.set("to_name", hail.dropoff);
+    if (hail.dropoffLat) params.set("to_lat", String(hail.dropoffLat));
+    if (hail.dropoffLng) params.set("to_lng", String(hail.dropoffLng));
+  }
   const requestHref = `/rider/request?${params.toString()}`;
 
   const switchToPrivate = async () => {
@@ -575,15 +703,28 @@ function HailTimeoutBanner({ hail }: { hail: Hail }) {
               Still searching · {waitedMin} min waiting
             </p>
             <p className="mt-0.5 text-sm font-extrabold tracking-tight text-amber-900 md:text-base">
-              No route taxi has accepted yet
+              {isJourneyTransfer
+                ? "No transfer driver yet"
+                : "No route taxi has accepted yet"}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-amber-900/80">
-              Switch to a private ride and you&apos;ll be picked up directly —
-              your wallet covers it.
+              {isJourneyTransfer
+                ? "Finish the rest of your trip in a private ride — your locked balance covers the difference, and any remaining hold is refunded."
+                : "Switch to a private ride and you'll be picked up directly — your wallet covers it."}
             </p>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-amber-200 bg-white px-5 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-amber-200 bg-white px-5 py-3">
+          <button
+            type="button"
+            onClick={() =>
+              setSnoozedUntil(now + HAIL_TIMEOUT_MINUTES * 60_000)
+            }
+            disabled={switching}
+            className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Keep searching
+          </button>
           <button
             type="button"
             onClick={switchToPrivate}
@@ -597,7 +738,9 @@ function HailTimeoutBanner({ hail }: { hail: Hail }) {
               </>
             ) : (
               <>
-                Book a private ride
+                {isJourneyTransfer
+                  ? "Finish in a private ride"
+                  : "Book a private ride"}
                 <Icon name="arrow-right" className="h-3.5 w-3.5" />
               </>
             )}
@@ -1049,4 +1192,362 @@ function friendlyTime(iso: string): string {
   const min = Math.floor(ms / 60_000);
   if (min < 60) return `${min} min ago`;
   return d.toLocaleTimeString("en-JM", { hour: "numeric", minute: "2-digit" });
+}
+
+/* ══════════════════════ Multi-leg journey UI ══════════════════════
+ * Renders only when the active hail belongs to a `route_journeys`
+ * row. The ladder gives the rider a permanent "where am I in the
+ * trip" view; the claim panel lets them scan the next driver's QR
+ * code when they arrive at a transfer point.
+ * ════════════════════════════════════════════════════════════════ */
+
+function JourneyLadder({
+  journey,
+  currentHailId,
+}: {
+  journey: JourneyPayload;
+  currentHailId: string;
+}) {
+  const { plannedLegCount, completedLegCount, totalFareJmd, settledFareJmd } =
+    journey.journey;
+  const legs = [...journey.legs].sort(
+    (a, b) => (a.legOrder ?? 0) - (b.legOrder ?? 0),
+  );
+  return (
+    <section className="rounded-2xl border border-line bg-surface p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+          Journey · {completedLegCount} of {plannedLegCount} legs done
+        </p>
+        <p className="text-[11px] font-bold text-muted">
+          {formatJMD(settledFareJmd)} settled · {formatJMD(totalFareJmd)} total
+        </p>
+      </div>
+      <ol className="mt-3 space-y-2.5">
+        {legs.map((leg, idx) => {
+          const isCurrent = leg.hailId === currentHailId;
+          const isDone = leg.status === "completed";
+          const isCancelled = leg.status === "cancelled";
+          const tone = isDone
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+            : isCurrent
+              ? "border-rajlo-red/40 bg-primary-soft text-rajlo-black"
+              : isCancelled
+                ? "border-line bg-surface-soft text-muted line-through"
+                : "border-line bg-surface text-foreground";
+          return (
+            <li
+              key={leg.hailId}
+              className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${tone}`}
+            >
+              <span
+                className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
+                  isDone
+                    ? "bg-emerald-500 text-white"
+                    : isCurrent
+                      ? "bg-rajlo-red text-white"
+                      : "bg-surface-soft text-muted"
+                }`}
+              >
+                {isDone ? (
+                  <Icon name="check-circle" className="h-3.5 w-3.5" />
+                ) : (
+                  idx + 1
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-extrabold tracking-tight">
+                  {leg.pickup.name} <span className="text-rajlo-red">→</span>{" "}
+                  {leg.dropoff.name}
+                </p>
+                <p className="truncate text-[11px] text-muted">
+                  {legLabel(leg.status)}
+                  {leg.isTransferLeg ? " · transfer leg" : ""}
+                </p>
+              </div>
+              <p className="shrink-0 text-[11px] font-bold tabular-nums">
+                {formatJMD(leg.fareJmd)}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function legLabel(status: string): string {
+  switch (status) {
+    case "requested":
+      return "waiting on driver";
+    case "accepted":
+      return "driver matched";
+    case "picked_up":
+      return "in progress";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return status;
+  }
+}
+
+function TransferClaimPanel({
+  journeyId,
+  pickupName,
+  fareJmd,
+  onClaimed,
+}: {
+  journeyId: string;
+  pickupName: string;
+  fareJmd: number;
+  onClaimed: () => void;
+}) {
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [manualId, setManualId] = useState("");
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  const claim = useCallback(
+    async (sessionId: string) => {
+      setClaiming(true);
+      setClaimError(null);
+      try {
+        const res = await fetch(
+          `/api/rider/route-taxi/journeys/${journeyId}/claim`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          },
+        );
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+          error?: string;
+        };
+        if (!res.ok || !json.ok) {
+          throw new Error(
+            json.message ?? json.error ?? "Couldn't lock in that driver.",
+          );
+        }
+        setScannerOpen(false);
+        setManualId("");
+        onClaimed();
+      } catch (e) {
+        setClaimError(
+          e instanceof Error ? e.message : "Couldn't lock in that driver.",
+        );
+      } finally {
+        setClaiming(false);
+      }
+    },
+    [journeyId, onClaimed],
+  );
+
+  return (
+    <section className="rounded-3xl border border-rajlo-red/30 bg-primary-soft p-6 md:p-7">
+      <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+        Next leg · transfer
+      </p>
+      <h2 className="mt-1 text-xl font-extrabold tracking-tight">
+        Find your next route taxi
+      </h2>
+      <p className="mt-1 text-sm text-rajlo-black/75">
+        We&apos;ve notified drivers heading through{" "}
+        <span className="font-bold">{pickupName}</span>. When the next car
+        pulls up, scan the driver&apos;s QR code to lock them in for the next
+        leg — {formatJMD(fareJmd)}.
+      </p>
+      {claimError && (
+        <p className="mt-3 rounded-xl border border-rajlo-red/40 bg-white px-3 py-2 text-xs font-semibold text-rajlo-red">
+          {claimError}
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setScannerOpen(true)}
+          className="inline-flex items-center gap-2 rounded-full bg-rajlo-red px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-rajlo-red/30 hover:-translate-y-0.5 hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={claiming}
+        >
+          <Icon name="search" className="h-4 w-4" />
+          Scan driver QR
+        </button>
+        <details className="group rounded-full border border-line bg-white px-4 py-2.5 text-xs font-bold">
+          <summary className="cursor-pointer select-none list-none">
+            Type code instead
+          </summary>
+          <div className="mt-3 flex flex-col gap-2">
+            <input
+              type="text"
+              value={manualId}
+              onChange={(e) => setManualId(e.target.value)}
+              placeholder="Session UUID from driver's screen"
+              className="rounded-xl border border-line bg-white px-3 py-2 text-xs"
+            />
+            <button
+              type="button"
+              disabled={claiming || !manualId.trim()}
+              onClick={() => {
+                const sid = extractSessionId(manualId);
+                if (sid) void claim(sid);
+                else setClaimError("That doesn't look like a session code.");
+              }}
+              className="rounded-full bg-rajlo-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+            >
+              {claiming ? "Locking in…" : "Lock in"}
+            </button>
+          </div>
+        </details>
+      </div>
+      {scannerOpen && (
+        <SessionScannerModal
+          onClose={() => setScannerOpen(false)}
+          onDetected={(sid) => {
+            void claim(sid);
+          }}
+          claiming={claiming}
+        />
+      )}
+    </section>
+  );
+}
+
+/* ──────────────────────── Session QR scanner ────────────────────────
+ * Same BarcodeDetector pattern as /rider/qr-pay, narrowed to extract
+ * a Rajlo session UUID from the canonical `rajlo://route-taxi/session/`
+ * payload. Closes the camera stream on unmount / detection.
+ * ─────────────────────────────────────────────────────────────────── */
+
+type ScannerWindow = Window & {
+  BarcodeDetector?: new (opts: { formats: string[] }) => {
+    detect: (
+      source: HTMLVideoElement,
+    ) => Promise<Array<{ rawValue: string }>>;
+  };
+};
+
+function SessionScannerModal({
+  onClose,
+  onDetected,
+  claiming,
+}: {
+  onClose: () => void;
+  onDetected: (sessionId: string) => void;
+  claiming: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    (async () => {
+      const w = window as ScannerWindow;
+      const Detector = w.BarcodeDetector;
+      if (!Detector) {
+        if (!cancelled) {
+          setScanError(
+            "This browser can't open the camera. Type the code instead.",
+          );
+        }
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => null);
+        }
+        const detector = new Detector({ formats: ["qr_code"] });
+        intervalId = setInterval(async () => {
+          if (cancelled || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            for (const c of codes) {
+              const sid = extractSessionId(c.rawValue);
+              if (sid) {
+                if (intervalId) clearInterval(intervalId);
+                onDetected(sid);
+                return;
+              }
+            }
+          } catch {
+            /* per-frame failure — next tick retries */
+          }
+        }, 500);
+      } catch (e) {
+        if (cancelled) return;
+        setScanError(
+          e instanceof Error && e.name === "NotAllowedError"
+            ? "Camera permission denied. Type the code instead."
+            : "Couldn't open the camera. Type the code instead.",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [onDetected]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/85 px-4 py-8 backdrop-blur-sm"
+    >
+      <div className="flex w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/10 bg-rajlo-black shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 text-white">
+          <p className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
+            Scan driver QR
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close scanner"
+            className="grid h-8 w-8 place-items-center rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="relative aspect-square w-full bg-black">
+          {scanError ? (
+            <div className="grid h-full place-items-center px-8 text-center text-white">
+              <p className="text-sm font-semibold">{scanError}</p>
+            </div>
+          ) : (
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="h-full w-full object-cover"
+            />
+          )}
+        </div>
+        <div className="px-5 py-3 text-center text-[11px] text-white/70">
+          {claiming
+            ? "Locking in your next driver…"
+            : "Point at the QR on the driver's screen."}
+        </div>
+      </div>
+    </div>
+  );
 }

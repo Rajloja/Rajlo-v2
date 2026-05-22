@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { creditWallet, debitWallet } from "@/lib/wallet";
+import { getBalanceWithLock } from "@/lib/wallet-holds";
 import { splitFare } from "@/lib/fare-engine";
 import { notifyDriver } from "@/lib/notify";
 
@@ -109,6 +110,38 @@ export async function POST(request: Request) {
 
   const fareJmd = charge.amount_jmd as number;
   const { driverEarningsJmd, commissionJmd } = splitFare(fareJmd);
+
+  // Pre-check available balance so we don't drain funds that are
+  // locked for an in-flight multi-leg journey. The DB trigger only
+  // blocks the raw negative case; the hold check is application-level.
+  const { availableJmd, lockedJmd } = await getBalanceWithLock(
+    supabase,
+    user.id,
+  );
+  if (availableJmd < fareJmd) {
+    // Roll the charge back so the driver's QR is still valid and the
+    // rider can retry after topping up.
+    await supabase
+      .from("qr_charges")
+      .update({
+        status: "pending",
+        rider_user_id: null,
+        confirmed_at: null,
+      })
+      .eq("id", charge.id);
+    return NextResponse.json(
+      {
+        error: "insufficient_balance",
+        message: lockedJmd > 0
+          ? `Top up your wallet — this charge is JMD $${fareJmd}. JMD $${lockedJmd} is locked for an active trip.`
+          : `Top up your wallet — this charge is JMD $${fareJmd}.`,
+        fareJmd,
+        availableJmd,
+        lockedJmd,
+      },
+      { status: 402 },
+    );
+  }
 
   // 1. Debit the rider.
   const debit = await debitWallet(supabase, user.id, fareJmd, "ride_charge", {

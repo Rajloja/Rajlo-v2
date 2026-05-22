@@ -9,6 +9,7 @@ import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp, Stagger, StaggerItem } from "@/components/anim";
 import { ListRowSkeleton, Skeleton } from "@/components/skeleton";
+import { SessionQr } from "@/components/session-qr";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { formatJMD } from "@/lib/jamaica";
 
@@ -79,6 +80,14 @@ type HailRow = {
   pickupLng?: number | null;
   dropoffLat?: number | null;
   dropoffLng?: number | null;
+  /** True when this hail is a transfer-in leg of a multi-leg journey
+   *  (i.e. the rider just finished a previous corridor and is showing
+   *  up here to continue). The session screen badges these so the
+   *  driver knows it's a guaranteed-onboarding scan-to-claim job, not
+   *  a speculative kerbside hail. */
+  isTransferLeg?: boolean;
+  journeyId?: string | null;
+  legOrder?: number | null;
 };
 
 type RiderInfo = {
@@ -1019,6 +1028,34 @@ function ActiveSessionMonitor({
         </section>
       </FadeUp>
 
+      {/* Transfer-rider QR — a passenger on a multi-leg journey
+         arrives at this corridor as a transfer. They scan THIS QR to
+         lock you in as the next leg's driver. Hidden if there are no
+         open seats — full vehicle can't take a transfer. */}
+      {session.seatsTaken < session.vehicleCapacity && (
+        <FadeUp delay={0.02}>
+          <section className="rounded-3xl border border-line bg-surface">
+            <div className="grid gap-4 p-5 md:grid-cols-[auto_1fr] md:items-center md:gap-6 md:p-6">
+              <SessionQr sessionId={session.id} size={140} />
+              <div className="min-w-0">
+                <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+                  Transfer pickup
+                </p>
+                <h2 className="mt-1 text-lg font-extrabold tracking-tight">
+                  Show this to transfer riders
+                </h2>
+                <p className="mt-2 text-sm text-muted">
+                  A passenger continuing a multi-leg journey scans
+                  this code to lock you in as their next driver.
+                  You&apos;ll get a notification the moment they
+                  scan — no waiting around for a chance pickup.
+                </p>
+              </div>
+            </div>
+          </section>
+        </FadeUp>
+      )}
+
       {/* Live map — shows the driver's GPS pin + the next-action
          pickup/dropoff so they always know where to head. Mirrors
          the rider's live-trip map: one driver, one target. */}
@@ -1251,11 +1288,24 @@ function ActiveSessionMonitor({
               {pending.map((h) => (
                 <li
                   key={h.id}
-                  className="rounded-2xl border border-line bg-surface p-4 transition-shadow hover:shadow-md"
+                  className={`rounded-2xl border bg-surface p-4 transition-shadow hover:shadow-md ${
+                    h.isTransferLeg
+                      ? "border-rajlo-red/40 ring-1 ring-rajlo-red/20"
+                      : "border-line"
+                  }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
+                        {h.isTransferLeg && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white">
+                            <Icon
+                              name="arrow-right"
+                              className="h-2.5 w-2.5"
+                            />
+                            Transfer rider
+                          </span>
+                        )}
                         <p className="text-sm font-bold">
                           {h.pickup} → {h.dropoff}
                         </p>
@@ -1272,6 +1322,9 @@ function ActiveSessionMonitor({
                         {h.distanceKm.toFixed(1)} km · You earn ~
                         {formatJMD(Math.round(h.fareJmd * 0.85))}
                         {h.concession ? " · concession" : ""}
+                        {h.isTransferLeg
+                          ? " · scan rider's QR or wait for them to scan yours"
+                          : ""}
                       </p>
                     </div>
                     <button

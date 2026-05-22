@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
-import { getWalletBalance } from "@/lib/wallet";
+import { getBalanceWithLock } from "@/lib/wallet-holds";
 import { calculateRouteFare } from "@/lib/fare-engine";
 import { isWithinJamaica } from "@/lib/jamaica";
 import { notifyRouteTaxiDrivers } from "@/lib/notify";
@@ -169,19 +169,26 @@ export async function POST(request: Request) {
     dropoffParish = riderDropoff.parish ?? dropoffParish;
   }
 
-  // Cashless gate. Don't let a hail leave the door if the rider can't
-  // cover it — they'll be sent to the wallet top-up screen. We
-  // return the actual `balanceJmd` so the client modal can show
-  // "fare 220 / balance 90 / short by 130" instead of just a string.
-  const walletBalanceJmd = await getWalletBalance(supabase, user.id);
-  if (walletBalanceJmd < fareJmd) {
+  // Cashless gate — spendable balance only (raw minus any active
+  // hold from a multi-leg journey in flight). The client modal shows
+  // "fare 220 / available 90 / locked 130 / short by 130" so the
+  // rider can see why their balance looks lower than the wallet UI.
+  const { availableJmd, balanceJmd, lockedJmd } = await getBalanceWithLock(
+    supabase,
+    user.id,
+  );
+  if (availableJmd < fareJmd) {
     return NextResponse.json(
       {
         error: "insufficient_balance",
-        message: `Top up your wallet — this trip costs JMD $${fareJmd}.`,
+        message: lockedJmd > 0
+          ? `Top up your wallet — this trip costs JMD $${fareJmd}. JMD $${lockedJmd} is locked for an active trip.`
+          : `Top up your wallet — this trip costs JMD $${fareJmd}.`,
         insufficientFunds: true,
         fareJmd,
-        balanceJmd: walletBalanceJmd,
+        balanceJmd,
+        availableJmd,
+        lockedJmd,
         requiredJmd: fareJmd,
       },
       { status: 402 },

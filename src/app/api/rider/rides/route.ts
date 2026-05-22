@@ -8,6 +8,7 @@ import { notifyRider, notifyAllAvailableDrivers } from "@/lib/notify";
 import { resolveRidePin } from "@/lib/pin-verify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
 import { FEE_UNCOLLECTED_STATUS } from "@/lib/cancellation-fees";
+import { getBalanceWithLock } from "@/lib/wallet-holds";
 
 /**
  * POST /api/rider/rides
@@ -177,19 +178,23 @@ export async function POST(request: Request) {
   // Booking is rejected with 402 Payment Required so the client can
   // route the rider to /rider/wallet to top up.
   const estimatedFareJmd = Math.round(body.fare.fareJMD);
-  const { data: wallet } = await supabase
-    .from("wallets")
-    .select("balance_jmd")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const balanceJmd =
-    (wallet as { balance_jmd: number } | null)?.balance_jmd ?? 0;
-  if (balanceJmd < estimatedFareJmd) {
+  // Spendable balance — raw wallet minus any active holds (e.g. a
+  // multi-leg route taxi journey already in flight). Booking a private
+  // ride must not break the lock the rider has on a pending journey.
+  const { availableJmd, balanceJmd, lockedJmd } = await getBalanceWithLock(
+    supabase,
+    user.id,
+  );
+  if (availableJmd < estimatedFareJmd) {
     return NextResponse.json(
       {
-        error: `Top up your wallet to book this trip — fare is JMD ${estimatedFareJmd.toLocaleString("en-JM")}, you have JMD ${balanceJmd.toLocaleString("en-JM")} available.`,
+        error: lockedJmd > 0
+          ? `Top up your wallet to book this trip — fare is JMD ${estimatedFareJmd.toLocaleString("en-JM")}, you have JMD ${availableJmd.toLocaleString("en-JM")} available (JMD ${lockedJmd.toLocaleString("en-JM")} locked for an active trip).`
+          : `Top up your wallet to book this trip — fare is JMD ${estimatedFareJmd.toLocaleString("en-JM")}, you have JMD ${availableJmd.toLocaleString("en-JM")} available.`,
         insufficientFunds: true,
         balanceJmd,
+        availableJmd,
+        lockedJmd,
         requiredJmd: estimatedFareJmd,
       },
       { status: 402 },

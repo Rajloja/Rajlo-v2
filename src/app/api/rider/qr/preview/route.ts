@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
-import { getWalletBalance } from "@/lib/wallet";
+import { getBalanceWithLock } from "@/lib/wallet-holds";
 
 /**
  * POST /api/rider/qr/preview
@@ -105,8 +105,15 @@ export async function POST(request: Request) {
     .eq("id", charge.driver_id)
     .maybeSingle();
 
-  const balanceJmd = await getWalletBalance(supabase, user.id);
-  const sufficient = balanceJmd >= (charge.amount_jmd as number);
+  // Spendable balance — raw minus any active hold (e.g. an in-flight
+  // multi-leg journey). The "sufficient" gate must respect the lock
+  // so paying a QR Pay charge can't drain money already reserved for
+  // a trip the rider is mid-journey on.
+  const { availableJmd, balanceJmd, lockedJmd } = await getBalanceWithLock(
+    supabase,
+    user.id,
+  );
+  const sufficient = availableJmd >= (charge.amount_jmd as number);
 
   return NextResponse.json({
     charge: {
@@ -126,8 +133,12 @@ export async function POST(request: Request) {
     },
     wallet: {
       balanceJmd,
+      availableJmd,
+      lockedJmd,
       sufficient,
-      shortfallJmd: sufficient ? 0 : (charge.amount_jmd as number) - balanceJmd,
+      shortfallJmd: sufficient
+        ? 0
+        : (charge.amount_jmd as number) - availableJmd,
     },
   });
 }

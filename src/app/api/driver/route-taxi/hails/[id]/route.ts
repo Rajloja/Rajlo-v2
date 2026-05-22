@@ -5,6 +5,12 @@ import { creditWallet, debitWallet } from "@/lib/wallet";
 import { splitFare } from "@/lib/fare-engine";
 import { notifyRider } from "@/lib/notify";
 import {
+  settleLeg,
+  advanceJourney,
+  cancelJourney,
+  getJourney,
+} from "@/lib/route-journey-progress";
+import {
   sendDriverHailAcceptedEmail,
   sendDriverHailCompletedEmail,
   sendRiderHailAcceptedEmail,
@@ -137,11 +143,13 @@ export async function PATCH(
   }
 
   // Load the hail + verify it's on the driver's route (for accept) or
-  // their existing session (for the later transitions).
+  // their existing session (for the later transitions). Journey
+  // columns are pulled too so the settlement / cancel branches know
+  // whether to settle from a hold or take the legacy raw-debit path.
   const { data: hail, error: hailError } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, route_id, session_id, status, fare_jmd, distance_km, pickup_name, dropoff_name",
+      "id, rider_id, route_id, session_id, status, fare_jmd, distance_km, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, journey_id, leg_order, is_transfer_leg",
     )
     .eq("id", hailId)
     .maybeSingle();
@@ -333,53 +341,109 @@ export async function PATCH(
 
   if (target === "completed") {
     const fareJmd = hail.fare_jmd as number;
-    const { driverEarningsJmd, commissionJmd } = splitFare(fareJmd);
 
-    // 1. Debit the rider. Cashless rule: if their balance can't cover
-    //    it, we don't fudge — we tell the driver to prompt the rider
-    //    to top up before they get out of the car.
-    const debit = await debitWallet(supabase, hail.rider_id, fareJmd, "ride_charge", {
-      description: `Route taxi · ${hail.pickup_name} → ${hail.dropoff_name}`,
-      metadata: { route_hail_id: hail.id, kind: "route_taxi" },
-    });
-    if (!debit.ok) {
-      return NextResponse.json(
+    let driverEarningsJmd: number;
+    let commissionJmd: number;
+    let debitTxnId: string | null = null;
+    let creditTxnId: string | null = null;
+    let riderBalanceAfter: number | null = null;
+
+    if (hail.journey_id) {
+      // Multi-leg (or single-leg as a length-1 journey): settle this
+      // leg through the journey orchestrator. It consumes the hold
+      // portion, writes the debit + credit, and bumps the journey row.
+      const journey = await getJourney(supabase, hail.journey_id as string);
+      if (!journey) {
+        return NextResponse.json(
+          { error: "journey not found for this hail" },
+          { status: 500 },
+        );
+      }
+      const split = splitFare(fareJmd);
+      driverEarningsJmd = split.driverEarningsJmd;
+      commissionJmd = split.commissionJmd;
+      const result = await settleLeg(
+        supabase,
+        hail as Parameters<typeof settleLeg>[1],
+        journey,
+        user.id,
+      );
+      if (!result.ok) {
+        return NextResponse.json(
+          {
+            error: result.warnings[0] ?? "settle_failed",
+            message:
+              "Rider's wallet can't cover this leg. Ask them to top up before they exit.",
+          },
+          { status: 402 },
+        );
+      }
+      debitTxnId = result.transactionIds.debit;
+      creditTxnId = result.transactionIds.credit;
+      riderBalanceAfter = result.riderBalanceAfter;
+      if (result.warnings.length > 0) {
+        console.error(
+          `route-taxi journey ${hail.journey_id} leg ${hail.leg_order} settle warnings:`,
+          result.warnings,
+        );
+      }
+    } else {
+      // Legacy single-leg flow — no journey row, no hold. Direct
+      // debit + credit, same as the original implementation.
+      const split = splitFare(fareJmd);
+      driverEarningsJmd = split.driverEarningsJmd;
+      commissionJmd = split.commissionJmd;
+      const debit = await debitWallet(
+        supabase,
+        hail.rider_id,
+        fareJmd,
+        "ride_charge",
         {
-          error: debit.insufficientFunds ? "rider_insufficient_balance" : debit.error,
-          message: debit.insufficientFunds
-            ? "Rider's wallet can't cover the fare. Ask them to top up before they exit."
-            : "Wallet debit failed.",
+          description: `Route taxi · ${hail.pickup_name} → ${hail.dropoff_name}`,
+          metadata: { route_hail_id: hail.id, kind: "route_taxi" },
         },
-        { status: debit.insufficientFunds ? 402 : 500 },
       );
+      if (!debit.ok) {
+        return NextResponse.json(
+          {
+            error: debit.insufficientFunds
+              ? "rider_insufficient_balance"
+              : debit.error,
+            message: debit.insufficientFunds
+              ? "Rider's wallet can't cover the fare. Ask them to top up before they exit."
+              : "Wallet debit failed.",
+          },
+          { status: debit.insufficientFunds ? 402 : 500 },
+        );
+      }
+      debitTxnId = debit.transactionId;
+      riderBalanceAfter = debit.balanceAfter;
+
+      const credit = await creditWallet(
+        supabase,
+        user.id,
+        driverEarningsJmd,
+        "ride_earning",
+        {
+          description: `Route taxi · ${hail.pickup_name} → ${hail.dropoff_name}`,
+          metadata: {
+            route_hail_id: hail.id,
+            kind: "route_taxi",
+            gross_fare_jmd: fareJmd,
+            commission_jmd: commissionJmd,
+          },
+        },
+      );
+      if (!credit.ok) {
+        console.error(
+          `route-taxi settlement: rider charged but driver credit failed (hail ${hail.id}): ${credit.error}`,
+        );
+      } else {
+        creditTxnId = credit.transactionId;
+      }
     }
 
-    // 2. Credit the driver their earnings (fare − commission).
-    const credit = await creditWallet(
-      supabase,
-      user.id,
-      driverEarningsJmd,
-      "ride_earning",
-      {
-        description: `Route taxi · ${hail.pickup_name} → ${hail.dropoff_name}`,
-        metadata: {
-          route_hail_id: hail.id,
-          kind: "route_taxi",
-          gross_fare_jmd: fareJmd,
-          commission_jmd: commissionJmd,
-        },
-      },
-    );
-    if (!credit.ok) {
-      // The rider was already charged. We log the discrepancy on the
-      // hail so admin can manually reconcile. Don't return 500 — the
-      // rider's trip really is complete.
-      console.error(
-        `route-taxi settlement: rider charged but driver credit failed (hail ${hail.id}): ${credit.error}`,
-      );
-    }
-
-    // 3. Stamp the hail with the settled amounts.
+    // Stamp the hail with the settled amounts.
     const { error: completeError } = await supabase
       .from("route_hails")
       .update({
@@ -387,8 +451,8 @@ export async function PATCH(
         completed_at: new Date().toISOString(),
         commission_jmd: commissionJmd,
         driver_earnings_jmd: driverEarningsJmd,
-        charged_transaction_id: debit.transactionId,
-        driver_credit_transaction_id: credit.ok ? credit.transactionId : null,
+        charged_transaction_id: debitTxnId,
+        driver_credit_transaction_id: creditTxnId,
       })
       .eq("id", hail.id);
 
@@ -397,6 +461,27 @@ export async function PATCH(
         { error: completeError.message },
         { status: 500 },
       );
+    }
+
+    // For multi-leg journeys: kick off the next leg if any remain.
+    // Best-effort — broadcast / matcher failures don't block the
+    // driver's completion response.
+    let nextLeg: { id: string; order: number } | null = null;
+    if (hail.journey_id && hail.leg_order) {
+      const rider = await resolveRiderContact(supabase, hail.rider_id);
+      const advance = await advanceJourney(supabase, {
+        journeyId: hail.journey_id as string,
+        justCompletedLegOrder: hail.leg_order as number,
+        transferLat: hail.dropoff_lat as number | null,
+        transferLng: hail.dropoff_lng as number | null,
+        riderFirstName: rider.firstName,
+      });
+      if (advance.kind === "next_leg_created") {
+        nextLeg = {
+          id: advance.hailId,
+          order: (hail.leg_order as number) + 1,
+        };
+      }
     }
 
     void notifyRider(supabase, {
@@ -458,7 +543,8 @@ export async function PATCH(
       fareJmd,
       driverEarningsJmd,
       commissionJmd,
-      riderBalanceAfter: debit.balanceAfter,
+      riderBalanceAfter,
+      nextLeg,
     });
   }
 
@@ -477,13 +563,37 @@ export async function PATCH(
       return NextResponse.json({ error: cancelError.message }, { status: 500 });
     }
 
+    // For a journey leg, cascade the cancel up to the journey. The
+    // unspent portion of the hold is refunded back to the rider's
+    // available balance; settled legs stay debited. Phase 3 will
+    // add intra-journey re-broadcast so a pre-pickup driver cancel
+    // can find another driver without killing the whole journey —
+    // for now, driver-cancel-on-journey = journey-cancel.
+    let refundedJmd = 0;
+    if (hail.journey_id) {
+      const cancel = await cancelJourney(supabase, {
+        journeyId: hail.journey_id as string,
+        reason: body.reason ?? "Driver cancelled mid-journey",
+        cancelledBy: "driver",
+      });
+      refundedJmd = cancel.refundedJmd;
+      if (cancel.warnings.length > 0) {
+        console.error(
+          `route-taxi journey ${hail.journey_id} cancel warnings:`,
+          cancel.warnings,
+        );
+      }
+    }
+
     void notifyRider(supabase, {
       riderId: hail.rider_id,
       kind: "trip",
       title: "Driver cancelled",
-      body:
-        body.reason ??
-        "Your driver had to cancel — hail another car when you're ready.",
+      body: hail.journey_id
+        ? body.reason ??
+          `Your driver had to cancel — JMD $${refundedJmd} refunded to your wallet. Re-hail when you're ready.`
+        : body.reason ??
+          "Your driver had to cancel — hail another car when you're ready.",
       href: "/rider/route-taxi",
       cta: "Re-hail",
       pushTag: `route-hail-${hail.id}`,
@@ -505,7 +615,11 @@ export async function PATCH(
       }
     })();
 
-    return NextResponse.json({ ok: true, status: "cancelled" });
+    return NextResponse.json({
+      ok: true,
+      status: "cancelled",
+      refundedJmd: hail.journey_id ? refundedJmd : 0,
+    });
   }
 
   return NextResponse.json({ error: "unhandled transition" }, { status: 500 });

@@ -79,7 +79,7 @@ export async function GET() {
   const { data: pending } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at, journey_id, leg_order, is_transfer_leg",
     )
     .eq("route_id", session.route_id)
     .eq("status", "requested")
@@ -91,7 +91,7 @@ export async function GET() {
   const { data: accepted } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, accepted_at",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, accepted_at, journey_id, leg_order, is_transfer_leg",
     )
     .eq("session_id", session.id)
     .eq("status", "accepted")
@@ -101,7 +101,7 @@ export async function GET() {
   const { data: onboard } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, picked_up_at",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, picked_up_at, journey_id, leg_order, is_transfer_leg",
     )
     .eq("session_id", session.id)
     .eq("status", "picked_up")
@@ -171,6 +171,9 @@ async function attachRiderProfiles(
     fare_jmd: number;
     accepted_at?: string;
     picked_up_at?: string;
+    journey_id?: string | null;
+    leg_order?: number | null;
+    is_transfer_leg?: boolean;
   }>,
   shape: "accepted" | "onboard",
 ) {
@@ -197,6 +200,9 @@ async function attachRiderProfiles(
       dropoffLng: nonZero(h.dropoff_lng),
       distanceKm: Number(h.distance_km),
       fareJmd: h.fare_jmd,
+      journeyId: h.journey_id ?? null,
+      legOrder: h.leg_order ?? null,
+      isTransferLeg: h.is_transfer_leg ?? false,
       rider: {
         name: (p?.full_name as string | null) ?? null,
         avatarUrl: (p?.avatar_url as string | null) ?? null,
@@ -229,6 +235,9 @@ function enrichAndSortPending(
     fare_jmd: number;
     concession: boolean;
     requested_at: string;
+    journey_id?: string | null;
+    leg_order?: number | null;
+    is_transfer_leg?: boolean;
   }> | null,
   session: {
     current_lat: number | null;
@@ -259,6 +268,9 @@ function enrichAndSortPending(
       concession: h.concession,
       requestedAt: h.requested_at,
       proximityKm,
+      journeyId: h.journey_id ?? null,
+      legOrder: h.leg_order ?? null,
+      isTransferLeg: h.is_transfer_leg ?? false,
     };
   });
 

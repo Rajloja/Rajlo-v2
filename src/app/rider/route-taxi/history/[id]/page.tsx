@@ -49,6 +49,9 @@ type Hail = {
   cancellationReason: string | null;
   commissionJmd: number | null;
   driverEarningsJmd: number | null;
+  journeyId: string | null;
+  legOrder: number | null;
+  isTransferLeg: boolean;
   session: null | {
     driver: null | {
       firstName: string | null;
@@ -70,6 +73,30 @@ type Hail = {
 
 type Payload = { hail: Hail; walletBalanceJmd: number | null };
 
+type JourneyLegSummary = {
+  hailId: string;
+  legOrder: number | null;
+  isTransferLeg: boolean;
+  status: string;
+  pickup: { name: string };
+  dropoff: { name: string };
+  fareJmd: number;
+};
+type JourneyBreakdown = {
+  journey: {
+    id: string;
+    status: "planning" | "active" | "completed" | "cancelled";
+    origin: string;
+    destination: string;
+    totalFareJmd: number;
+    settledFareJmd: number;
+    refundedFareJmd: number;
+    plannedLegCount: number;
+    completedLegCount: number;
+  };
+  legs: JourneyLegSummary[];
+};
+
 export default function RouteTaxiHistoryDetailPage({
   params,
 }: {
@@ -77,6 +104,7 @@ export default function RouteTaxiHistoryDetailPage({
 }) {
   const { id } = use(params);
   const [data, setData] = useState<Payload | null>(null);
+  const [journey, setJourney] = useState<JourneyBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +123,22 @@ export default function RouteTaxiHistoryDetailPage({
         const json = (await res.json()) as Payload;
         if (cancelled) return;
         setData(json);
+
+        // If this hail is part of a multi-leg journey, pull the whole
+        // journey so we can render the per-leg fare breakdown. Best-
+        // effort — single-leg view still works if the fetch fails.
+        if (json.hail.journeyId) {
+          try {
+            const jr = await fetch(
+              `/api/rider/route-taxi/journeys/${json.hail.journeyId}`,
+            );
+            if (jr.ok && !cancelled) {
+              setJourney((await jr.json()) as JourneyBreakdown);
+            }
+          } catch {
+            /* skip — receipt still useful without journey context */
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Couldn't load trip");
@@ -374,6 +418,16 @@ export default function RouteTaxiHistoryDetailPage({
         </section>
       </FadeUp>
 
+      {/* Multi-leg journey breakdown — renders only when this hail
+         is one leg of a route_journeys row. Shows every leg's fare so
+         the rider can reconcile the wallet debit against the corridor
+         chain they actually rode. */}
+      {journey && journey.journey.plannedLegCount > 1 && (
+        <FadeUp delay={0.11}>
+          <JourneyBreakdownPanel journey={journey} currentHailId={hail.id} />
+        </FadeUp>
+      )}
+
       <FadeUp delay={0.12}>
         <Link
           href="/rider/request"
@@ -384,6 +438,116 @@ export default function RouteTaxiHistoryDetailPage({
         </Link>
       </FadeUp>
     </div>
+  );
+}
+
+function JourneyBreakdownPanel({
+  journey,
+  currentHailId,
+}: {
+  journey: JourneyBreakdown;
+  currentHailId: string;
+}) {
+  const j = journey.journey;
+  const legs = [...journey.legs].sort(
+    (a, b) => (a.legOrder ?? 0) - (b.legOrder ?? 0),
+  );
+  const settledLegs = legs.filter((l) => l.status === "completed").length;
+  return (
+    <section className="overflow-hidden rounded-3xl border border-line bg-surface">
+      <div className="flex items-baseline justify-between gap-3 border-b border-line bg-surface-soft px-5 py-4 md:px-6 md:py-5">
+        <div className="min-w-0">
+          <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+            Journey breakdown
+          </p>
+          <p className="mt-0.5 truncate text-sm font-extrabold tracking-tight">
+            {j.origin} <span className="text-rajlo-red">→</span>{" "}
+            {j.destination}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted">
+            {settledLegs} of {j.plannedLegCount} legs settled
+            {j.refundedFareJmd > 0
+              ? ` · ${formatJMD(j.refundedFareJmd)} refunded`
+              : ""}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+            Settled total
+          </p>
+          <p className="text-2xl font-extrabold tracking-tight">
+            {formatJMD(j.settledFareJmd)}
+          </p>
+        </div>
+      </div>
+      <ol>
+        {legs.map((leg, idx) => {
+          const isCurrent = leg.hailId === currentHailId;
+          const isDone = leg.status === "completed";
+          const isCancelled = leg.status === "cancelled";
+          return (
+            <li
+              key={leg.hailId}
+              className={`flex items-center gap-3 border-b border-line px-5 py-3 last:border-b-0 md:px-6 ${
+                isCurrent ? "bg-primary-soft/30" : ""
+              }`}
+            >
+              <span
+                className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
+                  isDone
+                    ? "bg-emerald-500 text-white"
+                    : isCancelled
+                      ? "bg-surface-soft text-muted"
+                      : isCurrent
+                        ? "bg-rajlo-red text-white"
+                        : "bg-surface-soft text-muted"
+                }`}
+              >
+                {isDone ? (
+                  <Icon name="check-circle" className="h-3.5 w-3.5" />
+                ) : (
+                  idx + 1
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`truncate text-sm font-bold ${
+                    isCancelled ? "text-muted line-through" : ""
+                  }`}
+                >
+                  {leg.pickup.name}{" "}
+                  <span className="text-rajlo-red">→</span>{" "}
+                  {leg.dropoff.name}
+                </p>
+                <p className="text-[11px] text-muted">
+                  {isDone
+                    ? "Settled"
+                    : isCancelled
+                      ? "Cancelled"
+                      : isCurrent
+                        ? "This leg"
+                        : "Pending"}
+                  {leg.isTransferLeg ? " · transfer" : ""}
+                </p>
+              </div>
+              <p
+                className={`shrink-0 text-sm font-extrabold tabular-nums ${
+                  isCancelled ? "text-muted" : ""
+                }`}
+              >
+                {formatJMD(leg.fareJmd)}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+      {j.status === "active" && (
+        <div className="bg-surface-soft px-5 py-3 text-[11px] text-muted md:px-6">
+          Journey still in flight — the total updates as each leg
+          settles.
+        </div>
+      )}
+    </section>
   );
 }
 

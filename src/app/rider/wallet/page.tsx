@@ -39,6 +39,11 @@ type WalletTxn = {
 
 type WalletResponse = {
   balanceJmd: number;
+  /** Sum of every active hold (e.g. money reserved for an in-flight
+   *  multi-leg route taxi journey). `availableJmd` = `balanceJmd` −
+   *  `lockedJmd` is what the rider can actually spend right now. */
+  lockedJmd?: number;
+  availableJmd?: number;
   transactions: WalletTxn[];
   pagination?: { hasMore: boolean };
 };
@@ -79,6 +84,8 @@ export default function RiderWalletPage() {
     interval: 15_000,
   });
   const balance = wallet.data?.balanceJmd ?? 0;
+  const locked = wallet.data?.lockedJmd ?? 0;
+  const available = wallet.data?.availableJmd ?? Math.max(0, balance - locked);
   // Pagination state — first page lives in `wallet` (auto-refreshed
   // every 15s); older pages loaded via "Load more" accumulate here
   // separately so the refresh doesn't wipe them.
@@ -163,9 +170,17 @@ export default function RiderWalletPage() {
               {wallet.loading ? (
                 <Skeleton variant="dark" className="h-12 w-44" rounded="lg" />
               ) : (
-                formatJMD(balance)
+                formatJMD(available)
               )}
             </p>
+            {locked > 0 && (
+              <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/85 backdrop-blur">
+                <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-rajlo-red">
+                  <Icon name="shield" className="h-2.5 w-2.5 text-white" />
+                </span>
+                {formatJMD(locked)} locked for an active trip
+              </p>
+            )}
             <p className="mt-2 text-sm text-white/75">
               Used for booking trips, sending to other riders, or receiving refunds.
             </p>

@@ -21,6 +21,7 @@ import {
   type FareEstimate,
   type Place,
 } from "@/lib/jamaica";
+import type { CorridorPath } from "@/lib/route-taxi-pathfinder";
 
 type RouteTaxiMatch = {
   route: {
@@ -74,6 +75,13 @@ export default function RiderRequestPage() {
   const [matches, setMatches] = useState<RouteTaxiMatch[] | null>(null);
   const [matching, setMatching] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  // Multi-leg journey fallback — when the corridor matcher returns
+  // zero rows, we run the pathfinder to see if a chain of corridors
+  // can cover the same A → B (e.g. 7-Mile → Negril Bus Park →
+  // Sav-la-Mar). The result, when present, drives the Route Taxi
+  // card instead of the single-corridor variant.
+  const [journeyQuote, setJourneyQuote] = useState<CorridorPath | null>(null);
+  const [journeyQuoting, setJourneyQuoting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Triggered when the booking API returns 402 (insufficient wallet
@@ -250,6 +258,62 @@ export default function RiderRequestPage() {
     // never the trigger. Putting it in deps creates a feedback loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickup, dropoff, filledStops.length]);
+
+  // Multi-leg fallback. When the corridor matcher returns zero rows
+  // we still want to offer Route Taxi if a chain of corridors can
+  // cover the A → B (e.g. 7-Mile → Negril Bus Park → Sav-la-Mar).
+  // Triggers only after the matcher has settled (matching === false)
+  // AND matches is an empty array (not null = "still loading"). The
+  // journey-quote endpoint snaps pickup/dropoff to the nearest
+  // corridor endpoints and runs Dijkstra over the corridor graph.
+  useEffect(() => {
+    if (!pickup || !dropoff || filledStops.length > 0) {
+      setJourneyQuote(null);
+      return;
+    }
+    if (matching) return;
+    if (!matches || matches.length > 0) {
+      // Either still loading, or a direct corridor was found — no
+      // need for the multi-leg fallback.
+      setJourneyQuote(null);
+      return;
+    }
+    let cancelled = false;
+    setJourneyQuoting(true);
+    (async () => {
+      try {
+        const res = await fetch("/api/rider/route-taxi/journey-quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickup: {
+              name: pickup.name,
+              lat: pickup.lat,
+              lng: pickup.lng,
+            },
+            dropoff: {
+              name: dropoff.name,
+              lat: dropoff.lat,
+              lng: dropoff.lng,
+            },
+          }),
+        });
+        if (!res.ok) throw new Error("journey-quote failed");
+        const json = (await res.json()) as {
+          journey: CorridorPath | null;
+        };
+        if (cancelled) return;
+        setJourneyQuote(json.journey);
+      } catch {
+        if (!cancelled) setJourneyQuote(null);
+      } finally {
+        if (!cancelled) setJourneyQuoting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pickup, dropoff, filledStops.length, matching, matches]);
 
   // The match the rider would get IF they pick Route Taxi — drives
   // the card render. Defaults to the top match the matcher returned;
@@ -439,11 +503,73 @@ export default function RiderRequestPage() {
     setSubmitting(true);
     setSubmitError(null);
 
-    // Route Taxi (Mode B) — branch out to the hail endpoint with the
-    // matched corridor, then send the rider to the live-status page
-    // we already built. The rest of the form (seats, carpool, notes,
-    // multi-stop) doesn't apply: route taxis are single-seat,
-    // single-leg, regulated.
+    // Route Taxi (Mode B) — two flavours depending on whether a
+    // direct corridor exists. Both end with the rider on the live
+    // surface; the difference is which endpoint creates the row +
+    // whether a wallet hold is placed.
+    //
+    //   • Direct corridor match → /api/rider/route-taxi/hail
+    //     (single-leg, legacy path, no journey)
+    //   • Multi-leg journey from the pathfinder → /api/rider/route-taxi/journey
+    //     (creates a route_journeys row, locks the total fare in a
+    //     wallet_holds row, broadcasts leg-1)
+    if (mode === "route_taxi" && !selectedMatch && journeyQuote) {
+      try {
+        const res = await fetch("/api/rider/route-taxi/journey", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickup: {
+              name: pickup.name,
+              address: pickup.address,
+              lat: pickup.lat,
+              lng: pickup.lng,
+              parish: pickup.parish,
+            },
+            dropoff: {
+              name: dropoff.name,
+              address: dropoff.address,
+              lat: dropoff.lat,
+              lng: dropoff.lng,
+              parish: dropoff.parish,
+            },
+            plan: journeyQuote,
+          }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+          error?: string;
+          journey?: { id: string };
+          leg?: { id: string };
+          fareJmd?: number;
+          availableJmd?: number;
+          requiredJmd?: number;
+          balanceJmd?: number;
+        };
+        if (res.status === 402) {
+          setInsufficientFunds({
+            fareJmd: json.requiredJmd ?? journeyQuote.totalFareJmd,
+            balanceJmd: json.balanceJmd ?? json.availableJmd ?? 0,
+          });
+          setSubmitting(false);
+          return;
+        }
+        if (!res.ok || !json.ok || !json.leg?.id) {
+          throw new Error(
+            json.message ?? json.error ?? "Couldn't start journey.",
+          );
+        }
+        router.push(`/rider/route-taxi/live?id=${json.leg.id}`);
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error ? err.message : "Couldn't start journey.",
+        );
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (mode === "route_taxi" && selectedMatch) {
       try {
         const res = await fetch("/api/rider/route-taxi/hail", {
@@ -839,15 +965,76 @@ export default function RiderRequestPage() {
                     </p>
                   </button>
                 )}
+
+              {/* Route Taxi — multi-leg fallback. Surfaces when no
+                  direct corridor matches but the pathfinder found a
+                  chain (e.g. 7-Mile → Negril Bus Park → Sav-la-Mar). */}
+              {filledStops.length === 0 && journeyQuoting && (
+                <div className="flex flex-col items-stretch gap-2 rounded-2xl border border-line bg-surface-soft p-4">
+                  <Skeleton className="h-9 w-9" rounded="xl" />
+                  <Skeleton className="h-4 w-32" rounded="md" />
+                  <Skeleton className="h-3 w-full" rounded="md" />
+                </div>
+              )}
+              {filledStops.length === 0 &&
+                !matching &&
+                !journeyQuoting &&
+                (!matches || matches.length === 0) &&
+                journeyQuote && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("route_taxi")}
+                    aria-pressed={mode === "route_taxi"}
+                    className={`group relative flex flex-col items-stretch gap-2 rounded-2xl border p-4 text-left transition-all ${
+                      mode === "route_taxi"
+                        ? "border-rajlo-red bg-primary-soft shadow-md shadow-rajlo-red/15"
+                        : "border-line bg-surface hover:border-rajlo-red/40 hover:bg-primary-soft/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                          mode === "route_taxi"
+                            ? "bg-rajlo-red text-white"
+                            : "bg-primary-soft text-rajlo-red"
+                        }`}
+                      >
+                        <Icon name="navigation" className="h-4 w-4" />
+                      </span>
+                      <span className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+                        Route Taxi · {journeyQuote.legCount} legs
+                      </span>
+                    </div>
+                    <p className="text-base font-extrabold tracking-tight">
+                      {formatJMD(journeyQuote.totalFareJmd)}
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-muted">
+                      <span className="font-semibold text-foreground">
+                        {journeyQuote.legs
+                          .map((l, i) =>
+                            i === 0 ? l.origin : `→ ${l.origin}`,
+                          )
+                          .join(" ")}{" "}
+                        → {journeyQuote.legs[journeyQuote.legs.length - 1].destination}
+                      </span>
+                      <br />
+                      {journeyQuote.totalDistanceKm.toFixed(1)} km · scan to
+                      transfer between legs
+                    </p>
+                  </button>
+                )}
             </div>
 
-            {/* Hint when no route taxi covers this corridor */}
+            {/* Hint when neither a direct corridor nor a multi-leg
+                path can serve this trip — Private is the only option. */}
             {filledStops.length === 0 &&
               !matching &&
+              !journeyQuoting &&
               matches &&
-              matches.length === 0 && (
+              matches.length === 0 &&
+              !journeyQuote && (
                 <p className="mt-2 rounded-xl bg-surface-soft px-3 py-2 text-[11px] text-muted">
-                  No TA route taxi covers this trip yet — Private Ride is your
+                  No route taxi covers this trip yet — Private Ride is your
                   option.
                 </p>
               )}
@@ -972,17 +1159,25 @@ export default function RiderRequestPage() {
   const barFareJmd =
     mode === "route_taxi" && selectedMatch
       ? selectedMatch.fareJmd
-      : fare.fareJMD;
+      : mode === "route_taxi" && journeyQuote
+        ? journeyQuote.totalFareJmd
+        : fare.fareJMD;
   const barLabel =
     mode === "route_taxi" && selectedMatch
       ? "Route taxi fare"
-      : fareCalculating
-      ? "Calculating fare…"
-      : fare.fareJMD > 0
-      ? "Trip total"
-      : "Estimate appears here";
+      : mode === "route_taxi" && journeyQuote
+        ? `Route taxi · ${journeyQuote.legCount} legs`
+        : fareCalculating
+          ? "Calculating fare…"
+          : fare.fareJMD > 0
+            ? "Trip total"
+            : "Estimate appears here";
   const ctaLabel =
-    mode === "route_taxi" && selectedMatch ? "Hail next car" : "Request ride";
+    mode === "route_taxi" && selectedMatch
+      ? "Hail next car"
+      : mode === "route_taxi" && journeyQuote
+        ? "Start journey"
+        : "Request ride";
 
   const barContent = (
     <>
