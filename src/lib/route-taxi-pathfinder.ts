@@ -27,12 +27,23 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculateRouteFare, calculateConcessionFare } from "@/lib/fare-engine";
 import { haversineKm } from "@/lib/jamaica";
 
-/** Snap radius — how far a rider may walk to reach a corridor head.
- *  8 km is the realistic upper bound for "walk to the route taxi
- *  stand": rural Hanover/Westmoreland have endpoints sparsely spaced
- *  and 5 km would silently fail trips where the rider is reasonably
- *  close to a corridor head but just outside the tight radius. */
-export const MAX_SNAP_KM = 8;
+/** Snap radius — how far a rider may walk OR short-cab to reach a
+ *  corridor head.
+ *
+ *  10 km handles the realistic Jamaica case where corridor endpoints
+ *  are sparsely spaced (rural Hanover/Westmoreland) AND where two
+ *  endpoints in the same town (e.g. "Negril" and "West End") are
+ *  separate graph nodes despite being geographically adjacent. A
+ *  rider in northern Negril sits ~9 km from West End but only the
+ *  West End endpoint reaches Sav-la-Mar — 8 km was too tight to
+ *  catch that, 5 km missed everything beyond direct adjacency.
+ *
+ *  The walk penalty in `findRouteTaxiPath` (50 JMD/km) and the snap
+ *  warning surfaced on the rider's card mean a 9 km snap still
+ *  shows the cost to the rider; they self-select whether the
+ *  short-cab is worth it. We're not silently routing them across
+ *  half the parish — we're naming the gap clearly. */
+export const MAX_SNAP_KM = 10;
 
 /** Hard cap on path length so we don't return absurd 6-transfer chains. */
 export const MAX_LEGS = 4;
