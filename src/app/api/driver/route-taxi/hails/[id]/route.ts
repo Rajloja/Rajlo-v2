@@ -312,31 +312,22 @@ export async function PATCH(
   }
 
   if (target === "picked_up") {
-    const { error: pickupError } = await supabase
-      .from("route_hails")
-      .update({
-        status: "picked_up",
-        picked_up_at: new Date().toISOString(),
-      })
-      .eq("id", hail.id)
-      .eq("status", "accepted");
-
-    if (pickupError) {
-      return NextResponse.json({ error: pickupError.message }, { status: 500 });
-    }
-
-    void notifyRider(supabase, {
-      riderId: hail.rider_id,
-      kind: "trip",
-      title: "Trip in progress",
-      body: `Onboard with ${driver.first_name ?? "your driver"} — heading to ${hail.dropoff_name}.`,
-      href: "/rider/route-taxi",
-      cta: "View trip",
-      pushTag: `route-hail-${hail.id}`,
-      pushRenotify: false,
-    }).catch(() => null);
-
-    return NextResponse.json({ ok: true, status: "picked_up" });
+    // Drivers can no longer self-transition a hail to picked_up.
+    // The rider scanning the driver's session QR is the only path
+    // into `picked_up` — that's the trust gate that proves the
+    // right rider got into the right car before any wallet debit
+    // can fire on leg completion.
+    //
+    // Symmetric with the rider PIN flow on private rides: a driver
+    // tap can't move the trip forward unilaterally.
+    return NextResponse.json(
+      {
+        error: "rider_scan_required",
+        message:
+          "The rider needs to scan your session QR to start the trip — this prevents trips starting with the wrong car.",
+      },
+      { status: 409 },
+    );
   }
 
   if (target === "completed") {

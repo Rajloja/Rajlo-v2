@@ -302,22 +302,27 @@ function LiveInner() {
         </FadeUp>
       )}
 
-      {/* Transfer-claim panel — shown when this hail is a pending
-         transfer leg waiting on a driver. Lets the rider scan the
-         driver's QR code in person to lock in that specific car. */}
-      {journey &&
-        hail.isTransferLeg &&
-        hail.status === "requested" &&
-        journey.journey.status === "active" && (
-          <FadeUp delay={0.03}>
-            <TransferClaimPanel
-              journeyId={journey.journey.id}
-              pickupName={hail.pickup}
-              fareJmd={hail.fareJmd}
-              onClaimed={() => void refresh()}
-            />
-          </FadeUp>
-        )}
+      {/* Scan-to-start panel — the rider scanning the driver's
+         session QR is the trust gate for every route taxi trip.
+         Shows up whenever a scan can advance the state:
+           - status=accepted: driver matched, rider scans to start
+             trip (NEW: now required for ALL hails, not only transfers).
+           - status=requested + transfer leg: rider arriving at a
+             multi-leg transfer point, scan claims-and-starts in one
+             shot.
+         Hidden once the trip is in progress or terminal. */}
+      {(hail.status === "accepted" ||
+        (hail.status === "requested" && hail.isTransferLeg)) && (
+        <FadeUp delay={0.03}>
+          <ScanToStartPanel
+            hailId={hail.id}
+            mode={hail.status}
+            pickupName={hail.pickup}
+            fareJmd={hail.fareJmd}
+            onStarted={() => void refresh()}
+          />
+        </FadeUp>
+      )}
 
       <FadeUp>
         <StatusHero hail={hail} />
@@ -1293,29 +1298,45 @@ function legLabel(status: string): string {
   }
 }
 
-function TransferClaimPanel({
-  journeyId,
+/**
+ * Scan the driver's session QR to start (and, if needed, simultaneously
+ * claim) the trip. The scan is the trust gate for every route taxi
+ * ride: the server refuses driver-initiated `picked_up` and only
+ * advances state when the rider's app POSTs a valid session id to
+ * /api/rider/route-taxi/hails/[id]/scan.
+ *
+ * Two modes:
+ *   - "accepted": driver is already matched; rider is boarding now.
+ *     Copy reads "Start your trip · scan to confirm you're in this car".
+ *   - "requested": multi-leg transfer arrival; rider walks up to a
+ *     driver running the next corridor. Same scan does both claim and
+ *     start in a single atomic update on the server.
+ */
+function ScanToStartPanel({
+  hailId,
+  mode,
   pickupName,
   fareJmd,
-  onClaimed,
+  onStarted,
 }: {
-  journeyId: string;
+  hailId: string;
+  mode: "accepted" | "requested";
   pickupName: string;
   fareJmd: number;
-  onClaimed: () => void;
+  onStarted: () => void;
 }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [manualId, setManualId] = useState("");
-  const [claiming, setClaiming] = useState(false);
-  const [claimError, setClaimError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const claim = useCallback(
+  const scan = useCallback(
     async (sessionId: string) => {
-      setClaiming(true);
-      setClaimError(null);
+      setSubmitting(true);
+      setErrorMessage(null);
       try {
         const res = await fetch(
-          `/api/rider/route-taxi/journeys/${journeyId}/claim`,
+          `/api/rider/route-taxi/hails/${hailId}/scan`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1329,40 +1350,55 @@ function TransferClaimPanel({
         };
         if (!res.ok || !json.ok) {
           throw new Error(
-            json.message ?? json.error ?? "Couldn't lock in that driver.",
+            json.message ?? json.error ?? "Couldn't start the trip.",
           );
         }
         setScannerOpen(false);
         setManualId("");
-        onClaimed();
+        onStarted();
       } catch (e) {
-        setClaimError(
-          e instanceof Error ? e.message : "Couldn't lock in that driver.",
+        setErrorMessage(
+          e instanceof Error ? e.message : "Couldn't start the trip.",
         );
       } finally {
-        setClaiming(false);
+        setSubmitting(false);
       }
     },
-    [journeyId, onClaimed],
+    [hailId, onStarted],
   );
+
+  const isTransfer = mode === "requested";
+  const eyebrow = isTransfer ? "Next leg · transfer" : "Boarding · scan to start";
+  const title = isTransfer
+    ? "Find your next route taxi"
+    : "Scan to start your trip";
+  const blurb = isTransfer ? (
+    <>
+      We&apos;ve notified drivers heading through{" "}
+      <span className="font-bold">{pickupName}</span>. When the next car
+      pulls up, scan the driver&apos;s QR to lock them in — {formatJMD(fareJmd)}.
+    </>
+  ) : (
+    <>
+      Hop in and scan the driver&apos;s QR code on their phone to start
+      this trip — {formatJMD(fareJmd)}. We won&apos;t debit your wallet
+      until the trip wraps. Until you scan, no money moves.
+    </>
+  );
+  const scanLabel = isTransfer ? "Scan driver QR" : "Scan to start trip";
+  const submitInflightLabel = isTransfer ? "Locking in…" : "Starting…";
+  const submitIdleLabel = isTransfer ? "Lock in" : "Start trip";
 
   return (
     <section className="rounded-3xl border border-rajlo-red/30 bg-primary-soft p-6 md:p-7">
       <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-        Next leg · transfer
+        {eyebrow}
       </p>
-      <h2 className="mt-1 text-xl font-extrabold tracking-tight">
-        Find your next route taxi
-      </h2>
-      <p className="mt-1 text-sm text-rajlo-black/75">
-        We&apos;ve notified drivers heading through{" "}
-        <span className="font-bold">{pickupName}</span>. When the next car
-        pulls up, scan the driver&apos;s QR code to lock them in for the next
-        leg — {formatJMD(fareJmd)}.
-      </p>
-      {claimError && (
+      <h2 className="mt-1 text-xl font-extrabold tracking-tight">{title}</h2>
+      <p className="mt-1 text-sm text-rajlo-black/75">{blurb}</p>
+      {errorMessage && (
         <p className="mt-3 rounded-xl border border-rajlo-red/40 bg-white px-3 py-2 text-xs font-semibold text-rajlo-red">
-          {claimError}
+          {errorMessage}
         </p>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
@@ -1370,10 +1406,10 @@ function TransferClaimPanel({
           type="button"
           onClick={() => setScannerOpen(true)}
           className="inline-flex items-center gap-2 rounded-full bg-rajlo-red px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-rajlo-red/30 hover:-translate-y-0.5 hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={claiming}
+          disabled={submitting}
         >
           <Icon name="search" className="h-4 w-4" />
-          Scan driver QR
+          {scanLabel}
         </button>
         <details className="group rounded-full border border-line bg-white px-4 py-2.5 text-xs font-bold">
           <summary className="cursor-pointer select-none list-none">
@@ -1389,15 +1425,18 @@ function TransferClaimPanel({
             />
             <button
               type="button"
-              disabled={claiming || !manualId.trim()}
+              disabled={submitting || !manualId.trim()}
               onClick={() => {
                 const sid = extractSessionId(manualId);
-                if (sid) void claim(sid);
-                else setClaimError("That doesn't look like a session code.");
+                if (sid) void scan(sid);
+                else
+                  setErrorMessage(
+                    "That doesn't look like a session code.",
+                  );
               }}
               className="rounded-full bg-rajlo-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
             >
-              {claiming ? "Locking in…" : "Lock in"}
+              {submitting ? submitInflightLabel : submitIdleLabel}
             </button>
           </div>
         </details>
@@ -1406,9 +1445,9 @@ function TransferClaimPanel({
         <SessionScannerModal
           onClose={() => setScannerOpen(false)}
           onDetected={(sid) => {
-            void claim(sid);
+            void scan(sid);
           }}
-          claiming={claiming}
+          claiming={submitting}
         />
       )}
     </section>

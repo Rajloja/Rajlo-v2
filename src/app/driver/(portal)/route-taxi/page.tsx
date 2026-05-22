@@ -1028,27 +1028,120 @@ function ActiveSessionMonitor({
         </section>
       </FadeUp>
 
-      {/* Transfer-rider QR — a passenger on a multi-leg journey
-         arrives at this corridor as a transfer. They scan THIS QR to
-         lock you in as the next leg's driver. Hidden if there are no
-         open seats — full vehicle can't take a transfer. */}
+      {/* PENDING — hails on this corridor waiting for accept.
+         Pulled up to the top of the page so a driver opening the
+         app sees the actionable queue first, before any of the
+         supporting UI (QR card, map, onboard list). */}
+      <FadeUp delay={0.02}>
+        <section>
+          <SectionHeader
+            eyebrow="Hails on this route"
+            title={
+              pending.length === 0
+                ? "Waiting for the next rider…"
+                : `${pending.length} rider${pending.length === 1 ? "" : "s"} hailing`
+            }
+            hint={
+              seatsFull
+                ? "Vehicle full — drop someone off before accepting more"
+                : undefined
+            }
+          />
+          {pending.length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-line bg-surface-soft p-8 text-center">
+              <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white text-rajlo-red shadow-sm">
+                <Icon name="navigation" className="h-5 w-5" />
+              </span>
+              <p className="mt-3 text-sm font-bold">No hails yet</p>
+              <p className="mt-1 text-xs text-muted">
+                Stay on this corridor — we&apos;re polling every 5s for new
+                riders.
+              </p>
+            </div>
+          ) : (
+            <ul className="mt-3 space-y-2.5">
+              {pending.map((h) => (
+                <li
+                  key={h.id}
+                  className={`rounded-2xl border bg-surface p-4 transition-shadow hover:shadow-md ${
+                    h.isTransferLeg
+                      ? "border-rajlo-red/40 ring-1 ring-rajlo-red/20"
+                      : "border-line"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {h.isTransferLeg && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white">
+                            <Icon
+                              name="arrow-right"
+                              className="h-2.5 w-2.5"
+                            />
+                            Transfer rider
+                          </span>
+                        )}
+                        <p className="text-sm font-bold">
+                          {h.pickup} → {h.dropoff}
+                        </p>
+                        {typeof h.proximityKm === "number" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200">
+                            <Icon name="map-pin" className="h-2.5 w-2.5" />
+                            {h.proximityKm < 1
+                              ? `${Math.round(h.proximityKm * 1000)} m away`
+                              : `${h.proximityKm.toFixed(1)} km away`}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-muted">
+                        {h.distanceKm.toFixed(1)} km · You earn ~
+                        {formatJMD(Math.round(h.fareJmd * 0.85))}
+                        {h.concession ? " · concession" : ""}
+                        {" · rider scans QR to start"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onTransition(h.id, "accepted")}
+                      disabled={isPending(h.id, "accepted") || seatsFull}
+                      title={seatsFull ? "Vehicle full" : undefined}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white shadow-md shadow-rajlo-red/25 hover:-translate-y-0.5 hover:bg-primary-hover disabled:opacity-50 disabled:hover:-translate-y-0"
+                    >
+                      <Icon name="check-circle" className="h-3.5 w-3.5" />
+                      {isPending(h.id, "accepted")
+                        ? "Accepting…"
+                        : `Accept · ${formatJMD(h.fareJmd)}`}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </FadeUp>
+
+      {/* Boarding QR — every rider scans this to start their trip,
+         not just multi-leg transfer riders. Driver self-tap on
+         "picked up" is gone; the rider's scan is the only path to
+         `picked_up` state. Hidden when the vehicle is full because
+         no one new can board. */}
       {session.seatsTaken < session.vehicleCapacity && (
-        <FadeUp delay={0.02}>
+        <FadeUp delay={0.04}>
           <section className="rounded-3xl border border-line bg-surface">
             <div className="grid gap-4 p-5 md:grid-cols-[auto_1fr] md:items-center md:gap-6 md:p-6">
               <SessionQr sessionId={session.id} size={140} />
               <div className="min-w-0">
                 <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                  Transfer pickup
+                  Boarding
                 </p>
                 <h2 className="mt-1 text-lg font-extrabold tracking-tight">
-                  Show this to transfer riders
+                  Every rider scans this to start the trip
                 </h2>
                 <p className="mt-2 text-sm text-muted">
-                  A passenger continuing a multi-leg journey scans
-                  this code to lock you in as their next driver.
-                  You&apos;ll get a notification the moment they
-                  scan — no waiting around for a chance pickup.
+                  Show this code when a rider opens your door. Their
+                  scan starts the trip and you get a notification —
+                  no &quot;picked up&quot; button to tap. Wallet only
+                  moves at trip completion.
                 </p>
               </div>
             </div>
@@ -1227,18 +1320,18 @@ function ActiveSessionMonitor({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onTransition(h.id, "picked_up")}
-                        disabled={isPending(h.id, "picked_up") || seatsFull}
-                        title={seatsFull ? "Vehicle full" : undefined}
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-amber-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-amber-600/25 hover:-translate-y-0.5 hover:bg-amber-700 disabled:opacity-50 disabled:hover:-translate-y-0 sm:flex-none"
+                      {/* Drivers no longer self-confirm pickup. The
+                          rider scans the session QR to start the
+                          trip — see the QR card above the hail list.
+                          Status pill here just tells the driver
+                          what they're waiting on. */}
+                      <span
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-amber-700/30 bg-white px-4 py-2.5 text-xs font-bold text-amber-900 sm:flex-none"
+                        title="The rider scans your session QR to start the trip — money only moves at completion."
                       >
-                        <Icon name="check-circle" className="h-3.5 w-3.5" />
-                        {isPending(h.id, "picked_up")
-                          ? "Boarding…"
-                          : "Picked up"}
-                      </button>
+                        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                        Waiting for rider to scan
+                      </span>
                       <button
                         type="button"
                         onClick={() => onTransition(h.id, "cancelled")}
@@ -1255,97 +1348,6 @@ function ActiveSessionMonitor({
           </section>
         </FadeUp>
       )}
-
-      {/* PENDING — waiting for accept */}
-      <FadeUp delay={0.07}>
-        <section>
-          <SectionHeader
-            eyebrow="Hails on this route"
-            title={
-              pending.length === 0
-                ? "Waiting for the next rider…"
-                : `${pending.length} rider${pending.length === 1 ? "" : "s"} hailing`
-            }
-            hint={
-              seatsFull
-                ? "Vehicle full — drop someone off before accepting more"
-                : undefined
-            }
-          />
-          {pending.length === 0 ? (
-            <div className="mt-3 rounded-2xl border border-dashed border-line bg-surface-soft p-8 text-center">
-              <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white text-rajlo-red shadow-sm">
-                <Icon name="navigation" className="h-5 w-5" />
-              </span>
-              <p className="mt-3 text-sm font-bold">No hails yet</p>
-              <p className="mt-1 text-xs text-muted">
-                Stay on this corridor — we&apos;re polling every 5s for new
-                riders.
-              </p>
-            </div>
-          ) : (
-            <ul className="mt-3 space-y-2.5">
-              {pending.map((h) => (
-                <li
-                  key={h.id}
-                  className={`rounded-2xl border bg-surface p-4 transition-shadow hover:shadow-md ${
-                    h.isTransferLeg
-                      ? "border-rajlo-red/40 ring-1 ring-rajlo-red/20"
-                      : "border-line"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {h.isTransferLeg && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white">
-                            <Icon
-                              name="arrow-right"
-                              className="h-2.5 w-2.5"
-                            />
-                            Transfer rider
-                          </span>
-                        )}
-                        <p className="text-sm font-bold">
-                          {h.pickup} → {h.dropoff}
-                        </p>
-                        {typeof h.proximityKm === "number" && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200">
-                            <Icon name="map-pin" className="h-2.5 w-2.5" />
-                            {h.proximityKm < 1
-                              ? `${Math.round(h.proximityKm * 1000)} m away`
-                              : `${h.proximityKm.toFixed(1)} km away`}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-muted">
-                        {h.distanceKm.toFixed(1)} km · You earn ~
-                        {formatJMD(Math.round(h.fareJmd * 0.85))}
-                        {h.concession ? " · concession" : ""}
-                        {h.isTransferLeg
-                          ? " · scan rider's QR or wait for them to scan yours"
-                          : ""}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onTransition(h.id, "accepted")}
-                      disabled={isPending(h.id, "accepted") || seatsFull}
-                      title={seatsFull ? "Vehicle full" : undefined}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white shadow-md shadow-rajlo-red/25 hover:-translate-y-0.5 hover:bg-primary-hover disabled:opacity-50 disabled:hover:-translate-y-0"
-                    >
-                      <Icon name="check-circle" className="h-3.5 w-3.5" />
-                      {isPending(h.id, "accepted")
-                        ? "Accepting…"
-                        : `Accept · ${formatJMD(h.fareJmd)}`}
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </FadeUp>
 
       {/* Chat sheet — single instance, opens for whichever hail the
          driver tapped. RLS ensures the driver can only see + send on
