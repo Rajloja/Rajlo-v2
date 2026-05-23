@@ -66,6 +66,12 @@ type ActiveSession = {
     parish: string | null;
     distanceKm: number;
     taFareJmd: number;
+    /** Endpoint coords for the corridor polyline on the driver
+     *  map. Null on legacy route rows without the lat/lng backfill. */
+    originLat?: number | null;
+    originLng?: number | null;
+    destinationLat?: number | null;
+    destinationLng?: number | null;
   } | null;
 };
 
@@ -93,6 +99,16 @@ type HailRow = {
   isTransferLeg?: boolean;
   journeyId?: string | null;
   legOrder?: number | null;
+  /** Mid-corridor projection coords from the corridor-aware
+   *  pathfinder. When present, the driver's nav target / map pin
+   *  should resolve to these instead of pickupLat/pickupLng (the
+   *  rider's typed pickup, which may be slightly off-road). Legacy
+   *  hails created before the pathfinder rewrite leave these null
+   *  and the driver UI falls back to pickup coords. */
+  boardingLat?: number | null;
+  boardingLng?: number | null;
+  alightingLat?: number | null;
+  alightingLng?: number | null;
 };
 
 type RiderInfo = {
@@ -940,47 +956,133 @@ function ActiveSessionMonitor({
   //   2. First accepted hail's pickup (head to pickup)
   //   3. First pending hail's pickup (preview before accepting)
   const nextAction = useMemo(() => {
-    const onboardWithDropoff = onboard.find(
-      (h) => h.dropoffLat != null && h.dropoffLng != null,
-    );
-    if (onboardWithDropoff) {
-      return {
-        kind: "dropoff" as const,
-        place: hailToPlace(
-          onboardWithDropoff.dropoff,
-          onboardWithDropoff.dropoffLat as number,
-          onboardWithDropoff.dropoffLng as number,
-        ),
-      };
+    // Resolve nav-target coords for a hail. The corridor-aware
+    // pathfinder writes mid-corridor projection coords
+    // (boarding_lat/lng + alighting_lat/lng) which match the EXACT
+    // pin the rider sees on their map. When those are present we
+    // use them so both phones converge on the same spot. Legacy
+    // hails fall back to the rider's typed pickup/dropoff coords.
+    const pickupTarget = (
+      h: AcceptedHail | OnboardHail | HailRow,
+    ): { lat: number; lng: number } | null => {
+      if (h.boardingLat != null && h.boardingLng != null) {
+        return { lat: h.boardingLat, lng: h.boardingLng };
+      }
+      if (h.pickupLat != null && h.pickupLng != null) {
+        return { lat: h.pickupLat, lng: h.pickupLng };
+      }
+      return null;
+    };
+    const dropoffTarget = (
+      h: OnboardHail,
+    ): { lat: number; lng: number } | null => {
+      if (h.alightingLat != null && h.alightingLng != null) {
+        return { lat: h.alightingLat, lng: h.alightingLng };
+      }
+      if (h.dropoffLat != null && h.dropoffLng != null) {
+        return { lat: h.dropoffLat, lng: h.dropoffLng };
+      }
+      return null;
+    };
+
+    for (const h of onboard) {
+      const t = dropoffTarget(h);
+      if (t) {
+        return {
+          kind: "dropoff" as const,
+          place: hailToPlace(h.dropoff, t.lat, t.lng),
+        };
+      }
     }
-    const acceptedWithPickup = accepted.find(
-      (h) => h.pickupLat != null && h.pickupLng != null,
-    );
-    if (acceptedWithPickup) {
-      return {
-        kind: "pickup" as const,
-        place: hailToPlace(
-          acceptedWithPickup.pickup,
-          acceptedWithPickup.pickupLat as number,
-          acceptedWithPickup.pickupLng as number,
-        ),
-      };
+    for (const h of accepted) {
+      const t = pickupTarget(h);
+      if (t) {
+        return {
+          kind: "pickup" as const,
+          place: hailToPlace(h.pickup, t.lat, t.lng),
+        };
+      }
     }
-    const pendingWithPickup = pending.find(
-      (h) => h.pickupLat != null && h.pickupLng != null,
-    );
-    if (pendingWithPickup) {
-      return {
-        kind: "pickup" as const,
-        place: hailToPlace(
-          pendingWithPickup.pickup,
-          pendingWithPickup.pickupLat as number,
-          pendingWithPickup.pickupLng as number,
-        ),
-      };
+    for (const h of pending) {
+      const t = pickupTarget(h);
+      if (t) {
+        return {
+          kind: "pickup" as const,
+          place: hailToPlace(h.pickup, t.lat, t.lng),
+        };
+      }
     }
     return null;
   }, [onboard, accepted, pending]);
+
+  // Map overlays for the driver's session map. Two things go in:
+  //   - Corridor polyline (the route the driver runs) — extracted
+  //     from the session's route endpoints. Renders as the same amber
+  //     polyline the rider sees on their map, so both sides share a
+  //     visual vocabulary.
+  //   - Boarding pin on the rider's projected board point when an
+  //     accepted (or pending) hail has the corridor-aware coords.
+  //     Mirrors the orange "B" pin the rider sees.
+  //   - Alighting pin during the drop-off phase for the same reason.
+  const driverMapOverlays = useMemo(() => {
+    const empty = {
+      boarding: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      alighting: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      corridorLines: null as Array<{
+        from: { lat: number; lng: number };
+        to: { lat: number; lng: number };
+      }> | null,
+    };
+    const route = session.route;
+    const corridorLines =
+      route &&
+      route.originLat != null &&
+      route.originLng != null &&
+      route.destinationLat != null &&
+      route.destinationLng != null
+        ? [
+            {
+              from: { lat: route.originLat, lng: route.originLng },
+              to: {
+                lat: route.destinationLat,
+                lng: route.destinationLng,
+              },
+            },
+          ]
+        : null;
+
+    if (!nextAction) {
+      return { ...empty, corridorLines };
+    }
+
+    // Pull the currently-targeted hail so we can surface ITS
+    // boarding / alighting projection. We match by which array
+    // nextAction came from (dropoff = onboard, pickup = accepted /
+    // pending).
+    let boardingCoords: { lat: number; lng: number } | null = null;
+    let alightingCoords: { lat: number; lng: number } | null = null;
+    if (nextAction.kind === "dropoff") {
+      const h = onboard[0];
+      if (h?.alightingLat != null && h?.alightingLng != null) {
+        alightingCoords = { lat: h.alightingLat, lng: h.alightingLng };
+      }
+    } else {
+      const h = accepted[0] ?? pending[0];
+      if (h && h.boardingLat != null && h.boardingLng != null) {
+        boardingCoords = { lat: h.boardingLat, lng: h.boardingLng };
+      }
+    }
+
+    return {
+      boarding: boardingCoords ? { coords: boardingCoords } : null,
+      alighting: alightingCoords ? { coords: alightingCoords } : null,
+      corridorLines,
+    };
+  }, [session.route, nextAction, onboard, accepted, pending]);
 
   const showMap = Boolean(driverPosition || nextAction);
 
@@ -1175,6 +1277,15 @@ function ActiveSessionMonitor({
                         Going to {h.dropoff} · {h.distanceKm.toFixed(1)} km ·{" "}
                         {formatJMD(h.fareJmd)}
                       </p>
+                      {/* Reminder for the driver: the corridor-aware
+                          rider app shows the rider where to stand
+                          along the corridor. The driver runs the
+                          corridor as normal; the rider flags them
+                          down at the boarding pin. No detour needed. */}
+                      <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800 ring-1 ring-amber-200">
+                        <Icon name="map-pin" className="h-2.5 w-2.5" />
+                        Rider waiting along your corridor
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {/* Tapping "Pick up rider" pops the QR modal.
@@ -1251,6 +1362,9 @@ function ActiveSessionMonitor({
               dropoff={
                 nextAction?.kind === "dropoff" ? nextAction.place : null
               }
+              boarding={driverMapOverlays.boarding}
+              alighting={driverMapOverlays.alighting}
+              corridorLines={driverMapOverlays.corridorLines}
               driverPosition={driverPosition}
               liveRoute={
                 nextAction

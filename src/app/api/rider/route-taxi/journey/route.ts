@@ -308,6 +308,24 @@ export async function POST(request: Request) {
       journey_id: journeyId,
       leg_order: 1,
       is_transfer_leg: false,
+      // Boarding / alighting coords from the corridor-aware
+      // pathfinder. These are the mid-corridor projection points the
+      // rider sees on their map; the driver's nav target should
+      // resolve to these so both phones converge on the same spot.
+      // For multi-leg journeys, the alighting coords on this row
+      // refer to the leg-1 alight (= corridor end / transfer point);
+      // the journey-wide alighting (the rider's actual dropoff) is
+      // written to the FINAL leg in advanceJourney.
+      boarding_lat: plan.boarding.coords.lat,
+      boarding_lng: plan.boarding.coords.lng,
+      alighting_lat:
+        plan.legCount === 1
+          ? plan.alighting.coords.lat
+          : leg1.destinationLat,
+      alighting_lng:
+        plan.legCount === 1
+          ? plan.alighting.coords.lng
+          : leg1.destinationLng,
     })
     .select("id, status, fare_jmd, requested_at")
     .single();

@@ -67,7 +67,7 @@ export async function GET() {
   const { data: route } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd",
+      "id, origin_name, destination_name, origin_parish, destination_parish, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd",
     )
     .eq("id", session.route_id)
     .maybeSingle();
@@ -79,7 +79,7 @@ export async function GET() {
   const { data: pending } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at, journey_id, leg_order, is_transfer_leg",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, concession, requested_at, journey_id, leg_order, is_transfer_leg, boarding_lat, boarding_lng, alighting_lat, alighting_lng",
     )
     .eq("route_id", session.route_id)
     .eq("status", "requested")
@@ -91,7 +91,7 @@ export async function GET() {
   const { data: accepted } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, accepted_at, journey_id, leg_order, is_transfer_leg",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, accepted_at, journey_id, leg_order, is_transfer_leg, boarding_lat, boarding_lng, alighting_lat, alighting_lng",
     )
     .eq("session_id", session.id)
     .eq("status", "accepted")
@@ -101,7 +101,7 @@ export async function GET() {
   const { data: onboard } = await supabase
     .from("route_hails")
     .select(
-      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, picked_up_at, journey_id, leg_order, is_transfer_leg",
+      "id, rider_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, distance_km, fare_jmd, picked_up_at, journey_id, leg_order, is_transfer_leg, boarding_lat, boarding_lng, alighting_lat, alighting_lng",
     )
     .eq("session_id", session.id)
     .eq("status", "picked_up")
@@ -130,6 +130,24 @@ export async function GET() {
             parish: route.origin_parish,
             distanceKm: Number(route.distance_km),
             taFareJmd: route.ta_fare_jmd,
+            // Endpoint coords for the driver map's corridor polyline.
+            // Null on legacy route rows without the lat/lng backfill —
+            // the driver map gracefully falls back to no corridor
+            // line in that case.
+            originLat: nonZero(
+              (route as { origin_lat?: number | null }).origin_lat ?? null,
+            ),
+            originLng: nonZero(
+              (route as { origin_lng?: number | null }).origin_lng ?? null,
+            ),
+            destinationLat: nonZero(
+              (route as { destination_lat?: number | null })
+                .destination_lat ?? null,
+            ),
+            destinationLng: nonZero(
+              (route as { destination_lng?: number | null })
+                .destination_lng ?? null,
+            ),
           }
         : null,
     },
@@ -176,6 +194,10 @@ async function attachRiderProfiles(
     journey_id?: string | null;
     leg_order?: number | null;
     is_transfer_leg?: boolean;
+    boarding_lat?: number | null;
+    boarding_lng?: number | null;
+    alighting_lat?: number | null;
+    alighting_lng?: number | null;
   }>,
   shape: "accepted" | "onboard",
 ) {
@@ -205,6 +227,13 @@ async function attachRiderProfiles(
       journeyId: h.journey_id ?? null,
       legOrder: h.leg_order ?? null,
       isTransferLeg: h.is_transfer_leg ?? false,
+      // Mid-corridor projection coords from the corridor-aware
+      // pathfinder. Null on legacy hails created before the columns
+      // existed — driver UI falls back to pickup/dropoff coords.
+      boardingLat: nonZero(h.boarding_lat ?? null),
+      boardingLng: nonZero(h.boarding_lng ?? null),
+      alightingLat: nonZero(h.alighting_lat ?? null),
+      alightingLng: nonZero(h.alighting_lng ?? null),
       rider: {
         name: (p?.full_name as string | null) ?? null,
         avatarUrl: (p?.avatar_url as string | null) ?? null,
@@ -233,6 +262,8 @@ function enrichAndSortPending(
     pickup_lat: number;
     pickup_lng: number;
     dropoff_name: string;
+    dropoff_lat: number;
+    dropoff_lng: number;
     distance_km: number;
     fare_jmd: number;
     concession: boolean;
@@ -240,6 +271,10 @@ function enrichAndSortPending(
     journey_id?: string | null;
     leg_order?: number | null;
     is_transfer_leg?: boolean;
+    boarding_lat?: number | null;
+    boarding_lng?: number | null;
+    alighting_lat?: number | null;
+    alighting_lng?: number | null;
   }> | null,
   session: {
     current_lat: number | null;
@@ -254,9 +289,24 @@ function enrichAndSortPending(
 
   const enriched = rows.map((h) => {
     const hasPickupCoords = h.pickup_lat !== 0 || h.pickup_lng !== 0;
+    const hasDropoffCoords =
+      h.dropoff_lat !== 0 || h.dropoff_lng !== 0;
+    // Proximity is measured against the BOARDING coords when the
+    // corridor-aware pathfinder has stamped them — that's the exact
+    // point the rider sees on their map, and lets the driver's sort
+    // reflect "who's closest to where they actually stand" rather
+    // than "who's closest to where they typed their pickup."
+    const boardingLat = h.boarding_lat ?? null;
+    const boardingLng = h.boarding_lng ?? null;
+    const targetForProximity =
+      boardingLat != null && boardingLng != null
+        ? { lat: boardingLat, lng: boardingLng }
+        : hasPickupCoords
+          ? { lat: h.pickup_lat, lng: h.pickup_lng }
+          : null;
     const proximityKm =
-      driverPos && hasPickupCoords
-        ? haversineKm(driverPos, { lat: h.pickup_lat, lng: h.pickup_lng })
+      driverPos && targetForProximity
+        ? haversineKm(driverPos, targetForProximity)
         : null;
     return {
       id: h.id,
@@ -265,6 +315,8 @@ function enrichAndSortPending(
       pickupLat: hasPickupCoords ? h.pickup_lat : null,
       pickupLng: hasPickupCoords ? h.pickup_lng : null,
       dropoff: h.dropoff_name,
+      dropoffLat: hasDropoffCoords ? h.dropoff_lat : null,
+      dropoffLng: hasDropoffCoords ? h.dropoff_lng : null,
       distanceKm: Number(h.distance_km),
       fareJmd: h.fare_jmd,
       concession: h.concession,
@@ -273,6 +325,10 @@ function enrichAndSortPending(
       journeyId: h.journey_id ?? null,
       legOrder: h.leg_order ?? null,
       isTransferLeg: h.is_transfer_leg ?? false,
+      boardingLat,
+      boardingLng,
+      alightingLat: h.alighting_lat ?? null,
+      alightingLng: h.alighting_lng ?? null,
     };
   });
 

@@ -1033,37 +1033,70 @@ export default function RiderRequestPage() {
                         JMD $14,950 private-ride card thinking they
                         cover the same trip — but the route taxi may
                         be heading to a different parish entirely. */}
-                    {(journeyQuote.pickupSnap || journeyQuote.dropoffSnap) && (
-                      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200">
-                        <Icon
-                          name="alert-triangle"
-                          className="mr-1 inline h-2.5 w-2.5"
-                        />
-                        {journeyQuote.pickupSnap && (
-                          <>
-                            Walk {journeyQuote.pickupSnap.walkKm.toFixed(1)} km
-                            to board at{" "}
+                    {/* Boarding / alighting summary. The new pathfinder
+                        snaps to corridor ROAD LINES (not just endpoints)
+                        so a rider already on a route taxi road sees
+                        walkKm ≈ 0 and "hail right here". A rider off
+                        the road sees the corridor name + how far to
+                        walk to reach it. */}
+                    {(() => {
+                      const pWalk = journeyQuote.boarding.walkKm;
+                      const dWalk = journeyQuote.alighting.walkKm;
+                      const pickupOnRoad = pWalk < 0.3;
+                      const dropoffOnRoad = dWalk < 0.3;
+                      const fmtWalk = (km: number) =>
+                        km < 1
+                          ? `${Math.round(km * 1000)} m`
+                          : `${km.toFixed(1)} km`;
+                      // Both endpoints on a corridor → green "ready to hail" pill.
+                      if (pickupOnRoad && dropoffOnRoad) {
+                        return (
+                          <p className="mt-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-emerald-900 ring-1 ring-emerald-200">
+                            <Icon
+                              name="check-circle"
+                              className="mr-1 inline h-2.5 w-2.5"
+                            />
+                            You&apos;re on the route. Hail here — driver
+                            will pass you on the{" "}
                             <span className="font-extrabold">
-                              {journeyQuote.pickupSnap.endpoint}
-                            </span>
-                          </>
-                        )}
-                        {journeyQuote.pickupSnap &&
-                          journeyQuote.dropoffSnap &&
-                          " · "}
-                        {journeyQuote.dropoffSnap && (
-                          <>
-                            walk{" "}
-                            {journeyQuote.dropoffSnap.walkKm.toFixed(1)} km
-                            from{" "}
-                            <span className="font-extrabold">
-                              {journeyQuote.dropoffSnap.endpoint}
+                              {journeyQuote.boarding.corridorLabel}
                             </span>{" "}
-                            to dropoff
-                          </>
-                        )}
-                      </p>
-                    )}
+                            road.
+                          </p>
+                        );
+                      }
+                      return (
+                        <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200">
+                          <Icon
+                            name="alert-triangle"
+                            className="mr-1 inline h-2.5 w-2.5"
+                          />
+                          {!pickupOnRoad && (
+                            <>
+                              Walk {fmtWalk(pWalk)} to the{" "}
+                              <span className="font-extrabold">
+                                {journeyQuote.boarding.corridorLabel}
+                              </span>{" "}
+                              road
+                              {journeyQuote.boarding.positionHint
+                                ? ` (${journeyQuote.boarding.positionHint})`
+                                : ""}
+                            </>
+                          )}
+                          {!pickupOnRoad && !dropoffOnRoad && " · "}
+                          {!dropoffOnRoad && (
+                            <>
+                              {pickupOnRoad && "Alight then "}
+                              walk {fmtWalk(dWalk)} from the{" "}
+                              <span className="font-extrabold">
+                                {journeyQuote.alighting.corridorLabel}
+                              </span>{" "}
+                              road to your dropoff
+                            </>
+                          )}
+                        </p>
+                      );
+                    })()}
                   </button>
                 )}
             </div>
@@ -1198,6 +1231,59 @@ export default function RiderRequestPage() {
     </>
   );
 
+  // Map overlays for the route taxi journey: boarding / alighting
+  // pins + corridor polylines + the dashed walking lines MapView
+  // computes from pickup → boarding and alighting → dropoff. Only
+  // populated when the rider has actively picked Route Taxi mode —
+  // we don't want the corridor pins flashing on the Private Ride
+  // view, which would just look like noise.
+  const journeyMapOverlays = useMemo(() => {
+    const empty = {
+      boarding: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      alighting: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      corridorLines: null as Array<{
+        from: { lat: number; lng: number };
+        to: { lat: number; lng: number };
+      }> | null,
+    };
+    if (mode !== "route_taxi" || !journeyQuote) return empty;
+
+    // Corridor polylines, one per leg. Skip any leg missing
+    // endpoint coords (legacy rows without the lat/lng backfill)
+    // so we don't draw bogus segments anchored at (0, 0).
+    const corridorLines = journeyQuote.legs
+      .filter(
+        (l) =>
+          l.originLat != null &&
+          l.originLng != null &&
+          l.destinationLat != null &&
+          l.destinationLng != null,
+      )
+      .map((l) => ({
+        from: { lat: l.originLat as number, lng: l.originLng as number },
+        to: {
+          lat: l.destinationLat as number,
+          lng: l.destinationLng as number,
+        },
+      }));
+
+    return {
+      boarding: {
+        coords: journeyQuote.boarding.coords,
+        walkKm: journeyQuote.boarding.walkKm,
+      },
+      alighting: {
+        coords: journeyQuote.alighting.coords,
+        walkKm: journeyQuote.alighting.walkKm,
+      },
+      corridorLines: corridorLines.length > 0 ? corridorLines : null,
+    };
+  }, [mode, journeyQuote]);
+
   // Action-bar amount + label adapts to the selected mode. Route Taxi
   // shows the regulated TA fare (the one the rider committed to in
   // the picker); Private Ride shows the live estimate from the
@@ -1276,6 +1362,9 @@ export default function RiderRequestPage() {
             nearbyDrivers={fleetDrivers}
             pickupEtaMinutes={pickupEtaMinutes}
             dropoffEtaMinutes={dropoff ? fare.etaMinutes : null}
+            boarding={journeyMapOverlays.boarding}
+            alighting={journeyMapOverlays.alighting}
+            corridorLines={journeyMapOverlays.corridorLines}
             className="h-64 w-full"
           />
           {breadcrumb}
@@ -1309,6 +1398,9 @@ export default function RiderRequestPage() {
             nearbyDrivers={fleetDrivers}
             pickupEtaMinutes={pickupEtaMinutes}
             dropoffEtaMinutes={dropoff ? fare.etaMinutes : null}
+            boarding={journeyMapOverlays.boarding}
+            alighting={journeyMapOverlays.alighting}
+            corridorLines={journeyMapOverlays.corridorLines}
             className="h-full w-full"
           />
           {breadcrumb}

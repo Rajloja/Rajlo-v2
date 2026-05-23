@@ -151,6 +151,28 @@ const ROUTE_END_R = 0x6a;
 const ROUTE_END_G = 0x00;
 const ROUTE_END_B = 0x00;
 
+/**
+ * Module-scoped cache of road-following corridor polylines, keyed by
+ * "fromLat,fromLng->toLat,toLng". Populated by the route-taxi
+ * overlay effect via DirectionsService and reused for every
+ * subsequent quote that traverses the same corridor — keeps the
+ * Directions API quota bounded even when riders churn through many
+ * Negril ↔ Sav-la-Mar etc. trips.
+ */
+const corridorPolylineCache = new Map<
+  string,
+  google.maps.LatLngLiteral[]
+>();
+
+function corridorCacheKey(
+  from: google.maps.LatLngLiteral,
+  to: google.maps.LatLngLiteral,
+): string {
+  return `${from.lat.toFixed(5)},${from.lng.toFixed(5)}->${to.lat.toFixed(
+    5,
+  )},${to.lng.toFixed(5)}`;
+}
+
 function interpolateRouteColor(t: number): string {
   const tc = Math.max(0, Math.min(1, t));
   const r = Math.round(ROUTE_START_R + (ROUTE_END_R - ROUTE_START_R) * tc);
@@ -256,6 +278,9 @@ export function MapView({
   searchingUntil = null,
   lockable = true,
   viewer = "rider",
+  boarding = null,
+  alighting = null,
+  corridorLines = null,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -303,6 +328,33 @@ export function MapView({
    *  Defaults to `"rider"` for backwards compatibility with every
    *  existing rider call-site. */
   viewer?: "driver" | "rider";
+  /** Where the rider physically boards the route taxi (mid-corridor
+   *  projection from the pathfinder). When non-null, an orange "B"
+   *  pin is dropped on the map and a dashed walking line connects
+   *  the rider's typed pickup → boarding point (if walkKm > 0.05). */
+  boarding?: {
+    coords: { lat: number; lng: number };
+    /** Walking distance from the rider's typed pickup to the
+     *  boarding point. Used to decide whether to draw the dashed
+     *  walking line — if the rider is essentially on the road
+     *  already, the line would visually clutter the map. */
+    walkKm?: number;
+  } | null;
+  /** Where the rider alights from the last leg. Symmetric to
+   *  `boarding` — teal "A" pin + walking line to the typed dropoff. */
+  alighting?: {
+    coords: { lat: number; lng: number };
+    walkKm?: number;
+  } | null;
+  /** Solid red polylines representing the route taxi's corridor(s).
+   *  One entry per leg — each segment runs from the corridor's
+   *  origin endpoint to its destination endpoint (straight-line
+   *  approximation for now; future iterations can substitute the
+   *  Google Directions polyline for accuracy where roads bend). */
+  corridorLines?: Array<{
+    from: { lat: number; lng: number };
+    to: { lat: number; lng: number };
+  }> | null;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -334,6 +386,16 @@ export function MapView({
   // Live route polyline (driver → target). Tracked separately so the
   // static-route effect doesn't accidentally clear it on every status flip.
   const livePolylineRef = useRef<google.maps.Polyline[]>([]);
+  // Route taxi boarding / alighting overlays — added by the
+  // corridor-aware pathfinder. The B / A pins land at the rider's
+  // mid-corridor projection points; the corridor polylines visualise
+  // which roads the taxi runs on; the walking polylines (dashed
+  // grey) connect rider's typed pickup → boarding and alighting →
+  // typed dropoff so the rider sees the full sequence on the map.
+  const boardingMarkerRef = useRef<google.maps.Marker | null>(null);
+  const alightingMarkerRef = useRef<google.maps.Marker | null>(null);
+  const corridorPolylineRef = useRef<google.maps.Polyline[]>([]);
+  const walkingPolylineRef = useRef<google.maps.Polyline[]>([]);
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
   // Live-position markers are tracked separately so they don't get wiped
   // when the route refreshes.
@@ -1191,6 +1253,267 @@ export function MapView({
     // where centering the map on a marker is what the user wants.
     // The rider can still tap the locate-me button to recenter.
   }, [riderPosition, selfPosition, riderHeading, liveRoute, searching, viewer]);
+
+  // ─────────────────────── Route-taxi overlays ───────────────────────
+  // Boarding / alighting pins + corridor polyline + dashed walking
+  // lines. Driven by the corridor-aware pathfinder on the rider's
+  // request page. Rendered on top of the static-route polyline so a
+  // rider browsing a route taxi quote sees the full sequence at a
+  // glance: typed pickup → walk → boarding pin → corridor → alight
+  // pin → walk → typed dropoff.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || typeof window === "undefined" || !window.google) return;
+
+    // Tear down whatever was rendered last time. Cheap — at most one
+    // marker per kind + a small polyline array.
+    boardingMarkerRef.current?.setMap(null);
+    boardingMarkerRef.current = null;
+    alightingMarkerRef.current?.setMap(null);
+    alightingMarkerRef.current = null;
+    corridorPolylineRef.current.forEach((p) => p.setMap(null));
+    corridorPolylineRef.current = [];
+    walkingPolylineRef.current.forEach((p) => p.setMap(null));
+    walkingPolylineRef.current = [];
+
+    if (!boarding && !alighting && (!corridorLines || corridorLines.length === 0)) {
+      return;
+    }
+
+    // 1. Corridor lines — solid amber polylines distinct from the
+    //    main red route polyline. We pick amber so the rider's eye
+    //    reads it as "the taxi's road" not "your destination". One
+    //    polyline per leg.
+    //
+    //    Each segment draws an immediate straight-line fallback so
+    //    the corridor appears instantly, then upgrades to the actual
+    //    road-following polyline once DirectionsService responds.
+    //    The road polyline is cached module-scoped so subsequent
+    //    quotes through the same corridor hit zero Directions calls.
+    if (corridorLines && corridorLines.length > 0) {
+      const ds = directionsServiceRef.current;
+      for (const seg of corridorLines) {
+        const key = corridorCacheKey(seg.from, seg.to);
+        const cached = corridorPolylineCache.get(key);
+        const initialPath: google.maps.LatLngLiteral[] = cached ?? [
+          { lat: seg.from.lat, lng: seg.from.lng },
+          { lat: seg.to.lat, lng: seg.to.lng },
+        ];
+        const line = new google.maps.Polyline({
+          map,
+          path: initialPath,
+          strokeColor: "#f59e0b", // amber-500 — distinct from route red
+          strokeOpacity: 0.85,
+          strokeWeight: 5,
+          zIndex: 50,
+        });
+        corridorPolylineRef.current.push(line);
+
+        // Cache miss → ask Directions for the actual road polyline.
+        // We capture the polyline ref in the closure so we can swap
+        // its path when the response arrives. Skip if the polyline
+        // was torn down by a prop change in the meantime (getMap()
+        // returns null after setMap(null)).
+        if (!cached && ds) {
+          const polyline = line;
+          ds.route(
+            {
+              origin: seg.from,
+              destination: seg.to,
+              travelMode: google.maps.TravelMode.DRIVING,
+            },
+            (result, status) => {
+              if (
+                status !== google.maps.DirectionsStatus.OK ||
+                !result?.routes?.[0]
+              ) {
+                // Straight line stays — better than nothing if
+                // Directions is rate-limited or the corridor doesn't
+                // resolve to a road route.
+                return;
+              }
+              const points = result.routes[0].overview_path.map((p) => ({
+                lat: p.lat(),
+                lng: p.lng(),
+              }));
+              corridorPolylineCache.set(key, points);
+              if (polyline.getMap()) {
+                polyline.setPath(points);
+              }
+            },
+          );
+        }
+      }
+    }
+
+    // 2. Dashed walking line from rider's typed pickup → boarding
+    //    point. Skipped when the rider is essentially on the road
+    //    (walkKm < 0.05 km ≈ 50 m) — no point drawing a hairline
+    //    walk that adds clutter.
+    if (
+      pickup &&
+      boarding &&
+      (boarding.walkKm ?? 0) >= 0.05
+    ) {
+      const walk = new google.maps.Polyline({
+        map,
+        path: [
+          { lat: pickup.lat, lng: pickup.lng },
+          { lat: boarding.coords.lat, lng: boarding.coords.lng },
+        ],
+        // Dashed grey — drawn with stroke opacity zero + repeated
+        // icon stamps so it reads as "you walk this bit yourself"
+        // and contrasts the solid corridor line above.
+        strokeOpacity: 0,
+        icons: [
+          {
+            icon: {
+              path: "M 0,-1 0,1",
+              strokeOpacity: 1,
+              strokeColor: "#6b7280", // slate-500
+              scale: 3,
+            },
+            offset: "0",
+            repeat: "12px",
+          },
+        ],
+        zIndex: 60,
+      });
+      walkingPolylineRef.current.push(walk);
+    }
+
+    // 3. Dashed walking line from alighting point → rider's typed
+    //    dropoff. Same skip rule as above.
+    if (
+      dropoff &&
+      alighting &&
+      (alighting.walkKm ?? 0) >= 0.05
+    ) {
+      const walk = new google.maps.Polyline({
+        map,
+        path: [
+          { lat: alighting.coords.lat, lng: alighting.coords.lng },
+          { lat: dropoff.lat, lng: dropoff.lng },
+        ],
+        strokeOpacity: 0,
+        icons: [
+          {
+            icon: {
+              path: "M 0,-1 0,1",
+              strokeOpacity: 1,
+              strokeColor: "#6b7280",
+              scale: 3,
+            },
+            offset: "0",
+            repeat: "12px",
+          },
+        ],
+        zIndex: 60,
+      });
+      walkingPolylineRef.current.push(walk);
+    }
+
+    // 4. Boarding pin — orange disc with "B" label. Sits at the
+    //    rider's projected board point on the corridor.
+    if (boarding) {
+      boardingMarkerRef.current = new google.maps.Marker({
+        map,
+        position: { lat: boarding.coords.lat, lng: boarding.coords.lng },
+        label: {
+          text: "B",
+          color: "#ffffff",
+          fontWeight: "800",
+          fontSize: "12px",
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 13,
+          fillColor: "#f97316", // orange-500
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        },
+        title: "Board the route taxi here",
+        zIndex: 70,
+      });
+    }
+
+    // 5. Alighting pin — teal disc with "A" label. Distinct hue
+    //    from the boarding orange so the rider can tell at a glance
+    //    which pin is which.
+    if (alighting) {
+      alightingMarkerRef.current = new google.maps.Marker({
+        map,
+        position: {
+          lat: alighting.coords.lat,
+          lng: alighting.coords.lng,
+        },
+        label: {
+          text: "A",
+          color: "#ffffff",
+          fontWeight: "800",
+          fontSize: "12px",
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 13,
+          fillColor: "#0d9488", // teal-600
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        },
+        title: "Alight from the route taxi here",
+        zIndex: 70,
+      });
+    }
+
+    // 6. Re-fit bounds to include every overlay we just dropped.
+    //    The static-route effect ran first and fit to pickup → stops
+    //    → dropoff; without this re-fit the corridor + boarding pins
+    //    could land off-screen (especially for long inter-parish
+    //    corridors that extend well past the rider's typed A→B
+    //    bounds).
+    const bounds = new google.maps.LatLngBounds();
+    let extended = false;
+    if (pickup) {
+      bounds.extend({ lat: pickup.lat, lng: pickup.lng });
+      extended = true;
+    }
+    if (dropoff) {
+      bounds.extend({ lat: dropoff.lat, lng: dropoff.lng });
+      extended = true;
+    }
+    if (boarding) {
+      bounds.extend({
+        lat: boarding.coords.lat,
+        lng: boarding.coords.lng,
+      });
+      extended = true;
+    }
+    if (alighting) {
+      bounds.extend({
+        lat: alighting.coords.lat,
+        lng: alighting.coords.lng,
+      });
+      extended = true;
+    }
+    if (corridorLines) {
+      for (const seg of corridorLines) {
+        bounds.extend(seg.from);
+        bounds.extend(seg.to);
+        extended = true;
+      }
+    }
+    if (extended) {
+      map.fitBounds(bounds, { top: 64, right: 56, bottom: 64, left: 56 });
+    }
+  }, [
+    boarding,
+    alighting,
+    corridorLines,
+    pickup,
+    dropoff,
+  ]);
 
   // Fullscreen side-effects — Esc to exit, body-scroll lock, and a
   // Google Maps resize trigger so tiles + bounds re-fit correctly

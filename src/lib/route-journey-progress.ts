@@ -335,6 +335,25 @@ export async function advanceJourney(
   const dropoffLat = isFinalLeg ? journey.destination_lat : nextLeg.destinationLat;
   const dropoffLng = isFinalLeg ? journey.destination_lng : nextLeg.destinationLng;
 
+  // Boarding / alighting coords for the new leg:
+  //  - boarding: the rider literally just stepped off the previous
+  //    leg at the transfer point, so boarding = transfer coords.
+  //    No mid-corridor projection here — they're already at the
+  //    corridor endpoint by definition.
+  //  - alighting: on the FINAL leg, this is the mid-corridor
+  //    projection of the rider's typed dropoff (frozen in
+  //    journey.plan.alighting at quote time). On a middle leg, the
+  //    rider alights at the next transfer point — same as
+  //    dropoff_lat/lng.
+  const boardingLat = args.transferLat ?? null;
+  const boardingLng = args.transferLng ?? null;
+  const alightingLat = isFinalLeg
+    ? journey.plan.alighting?.coords.lat ?? dropoffLat
+    : dropoffLat;
+  const alightingLng = isFinalLeg
+    ? journey.plan.alighting?.coords.lng ?? dropoffLng
+    : dropoffLng;
+
   // Insert the leg's hail row.
   const { data: hailRow, error: insertError } = await supabase
     .from("route_hails")
@@ -357,6 +376,10 @@ export async function advanceJourney(
       journey_id: journey.id,
       leg_order: nextLegOrder,
       is_transfer_leg: true,
+      boarding_lat: boardingLat,
+      boarding_lng: boardingLng,
+      alighting_lat: alightingLat,
+      alighting_lng: alightingLng,
     })
     .select("id")
     .single();

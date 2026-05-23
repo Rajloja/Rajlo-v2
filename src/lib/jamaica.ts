@@ -167,6 +167,46 @@ export function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+/**
+ * Project a point onto a line segment AB and return the closest
+ * point on that segment plus the parametric `t` (0 at A, 1 at B,
+ * clamped) and the great-circle distance from the original point.
+ *
+ * Used by the route-taxi pathfinder to snap a rider's pickup /
+ * dropoff onto a corridor's road line — rather than just the
+ * corridor's two named endpoints — so a rider standing anywhere
+ * along an active corridor can hail without walking to a stop.
+ *
+ * The projection math is planar (treats lat/lng as Euclidean) which
+ * is fine at Jamaica's scale: each corridor is short enough that
+ * great-circle curvature contributes negligibly. The reported
+ * distance IS great-circle though, so the "X km walk" copy is
+ * accurate.
+ */
+export function closestPointOnSegment(
+  p: { lat: number; lng: number },
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): {
+  point: { lat: number; lng: number };
+  /** Clamped to [0, 1]. 0 = at A, 1 = at B; anything in between
+   *  means the projection landed inside the segment. */
+  t: number;
+  distKm: number;
+} {
+  const dLat = b.lat - a.lat;
+  const dLng = b.lng - a.lng;
+  const lenSq = dLat * dLat + dLng * dLng;
+  if (lenSq === 0) {
+    return { point: { ...a }, t: 0, distKm: haversineKm(p, a) };
+  }
+  const rawT =
+    ((p.lat - a.lat) * dLat + (p.lng - a.lng) * dLng) / lenSq;
+  const t = Math.max(0, Math.min(1, rawT));
+  const point = { lat: a.lat + t * dLat, lng: a.lng + t * dLng };
+  return { point, t, distKm: haversineKm(p, point) };
+}
+
 /** Total straight-line distance through an ordered list of waypoints. */
 export function routeDistanceKm(points: { lat: number; lng: number }[]): number {
   if (points.length < 2) return 0;
