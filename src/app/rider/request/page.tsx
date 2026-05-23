@@ -703,6 +703,61 @@ export default function RiderRequestPage() {
     }
   };
 
+  // Map overlays for the route taxi journey: boarding / alighting
+  // pins + corridor polylines + the dashed walking lines MapView
+  // computes from pickup → boarding and alighting → dropoff. Only
+  // populated when the rider has actively picked Route Taxi mode —
+  // we don't want the corridor pins flashing on the Private Ride
+  // view, which would just look like noise.
+  // Declared above the bootstrapping early-return so the hook order
+  // stays stable across renders (Rules of Hooks).
+  const journeyMapOverlays = useMemo(() => {
+    const empty = {
+      boarding: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      alighting: null as
+        | { coords: { lat: number; lng: number }; walkKm?: number }
+        | null,
+      corridorLines: null as Array<{
+        from: { lat: number; lng: number };
+        to: { lat: number; lng: number };
+      }> | null,
+    };
+    if (mode !== "route_taxi" || !journeyQuote) return empty;
+
+    // Corridor polylines, one per leg. Skip any leg missing
+    // endpoint coords (legacy rows without the lat/lng backfill)
+    // so we don't draw bogus segments anchored at (0, 0).
+    const corridorLines = journeyQuote.legs
+      .filter(
+        (l) =>
+          l.originLat != null &&
+          l.originLng != null &&
+          l.destinationLat != null &&
+          l.destinationLng != null,
+      )
+      .map((l) => ({
+        from: { lat: l.originLat as number, lng: l.originLng as number },
+        to: {
+          lat: l.destinationLat as number,
+          lng: l.destinationLng as number,
+        },
+      }));
+
+    return {
+      boarding: {
+        coords: journeyQuote.boarding.coords,
+        walkKm: journeyQuote.boarding.walkKm,
+      },
+      alighting: {
+        coords: journeyQuote.alighting.coords,
+        walkKm: journeyQuote.alighting.walkKm,
+      },
+      corridorLines: corridorLines.length > 0 ? corridorLines : null,
+    };
+  }, [mode, journeyQuote]);
+
   if (bootstrapping) {
     // Hide the form while the active-ride check is in flight. Without
     // this the form briefly flashes before the redirect kicks in.
@@ -1230,59 +1285,6 @@ export default function RiderRequestPage() {
       )}
     </>
   );
-
-  // Map overlays for the route taxi journey: boarding / alighting
-  // pins + corridor polylines + the dashed walking lines MapView
-  // computes from pickup → boarding and alighting → dropoff. Only
-  // populated when the rider has actively picked Route Taxi mode —
-  // we don't want the corridor pins flashing on the Private Ride
-  // view, which would just look like noise.
-  const journeyMapOverlays = useMemo(() => {
-    const empty = {
-      boarding: null as
-        | { coords: { lat: number; lng: number }; walkKm?: number }
-        | null,
-      alighting: null as
-        | { coords: { lat: number; lng: number }; walkKm?: number }
-        | null,
-      corridorLines: null as Array<{
-        from: { lat: number; lng: number };
-        to: { lat: number; lng: number };
-      }> | null,
-    };
-    if (mode !== "route_taxi" || !journeyQuote) return empty;
-
-    // Corridor polylines, one per leg. Skip any leg missing
-    // endpoint coords (legacy rows without the lat/lng backfill)
-    // so we don't draw bogus segments anchored at (0, 0).
-    const corridorLines = journeyQuote.legs
-      .filter(
-        (l) =>
-          l.originLat != null &&
-          l.originLng != null &&
-          l.destinationLat != null &&
-          l.destinationLng != null,
-      )
-      .map((l) => ({
-        from: { lat: l.originLat as number, lng: l.originLng as number },
-        to: {
-          lat: l.destinationLat as number,
-          lng: l.destinationLng as number,
-        },
-      }));
-
-    return {
-      boarding: {
-        coords: journeyQuote.boarding.coords,
-        walkKm: journeyQuote.boarding.walkKm,
-      },
-      alighting: {
-        coords: journeyQuote.alighting.coords,
-        walkKm: journeyQuote.alighting.walkKm,
-      },
-      corridorLines: corridorLines.length > 0 ? corridorLines : null,
-    };
-  }, [mode, journeyQuote]);
 
   // Action-bar amount + label adapts to the selected mode. Route Taxi
   // shows the regulated TA fare (the one the rider committed to in
