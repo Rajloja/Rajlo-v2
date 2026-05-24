@@ -330,6 +330,24 @@ export default function RiderRequestPage() {
   // action-bar fare/CTA.
   const selectedMatch = mode === "route_taxi" ? displayMatch : null;
 
+  // Auto-flip mode back to "private" when Route Taxi is no longer a
+  // viable choice — either the matcher returned no direct corridor
+  // AND the multi-leg journey is non-hailable (rider too far from
+  // any road). Without this the rider could land on the page in
+  // route_taxi mode with no match + no hailable journey, see an
+  // off-corridor info card, and still hit "Hail next car" in the
+  // action bar — which would silently fall through to private ride
+  // creation.
+  useEffect(() => {
+    if (mode !== "route_taxi") return;
+    const hasMatch = (matches ?? []).length > 0;
+    const hasHailableJourney =
+      journeyQuote !== null && journeyQuote.hailable;
+    if (!hasMatch && !hasHailableJourney) {
+      setMode("private");
+    }
+  }, [mode, matches, journeyQuote]);
+
   const allPoints = useMemo(() => {
     const list: Place[] = [];
     if (pickup) list.push(pickup);
@@ -1035,7 +1053,8 @@ export default function RiderRequestPage() {
                 !matching &&
                 !journeyQuoting &&
                 (!matches || matches.length === 0) &&
-                journeyQuote && (
+                journeyQuote &&
+                journeyQuote.hailable && (
                   <button
                     type="button"
                     onClick={() => setMode("route_taxi")}
@@ -1081,29 +1100,21 @@ export default function RiderRequestPage() {
                         ? " · scan to transfer between legs"
                         : ""}
                     </p>
-                    {/* Snap-distance hints — surface the gap between
-                        what the rider TYPED and where the route taxi
-                        actually boards / alights. Without this the
-                        rider could pick a JMD $410 route-taxi vs a
-                        JMD $14,950 private-ride card thinking they
-                        cover the same trip — but the route taxi may
-                        be heading to a different parish entirely. */}
-                    {/* Boarding / alighting summary. The new pathfinder
-                        snaps to corridor ROAD LINES (not just endpoints)
-                        so a rider already on a route taxi road sees
-                        walkKm ≈ 0 and "hail right here". A rider off
-                        the road sees the corridor name + how far to
-                        walk to reach it. */}
+                    {/* On-corridor confirmation pill. The pathfinder
+                        only reaches this branch when both walks are
+                        within MAX_HAILABLE_WALK_KM (~1 km), so a tiny
+                        residual walk just gets factored into the
+                        "hail here" copy — we never tell the rider to
+                        walk multiple km to a route taxi. */}
                     {(() => {
                       const pWalk = journeyQuote.boarding.walkKm;
                       const dWalk = journeyQuote.alighting.walkKm;
-                      const pickupOnRoad = pWalk < 0.3;
-                      const dropoffOnRoad = dWalk < 0.3;
+                      const pickupOnRoad = pWalk < 0.15;
+                      const dropoffOnRoad = dWalk < 0.15;
                       const fmtWalk = (km: number) =>
                         km < 1
                           ? `${Math.round(km * 1000)} m`
                           : `${km.toFixed(1)} km`;
-                      // Both endpoints on a corridor → green "ready to hail" pill.
                       if (pickupOnRoad && dropoffOnRoad) {
                         return (
                           <p className="mt-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-emerald-900 ring-1 ring-emerald-200">
@@ -1121,38 +1132,100 @@ export default function RiderRequestPage() {
                         );
                       }
                       return (
-                        <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200">
+                        <p className="mt-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-emerald-900 ring-1 ring-emerald-200">
                           <Icon
-                            name="alert-triangle"
+                            name="check-circle"
                             className="mr-1 inline h-2.5 w-2.5"
                           />
-                          {!pickupOnRoad && (
-                            <>
-                              Walk {fmtWalk(pWalk)} to the{" "}
-                              <span className="font-extrabold">
-                                {journeyQuote.boarding.corridorLabel}
-                              </span>{" "}
-                              road
-                              {journeyQuote.boarding.positionHint
-                                ? ` (${journeyQuote.boarding.positionHint})`
-                                : ""}
-                            </>
-                          )}
-                          {!pickupOnRoad && !dropoffOnRoad && " · "}
-                          {!dropoffOnRoad && (
-                            <>
-                              {pickupOnRoad && "Alight then "}
-                              walk {fmtWalk(dWalk)} from the{" "}
-                              <span className="font-extrabold">
-                                {journeyQuote.alighting.corridorLabel}
-                              </span>{" "}
-                              road to your dropoff
-                            </>
-                          )}
+                          Hail here on the{" "}
+                          <span className="font-extrabold">
+                            {journeyQuote.boarding.corridorLabel}
+                          </span>{" "}
+                          road.
+                          {!pickupOnRoad &&
+                            ` Pickup ${fmtWalk(pWalk)} from the road.`}
+                          {!dropoffOnRoad &&
+                            ` Alight ${fmtWalk(dWalk)} from your dropoff.`}
                         </p>
                       );
                     })()}
                   </button>
+                )}
+
+              {/* Off-corridor info card. The pathfinder found a route
+                  taxi chain, but the rider's pickup or dropoff sits
+                  too far from any corridor to actually hail one (real
+                  walking distance, not the 9-km nonsense the older
+                  build let through). This card is read-only — the
+                  rider cannot select Route Taxi from here. */}
+              {filledStops.length === 0 &&
+                !matching &&
+                !journeyQuoting &&
+                (!matches || matches.length === 0) &&
+                journeyQuote &&
+                !journeyQuote.hailable && (
+                  <div className="flex flex-col items-stretch gap-2 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-900">
+                        <Icon name="alert-triangle" className="h-4 w-4" />
+                      </span>
+                      <span className="font-secondary text-[10px] font-bold uppercase tracking-wider text-amber-900">
+                        Route taxi · too far to hail
+                      </span>
+                    </div>
+                    {(() => {
+                      const pWalk = journeyQuote.boarding.walkKm;
+                      const dWalk = journeyQuote.alighting.walkKm;
+                      const fmtWalk = (km: number) =>
+                        km < 1
+                          ? `${Math.round(km * 1000)} m`
+                          : `${km.toFixed(1)} km`;
+                      const pickupFar = pWalk > 1.0;
+                      const dropoffFar = dWalk > 1.0;
+                      return (
+                        <>
+                          <p className="text-[12px] font-semibold leading-snug text-amber-900">
+                            {pickupFar && (
+                              <>
+                                Nearest pickup is{" "}
+                                <span className="font-extrabold">
+                                  {fmtWalk(pWalk)} away
+                                </span>{" "}
+                                on the{" "}
+                                <span className="font-extrabold">
+                                  {journeyQuote.boarding.corridorLabel}
+                                </span>{" "}
+                                road
+                              </>
+                            )}
+                            {pickupFar && dropoffFar && (
+                              <span className="text-amber-900/80">; and</span>
+                            )}
+                            {dropoffFar && (
+                              <>
+                                {!pickupFar && "Your dropoff is "}
+                                {pickupFar && " your dropoff is "}
+                                <span className="font-extrabold">
+                                  {fmtWalk(dWalk)}
+                                </span>{" "}
+                                from the{" "}
+                                <span className="font-extrabold">
+                                  {journeyQuote.alighting.corridorLabel}
+                                </span>{" "}
+                                road
+                              </>
+                            )}
+                            .
+                          </p>
+                          <p className="text-[11px] leading-relaxed text-amber-900/80">
+                            Route taxis only stop on the corridor. Take a
+                            private ride to the road first to hail, or just
+                            book a private ride for the whole trip.
+                          </p>
+                        </>
+                      );
+                    })()}
+                  </div>
                 )}
             </div>
 
@@ -1367,6 +1440,7 @@ export default function RiderRequestPage() {
             boarding={journeyMapOverlays.boarding}
             alighting={journeyMapOverlays.alighting}
             corridorLines={journeyMapOverlays.corridorLines}
+            suppressStaticRoute={mode === "route_taxi"}
             className="h-64 w-full"
           />
           {breadcrumb}
@@ -1403,6 +1477,7 @@ export default function RiderRequestPage() {
             boarding={journeyMapOverlays.boarding}
             alighting={journeyMapOverlays.alighting}
             corridorLines={journeyMapOverlays.corridorLines}
+            suppressStaticRoute={mode === "route_taxi"}
             className="h-full w-full"
           />
           {breadcrumb}

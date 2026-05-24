@@ -281,6 +281,7 @@ export function MapView({
   boarding = null,
   alighting = null,
   corridorLines = null,
+  suppressStaticRoute = false,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -330,18 +331,17 @@ export function MapView({
   viewer?: "driver" | "rider";
   /** Where the rider physically boards the route taxi (mid-corridor
    *  projection from the pathfinder). When non-null, an orange "B"
-   *  pin is dropped on the map and a dashed walking line connects
-   *  the rider's typed pickup → boarding point (if walkKm > 0.05). */
+   *  pin is dropped on the map at this point. */
   boarding?: {
     coords: { lat: number; lng: number };
     /** Walking distance from the rider's typed pickup to the
-     *  boarding point. Used to decide whether to draw the dashed
-     *  walking line — if the rider is essentially on the road
-     *  already, the line would visually clutter the map. */
+     *  boarding point. Riders are gated to ≤ MAX_HAILABLE_WALK_KM
+     *  (~1 km) so this is informational only — the map no longer
+     *  draws a walking line, which was visual clutter at this scale. */
     walkKm?: number;
   } | null;
   /** Where the rider alights from the last leg. Symmetric to
-   *  `boarding` — teal "A" pin + walking line to the typed dropoff. */
+   *  `boarding` — teal "A" pin at the alighting projection point. */
   alighting?: {
     coords: { lat: number; lng: number };
     walkKm?: number;
@@ -355,6 +355,16 @@ export function MapView({
     from: { lat: number; lng: number };
     to: { lat: number; lng: number };
   }> | null;
+  /** When true, the private-ride visualisation is suppressed:
+   *    - the red gradient polyline is not drawn,
+   *    - the lettered pickup/dropoff markers (A/B/C…) are not drawn,
+   *    - bounds-fit is delegated entirely to the route-taxi overlay
+   *      effect (so the corridor amber line + B/A pins decide the
+   *      viewport).
+   *  Set this when the page is showing the rider's Route Taxi quote.
+   *  Without it, the red road-following polyline overlays the amber
+   *  corridor line and makes the map a confusing soup. */
+  suppressStaticRoute?: boolean;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -395,7 +405,6 @@ export function MapView({
   const boardingMarkerRef = useRef<google.maps.Marker | null>(null);
   const alightingMarkerRef = useRef<google.maps.Marker | null>(null);
   const corridorPolylineRef = useRef<google.maps.Polyline[]>([]);
-  const walkingPolylineRef = useRef<google.maps.Polyline[]>([]);
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
   // Live-position markers are tracked separately so they don't get wiped
   // when the route refreshes.
@@ -649,6 +658,7 @@ export function MapView({
       stops.map((s, i) => `s${i}:${fmt(s)}`).join("|"),
       dropoff ? `d:${fmt(dropoff)}` : "d:",
       liveRoute ? "live" : "static",
+      suppressStaticRoute ? "supp" : "show",
     ].join("|");
     if (
       signature === lastRouteSignatureRef.current &&
@@ -668,6 +678,15 @@ export function MapView({
     markersRef.current = [];
     polylineRef.current.forEach((p) => p.setMap(null));
     polylineRef.current = [];
+
+    // Route-taxi mode owns the visuals. Skip the lettered ABCD
+    // markers and the red road-following polyline entirely — they
+    // would overlay the amber corridor line and the orange/teal
+    // boarding/alighting pins, turning the map into a confusing
+    // soup. The route-taxi overlay effect handles markers + bounds.
+    if (suppressStaticRoute) {
+      return;
+    }
 
     const points: { place: Place; label: string }[] = [];
     if (pickup) points.push({ place: pickup, label: "A" });
@@ -816,7 +835,7 @@ export function MapView({
     return () => {
       cancelled = true;
     };
-  }, [pickup, stops, dropoff, liveRoute, mapReady]);
+  }, [pickup, stops, dropoff, liveRoute, mapReady, suppressStaticRoute]);
 
   // Floating ETA bubbles above the pickup + dropoff pins. Lives in its
   // own effect so a nearest-driver-ETA tick can refresh the bubble
@@ -1273,8 +1292,6 @@ export function MapView({
     alightingMarkerRef.current = null;
     corridorPolylineRef.current.forEach((p) => p.setMap(null));
     corridorPolylineRef.current = [];
-    walkingPolylineRef.current.forEach((p) => p.setMap(null));
-    walkingPolylineRef.current = [];
 
     if (!boarding && !alighting && (!corridorLines || corridorLines.length === 0)) {
       return;
@@ -1332,13 +1349,32 @@ export function MapView({
                 // resolve to a road route.
                 return;
               }
-              const points = result.routes[0].overview_path.map((p) => ({
-                lat: p.lat(),
-                lng: p.lng(),
-              }));
-              corridorPolylineCache.set(key, points);
+              // Stitch every step's full path instead of using
+              // `overview_path`. The overview is Google's simplified
+              // geometry — it drops vertices, so long corridors
+              // visibly "cut corners" and read as straight diagonals
+              // that don't match the visible road. Step paths bend
+              // with every curve. Same approach as the private-ride
+              // polyline via fullRoutePath().
+              const route = result.routes[0];
+              const points: { lat: number; lng: number }[] = [];
+              for (const leg of route.legs ?? []) {
+                for (const step of leg.steps ?? []) {
+                  for (const pt of step.path ?? []) {
+                    points.push({ lat: pt.lat(), lng: pt.lng() });
+                  }
+                }
+              }
+              const finalPoints =
+                points.length > 1
+                  ? points
+                  : route.overview_path.map((p) => ({
+                      lat: p.lat(),
+                      lng: p.lng(),
+                    }));
+              corridorPolylineCache.set(key, finalPoints);
               if (polyline.getMap()) {
-                polyline.setPath(points);
+                polyline.setPath(finalPoints);
               }
             },
           );
@@ -1346,72 +1382,10 @@ export function MapView({
       }
     }
 
-    // 2. Dashed walking line from rider's typed pickup → boarding
-    //    point. Skipped when the rider is essentially on the road
-    //    (walkKm < 0.05 km ≈ 50 m) — no point drawing a hairline
-    //    walk that adds clutter.
-    if (
-      pickup &&
-      boarding &&
-      (boarding.walkKm ?? 0) >= 0.05
-    ) {
-      const walk = new google.maps.Polyline({
-        map,
-        path: [
-          { lat: pickup.lat, lng: pickup.lng },
-          { lat: boarding.coords.lat, lng: boarding.coords.lng },
-        ],
-        // Dashed grey — drawn with stroke opacity zero + repeated
-        // icon stamps so it reads as "you walk this bit yourself"
-        // and contrasts the solid corridor line above.
-        strokeOpacity: 0,
-        icons: [
-          {
-            icon: {
-              path: "M 0,-1 0,1",
-              strokeOpacity: 1,
-              strokeColor: "#6b7280", // slate-500
-              scale: 3,
-            },
-            offset: "0",
-            repeat: "12px",
-          },
-        ],
-        zIndex: 60,
-      });
-      walkingPolylineRef.current.push(walk);
-    }
-
-    // 3. Dashed walking line from alighting point → rider's typed
-    //    dropoff. Same skip rule as above.
-    if (
-      dropoff &&
-      alighting &&
-      (alighting.walkKm ?? 0) >= 0.05
-    ) {
-      const walk = new google.maps.Polyline({
-        map,
-        path: [
-          { lat: alighting.coords.lat, lng: alighting.coords.lng },
-          { lat: dropoff.lat, lng: dropoff.lng },
-        ],
-        strokeOpacity: 0,
-        icons: [
-          {
-            icon: {
-              path: "M 0,-1 0,1",
-              strokeOpacity: 1,
-              strokeColor: "#6b7280",
-              scale: 3,
-            },
-            offset: "0",
-            repeat: "12px",
-          },
-        ],
-        zIndex: 60,
-      });
-      walkingPolylineRef.current.push(walk);
-    }
+    // (Walking polylines removed — riders are now gated to ≤ 1 km
+    //  walk via MAX_HAILABLE_WALK_KM, so the boarding pin sits
+    //  essentially at the rider's pickup. A dashed line connecting
+    //  two near-overlapping pins added clutter and confused users.)
 
     // 4. Boarding pin — orange disc with "B" label. Sits at the
     //    rider's projected board point on the corridor.

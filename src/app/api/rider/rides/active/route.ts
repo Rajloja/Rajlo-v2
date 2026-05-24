@@ -5,6 +5,7 @@ import { getAverageRating } from "@/lib/ratings";
 import { getDriverSelfieUrl } from "@/lib/driver-selfie";
 
 /**
+ * 
  * GET /api/rider/rides/active
  *
  * Returns the rider's currently-active ride (status in

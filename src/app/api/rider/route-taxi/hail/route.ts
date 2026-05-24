@@ -3,10 +3,11 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getBalanceWithLock } from "@/lib/wallet-holds";
 import { calculateRouteFare } from "@/lib/fare-engine";
-import { isWithinJamaica } from "@/lib/jamaica";
+import { closestPointOnSegment, isWithinJamaica } from "@/lib/jamaica";
 import { notifyRouteTaxiDrivers } from "@/lib/notify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
 import { sendRiderHailRequestedEmail } from "@/lib/email-templates";
+import { MAX_HAILABLE_WALK_KM } from "@/lib/route-taxi-pathfinder";
 
 /**
  * POST /api/rider/route-taxi/hail
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
   const { data: route, error: routeError } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd",
+      "id, origin_name, destination_name, origin_parish, destination_parish, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd",
     )
     .eq("id", body.routeId)
     .eq("active", true)
@@ -167,6 +168,63 @@ export async function POST(request: Request) {
     dropoffLat = riderDropoff.lat;
     dropoffLng = riderDropoff.lng;
     dropoffParish = riderDropoff.parish ?? dropoffParish;
+  }
+
+  // Geometric "rider-on-corridor" gate. Route taxi is hail-from-the-
+  // road service — if the rider's pickup OR dropoff is more than
+  // MAX_HAILABLE_WALK_KM from this corridor's road line, we refuse
+  // the hail and send them to take a private ride. Belt-and-
+  // suspenders with the client-side gate. Skipped only when the
+  // route row is missing endpoint coords (legacy seed) OR the rider
+  // hailed without coords (legacy client); in both cases we have to
+  // trust the matcher's earlier filter.
+  const routeOriginLat = (route as { origin_lat: number | null }).origin_lat;
+  const routeOriginLng = (route as { origin_lng: number | null }).origin_lng;
+  const routeDestLat = (route as { destination_lat: number | null })
+    .destination_lat;
+  const routeDestLng = (route as { destination_lng: number | null })
+    .destination_lng;
+  if (
+    routeOriginLat != null &&
+    routeOriginLng != null &&
+    routeDestLat != null &&
+    routeDestLng != null &&
+    pickupLat !== 0 &&
+    pickupLng !== 0 &&
+    dropoffLat !== 0 &&
+    dropoffLng !== 0
+  ) {
+    const corridorOrigin = { lat: routeOriginLat, lng: routeOriginLng };
+    const corridorDest = { lat: routeDestLat, lng: routeDestLng };
+    const pickProj = closestPointOnSegment(
+      { lat: pickupLat, lng: pickupLng },
+      corridorOrigin,
+      corridorDest,
+    );
+    const dropProj = closestPointOnSegment(
+      { lat: dropoffLat, lng: dropoffLng },
+      corridorOrigin,
+      corridorDest,
+    );
+    if (
+      pickProj.distKm > MAX_HAILABLE_WALK_KM ||
+      dropProj.distKm > MAX_HAILABLE_WALK_KM
+    ) {
+      const fmt = (km: number) =>
+        km < 1
+          ? `${Math.round(km * 1000)} m`
+          : `${km.toFixed(1)} km`;
+      const farKm = Math.max(pickProj.distKm, dropProj.distKm);
+      return NextResponse.json(
+        {
+          error: "off_corridor",
+          message: `You're ${fmt(farKm)} from the ${route.origin_name} → ${route.destination_name} road. Get to the corridor first, or book a private ride.`,
+          pickupWalkKm: pickProj.distKm,
+          dropoffWalkKm: dropProj.distKm,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Cashless gate — spendable balance only (raw minus any active

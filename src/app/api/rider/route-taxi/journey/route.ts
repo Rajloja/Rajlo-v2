@@ -163,6 +163,47 @@ export async function POST(request: Request) {
     );
   }
 
+  // Server-side hailability gate. A path geometrically exists, but
+  // the rider's pickup or dropoff sits too far from any corridor for
+  // them to flag a taxi down. We tell them where the nearest pickup
+  // *is* so they can take a private ride to it and re-book — never
+  // book a route taxi that requires a 5 km walk.
+  if (!fresh.hailable) {
+    const fmt = (km: number) =>
+      km < 1
+        ? `${Math.round(km * 1000)} m`
+        : `${km.toFixed(1)} km`;
+    const farEnd =
+      fresh.boarding.walkKm > fresh.alighting.walkKm
+        ? {
+            label: "pickup",
+            walk: fresh.boarding.walkKm,
+            corridor: fresh.boarding.corridorLabel,
+          }
+        : {
+            label: "dropoff",
+            walk: fresh.alighting.walkKm,
+            corridor: fresh.alighting.corridorLabel,
+          };
+    return NextResponse.json(
+      {
+        error: "off_corridor",
+        message: `Your ${farEnd.label} is ${fmt(farEnd.walk)} from the nearest route taxi road (${farEnd.corridor}). Take a private ride to the corridor first, or book a private ride for the full trip.`,
+        nearestPickup: {
+          coords: fresh.boarding.coords,
+          walkKm: fresh.boarding.walkKm,
+          corridorLabel: fresh.boarding.corridorLabel,
+        },
+        nearestDropoff: {
+          coords: fresh.alighting.coords,
+          walkKm: fresh.alighting.walkKm,
+          corridorLabel: fresh.alighting.corridorLabel,
+        },
+      },
+      { status: 409 },
+    );
+  }
+
   let plan: CorridorPath = fresh;
   if (body.plan) {
     const drift = Math.abs(body.plan.totalFareJmd - fresh.totalFareJmd);

@@ -27,11 +27,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculateRouteFare, calculateConcessionFare } from "@/lib/fare-engine";
 import { closestPointOnSegment, haversineKm } from "@/lib/jamaica";
 
-/** Snap radius — how far a rider may walk OR short-cab to reach a
- *  corridor head. 10 km is the realistic upper bound; below that
- *  we accept the rider would either walk or short-cab. The walk
- *  penalty + snap warning in the UI keep dubious snaps honest.  */
+/** Snap radius — how far the pathfinder will look for a corridor to
+ *  *consider*. We keep this generous (10 km) so the API can still
+ *  surface "nearest pickup is N km away" info when the rider is off
+ *  every corridor, without losing the corridor entirely. Whether
+ *  that path is actually *hailable* is gated by MAX_HAILABLE_WALK_KM. */
 export const MAX_SNAP_KM = 10;
+
+/** Real walking distance — how far a rider may walk to a corridor and
+ *  still hail directly. 1.0 km ≈ 12 min walk on flat ground; beyond
+ *  that no one will actually do it (you'd take a private ride to the
+ *  road, then hail). This is the hard gate on whether the rider can
+ *  book a route taxi at all. Apply identically on the alighting end —
+ *  alighting 5 km from your destination is just as broken. */
+export const MAX_HAILABLE_WALK_KM = 1.0;
 
 /** Hard cap on path length so we don't return absurd 6-transfer chains. */
 export const MAX_LEGS = 4;
@@ -110,6 +119,12 @@ export type CorridorPath = {
   boarding: CorridorAttachment;
   /** Where the rider alights from the last leg. */
   alighting: CorridorAttachment;
+  /** True when both walks are ≤ MAX_HAILABLE_WALK_KM — i.e. the
+   *  rider is on (or essentially on) the corridor and can hail
+   *  directly. False means the path geometrically exists but the
+   *  rider needs to get to the road first; the API surfaces this as
+   *  a "nearest pickup N km away" info card, never as a hail option. */
+  hailable: boolean;
 };
 
 /* ────────────────────────── Graph construction ────────────────────────── */
@@ -817,6 +832,10 @@ export async function findRouteTaxiPath(
     best.legs[best.legs.length - 1].destination,
   );
 
+  const hailable =
+    best.boardingAttachment.walkKm <= MAX_HAILABLE_WALK_KM &&
+    best.alightingAttachment.walkKm <= MAX_HAILABLE_WALK_KM;
+
   return {
     legs: best.legs,
     totalFareJmd: best.totalFareJmd,
@@ -834,5 +853,6 @@ export async function findRouteTaxiPath(
       walkKm: best.alightingAttachment.walkKm,
       positionHint: alightingHint,
     },
+    hailable,
   };
 }
