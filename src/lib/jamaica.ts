@@ -207,6 +207,74 @@ export function closestPointOnSegment(
   return { point, t, distKm: haversineKm(p, point) };
 }
 
+/**
+ * Project a point onto a polyline (a chain of N points forming N-1
+ * segments) and return the closest projection plus its position
+ * along the entire polyline as a normalised `t` in [0, 1].
+ *
+ * Why a polyline instead of a single segment? Jamaica's corridors
+ * are coastal and mountain roads that curve heavily. The straight
+ * line between a corridor's origin and destination endpoint can sit
+ * many km away from the actual road inside bays / around bends — so
+ * a rider literally standing on the road can compute as off-corridor
+ * if we projected against the straight line. Walking the road's
+ * vertex chain fixes that: distance is from the rider to the
+ * NEAREST segment of the actual road geometry.
+ *
+ * `t` is normalised by cumulative arc length so it remains a clean
+ * 0..1 progress indicator (0 = at polyline[0], 1 = at polyline[last])
+ * regardless of how uneven the segments are.
+ *
+ * Returns null when the polyline is degenerate (< 2 points or zero
+ * total length); callers should fall back to single-segment projection
+ * in that case.
+ */
+export function closestPointOnPolyline(
+  p: { lat: number; lng: number },
+  polyline: { lat: number; lng: number }[],
+): {
+  point: { lat: number; lng: number };
+  t: number;
+  distKm: number;
+} | null {
+  if (polyline.length < 2) return null;
+
+  const segLens: number[] = new Array(polyline.length - 1);
+  let totalLen = 0;
+  for (let i = 1; i < polyline.length; i++) {
+    const len = haversineKm(polyline[i - 1], polyline[i]);
+    segLens[i - 1] = len;
+    totalLen += len;
+  }
+  if (totalLen === 0) return null;
+
+  let best: {
+    point: { lat: number; lng: number };
+    cumLen: number;
+    distKm: number;
+  } | null = null;
+  let cumLen = 0;
+  for (let i = 1; i < polyline.length; i++) {
+    const proj = closestPointOnSegment(p, polyline[i - 1], polyline[i]);
+    const projCumLen = cumLen + proj.t * segLens[i - 1];
+    if (!best || proj.distKm < best.distKm) {
+      best = {
+        point: proj.point,
+        cumLen: projCumLen,
+        distKm: proj.distKm,
+      };
+    }
+    cumLen += segLens[i - 1];
+  }
+
+  if (!best) return null;
+  return {
+    point: best.point,
+    t: best.cumLen / totalLen,
+    distKm: best.distKm,
+  };
+}
+
 /** Total straight-line distance through an ordered list of waypoints. */
 export function routeDistanceKm(points: { lat: number; lng: number }[]): number {
   if (points.length < 2) return 0;

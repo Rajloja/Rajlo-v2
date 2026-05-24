@@ -3,7 +3,11 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getBalanceWithLock } from "@/lib/wallet-holds";
 import { calculateRouteFare } from "@/lib/fare-engine";
-import { closestPointOnSegment, isWithinJamaica } from "@/lib/jamaica";
+import {
+  closestPointOnPolyline,
+  closestPointOnSegment,
+  isWithinJamaica,
+} from "@/lib/jamaica";
 import { notifyRouteTaxiDrivers } from "@/lib/notify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
 import { sendRiderHailRequestedEmail } from "@/lib/email-templates";
@@ -104,7 +108,7 @@ export async function POST(request: Request) {
   const { data: route, error: routeError } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_parish, destination_parish, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd",
+      "id, origin_name, destination_name, origin_parish, destination_parish, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd, path_polyline",
     )
     .eq("id", body.routeId)
     .eq("active", true)
@@ -196,16 +200,43 @@ export async function POST(request: Request) {
   ) {
     const corridorOrigin = { lat: routeOriginLat, lng: routeOriginLng };
     const corridorDest = { lat: routeDestLat, lng: routeDestLng };
-    const pickProj = closestPointOnSegment(
-      { lat: pickupLat, lng: pickupLng },
-      corridorOrigin,
-      corridorDest,
-    );
-    const dropProj = closestPointOnSegment(
-      { lat: dropoffLat, lng: dropoffLng },
-      corridorOrigin,
-      corridorDest,
-    );
+    // Prefer the actual road polyline when stored — the straight
+    // line between origin and destination cuts across bays and
+    // mountains, so a rider standing on the real corridor road can
+    // wrongly read as kilometres off. Falls back to the straight
+    // line only if the polyline column is empty (legacy route, or
+    // the pathfinder's lazy-fetch hasn't populated it yet).
+    const pathPolyline =
+      (route as { path_polyline: Array<{ lat: number; lng: number }> | null })
+        .path_polyline;
+    const pickViaPoly =
+      pathPolyline && pathPolyline.length >= 2
+        ? closestPointOnPolyline(
+            { lat: pickupLat, lng: pickupLng },
+            pathPolyline,
+          )
+        : null;
+    const dropViaPoly =
+      pathPolyline && pathPolyline.length >= 2
+        ? closestPointOnPolyline(
+            { lat: dropoffLat, lng: dropoffLng },
+            pathPolyline,
+          )
+        : null;
+    const pickProj =
+      pickViaPoly ??
+      closestPointOnSegment(
+        { lat: pickupLat, lng: pickupLng },
+        corridorOrigin,
+        corridorDest,
+      );
+    const dropProj =
+      dropViaPoly ??
+      closestPointOnSegment(
+        { lat: dropoffLat, lng: dropoffLng },
+        corridorOrigin,
+        corridorDest,
+      );
     if (
       pickProj.distKm > MAX_HAILABLE_WALK_KM ||
       dropProj.distKm > MAX_HAILABLE_WALK_KM

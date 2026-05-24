@@ -90,3 +90,66 @@ type DirectionsResponse = {
     }>;
   }>;
 };
+
+/**
+ * Decode a Google "encoded polyline algorithm" string into an array of
+ * `{lat, lng}` points. Spec:
+ *   https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+ *
+ * Implemented inline instead of pulling @googlemaps/polyline-codec to
+ * keep the server bundle lean — the algorithm is 30 lines of bit-twiddling
+ * and never needs to change.
+ */
+export function decodePolyline(
+  encoded: string,
+): Array<{ lat: number; lng: number }> {
+  const points: Array<{ lat: number; lng: number }> = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte: number;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    result = 0;
+    shift = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    points.push({ lat: lat * 1e-5, lng: lng * 1e-5 });
+  }
+  return points;
+}
+
+/**
+ * Fetch a corridor's driving polyline as an array of `{lat, lng}`
+ * points. Thin wrapper around fetchPlannedRoute that decodes the
+ * encoded polyline string for callers that need to do geometry on
+ * the route (projection, distance-along-corridor, etc.).
+ *
+ * Returns null on any failure — caller should fall back to the
+ * straight-line segment between the endpoints.
+ */
+export async function fetchCorridorPolyline(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+): Promise<Array<{ lat: number; lng: number }> | null> {
+  const planned = await fetchPlannedRoute(origin, destination);
+  if (!planned) return null;
+  const decoded = decodePolyline(planned.polyline);
+  return decoded.length >= 2 ? decoded : null;
+}

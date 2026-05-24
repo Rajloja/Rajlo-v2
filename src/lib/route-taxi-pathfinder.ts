@@ -25,7 +25,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculateRouteFare, calculateConcessionFare } from "@/lib/fare-engine";
-import { closestPointOnSegment, haversineKm } from "@/lib/jamaica";
+import {
+  closestPointOnPolyline,
+  closestPointOnSegment,
+  haversineKm,
+} from "@/lib/jamaica";
+import { fetchCorridorPolyline } from "@/lib/directions";
 
 /** Snap radius — how far the pathfinder will look for a corridor to
  *  *consider*. We keep this generous (10 km) so the API can still
@@ -163,6 +168,15 @@ type GraphEdge = {
   fareJmd: number;
   destLat: number | null;
   destLng: number | null;
+  /** Actual driving polyline for the corridor (Google Directions),
+   *  stored as a chain of `{lat, lng}` points. When present the snap
+   *  step projects the rider onto this polyline instead of the
+   *  straight line between fromLat/fromLng → destLat/destLng — which
+   *  matters enormously on curved coastal / mountain roads where a
+   *  rider standing on the road can be many km from the straight
+   *  line. Reverse edges share the same polyline as their forward
+   *  counterpart (the road is the same in both directions). */
+  pathPolyline: Array<{ lat: number; lng: number }> | null;
 };
 
 type CorridorGraph = {
@@ -198,6 +212,12 @@ type RouteRow = {
   distance_km: number | string;
   ta_fare_jmd: number;
   active: boolean;
+  /** Persistent cache of the driving polyline. Populated by the
+   *  pathfinder's lazy-fetch on the first build that sees a route
+   *  missing this column; never re-fetched after that until the
+   *  admin edits the route (which also invalidates the memory cache
+   *  via invalidateRouteGraphCache). */
+  path_polyline: Array<{ lat: number; lng: number }> | null;
 };
 
 let cachedGraph: { graph: CorridorGraph; builtAt: number } | null = null;
@@ -210,7 +230,7 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
   const { data, error } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd, active",
+      "id, origin_name, destination_name, origin_lat, origin_lng, destination_lat, destination_lng, distance_km, ta_fare_jmd, active, path_polyline",
     )
     .eq("active", true);
 
@@ -218,6 +238,61 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
     throw new Error(`pathfinder: failed to load routes — ${error.message}`);
   }
   const rows = (data ?? []) as RouteRow[];
+
+  // Lazy-fetch driving polylines for any active route missing one.
+  // Without these, the snap step projects onto the straight line
+  // between endpoints — which on Jamaica's curved coastal roads can
+  // place a rider standing on the actual road many km off the
+  // "corridor". One Google Directions call per missing route; the
+  // result is persisted to routes.path_polyline so subsequent graph
+  // builds (and server restarts) hit the DB cache rather than the
+  // Directions API.
+  //
+  // Parallel — Promise.allSettled so a single failed fetch can't
+  // break the whole build (the affected route falls back to the
+  // straight-line projection). Capped at modest parallelism via
+  // Promise.allSettled's natural behaviour; the corridor catalogue
+  // is small enough that an unbounded fan-out is fine.
+  const fetchTasks: Promise<void>[] = [];
+  for (const r of rows) {
+    if (
+      r.path_polyline === null &&
+      r.origin_lat != null &&
+      r.origin_lng != null &&
+      r.destination_lat != null &&
+      r.destination_lng != null
+    ) {
+      const oLat = r.origin_lat;
+      const oLng = r.origin_lng;
+      const dLat = r.destination_lat;
+      const dLng = r.destination_lng;
+      const row = r;
+      fetchTasks.push(
+        (async () => {
+          try {
+            const polyline = await fetchCorridorPolyline(
+              { lat: oLat, lng: oLng },
+              { lat: dLat, lng: dLng },
+            );
+            if (!polyline) return;
+            row.path_polyline = polyline;
+            // Best-effort write-back. A failure here is harmless —
+            // the polyline is in memory for this build and the next
+            // build will simply re-fetch.
+            await supabase
+              .from("routes")
+              .update({ path_polyline: polyline })
+              .eq("id", row.id);
+          } catch {
+            // Swallow — straight-line fallback is correctness-safe.
+          }
+        })(),
+      );
+    }
+  }
+  if (fetchTasks.length > 0) {
+    await Promise.allSettled(fetchTasks);
+  }
 
   const nodes = new Map<string, GraphNode>();
   const edgesByFrom = new Map<string, GraphEdge[]>();
@@ -254,6 +329,7 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
     fareJmd: number;
     destLat: number | null;
     destLng: number | null;
+    pathPolyline: Array<{ lat: number; lng: number }> | null;
   };
   const pendingForward: PendingEdge[] = [];
   for (const r of rows) {
@@ -291,6 +367,7 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
       fareJmd,
       destLat: r.destination_lat,
       destLng: r.destination_lng,
+      pathPolyline: r.path_polyline,
     });
   }
 
@@ -365,6 +442,7 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
       fareJmd: pe.fareJmd,
       destLat: pe.destLat,
       destLng: pe.destLng,
+      pathPolyline: pe.pathPolyline,
     };
     const reverse: GraphEdge = {
       routeId: pe.routeId,
@@ -379,6 +457,11 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
       fareJmd: pe.fareJmd,
       destLat: pe.fromLat,
       destLng: pe.fromLng,
+      // Reverse edge: same physical road traced backwards. The
+      // polyline's vertex order doesn't matter for projection
+      // (closestPointOnPolyline walks segments either way), so we
+      // share the forward polyline directly rather than reversing.
+      pathPolyline: pe.pathPolyline,
     };
     pushEdge(edgesByFrom, forward);
     pushEdge(edgesByFrom, reverse);
@@ -459,7 +542,15 @@ function positionHintFromT(t: number, fromName: string, toName: string): string 
 
 /** Project a point onto every TA corridor segment in the graph and
  *  return the top-N nearest within `maxKm`. Deduped by routeId so a
- *  corridor's forward and reverse edges don't appear twice. */
+ *  corridor's forward and reverse edges don't appear twice.
+ *
+ *  When the corridor has a stored road polyline (Google Directions
+ *  geometry), the projection follows the actual road. Otherwise
+ *  falls back to projecting onto the straight line between the
+ *  corridor's named endpoints — the legacy behaviour, kept as a
+ *  safety net for routes that haven't had their polyline fetched
+ *  yet (or where the fetch failed). The fallback is correctness-safe
+ *  but distance-pessimistic on curved coastal / mountain roads. */
 function nearestCorridorAttachments(
   graph: CorridorGraph,
   point: { lat: number; lng: number },
@@ -481,11 +572,17 @@ function nearestCorridorAttachments(
       ) {
         continue;
       }
-      const proj = closestPointOnSegment(
-        point,
-        { lat: edge.fromLat, lng: edge.fromLng },
-        { lat: edge.destLat, lng: edge.destLng },
-      );
+      const polyProj =
+        edge.pathPolyline && edge.pathPolyline.length >= 2
+          ? closestPointOnPolyline(point, edge.pathPolyline)
+          : null;
+      const proj =
+        polyProj ??
+        closestPointOnSegment(
+          point,
+          { lat: edge.fromLat, lng: edge.fromLng },
+          { lat: edge.destLat, lng: edge.destLng },
+        );
       if (proj.distKm > maxKm) continue;
       attachments.push({
         routeId: edge.routeId,
@@ -520,6 +617,9 @@ function reverseOf(fwd: GraphEdge): GraphEdge {
     fareJmd: fwd.fareJmd,
     destLat: fwd.fromLat,
     destLng: fwd.fromLng,
+    // Same road in the opposite direction — polyline geometry is
+    // identical; projection doesn't care about vertex order.
+    pathPolyline: fwd.pathPolyline,
   };
 }
 
