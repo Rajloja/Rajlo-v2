@@ -60,7 +60,12 @@ export async function GET(request: Request) {
     );
   }
 
-  const { data, error } = await query.limit(800);
+  // 2000 is well above the current 884-row catalogue with headroom
+  // for catalogue growth; PostgREST's hard default of 1000 is the
+  // real floor here so we keep this explicit. If the catalogue ever
+  // exceeds ~1800 rows we should switch to paginated fetches client-
+  // side rather than bumping this further.
+  const { data, error } = await query.limit(2000);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -261,7 +261,7 @@ function StartSessionPicker({
   const [direction, setDirection] = useState<"forward" | "reverse">("forward");
   const [capacity, setCapacity] = useState(4);
   const [starting, setStarting] = useState(false);
-  // 466 routes is too much to scroll through. Search-first window;
+  // 884 routes is too much to scroll through. Search-first window;
   // expand button reveals more if the driver wants to browse.
   const VISIBLE_LIMIT = 15;
   const [visibleLimit, setVisibleLimit] = useState(VISIBLE_LIMIT);
