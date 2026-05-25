@@ -4,8 +4,15 @@
  * output) into a structured seed list for the `routes` table.
  *
  * Usage:
- *   pdftotext -layout "public/ROUTE TAXI FARE INCREASE 2023_updated.pdf" /tmp/fares_2023.txt
+ *   pdftotext -table "public/ROUTE TAXI FARE INCREASE 2023_updated.pdf" /tmp/fares_2023.txt
  *   node scripts/parse-ta-routes.mjs /tmp/fares_2023.txt > src/lib/route-seed.ts
+ *
+ * IMPORTANT: use `-table` mode, NOT `-layout`. `-layout` mis-aligns the
+ * PDF's column boundaries for any row with a wrapped origin name —
+ * Negril → Sav-la-Mar got distance "10" with -layout (should be 28),
+ * and the drift check then rejected the row as anomalous. With -table
+ * the same row parses correctly as 28 km / $310. Net effect: -table
+ * extracts roughly 2× as many rows as -layout, and they're correct.
  *
  * Strategy:
  *   - Walk the file line-by-line.
@@ -62,13 +69,17 @@ const lines = text.split(/\r?\n/);
 // Match e.g.:
 //   "CHISHOLM AVENUE   DOWNTOWN            6.4    $ 130.00 $ 160.00"
 //   "MOUNT INDUSTRY    LAWRENCE TAVERN     14     $ 170.00 $ 210.00"
+//   "GRAVEL HILL via York Town  MAY PEN    16.9   $ 190.00 $ 230.00"
 //
-// Origin and destination are uppercase tokens (letters, digits, spaces,
-// dots, slashes, apostrophes, dashes, parentheses, ampersands) separated
-// from each other and from the numeric block by 2+ spaces. Distance is
-// integer or one-decimal. Two dollar amounts follow (current + new).
+// Origin and destination are alphanumeric tokens (uppercase + optional
+// lowercase for "via X" qualifiers, dots, slashes, apostrophes, dashes,
+// parens, ampersands) separated from each other and from the numeric
+// block by 2+ spaces. Distance is integer or one-decimal. Two dollar
+// amounts follow (current + new) — the second one may have variable
+// whitespace inside ("$ 180.00" or "$               180.00"), absorbed
+// by \s* before the digit run.
 const ROW_RE =
-  /^([A-Z0-9][A-Z0-9 .'\-/&()]+?)\s{2,}([A-Z0-9][A-Z0-9 .'\-/&()]+?)\s{2,}(\d+(?:\.\d+)?)\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})\s*$/;
+  /^([A-Z0-9][A-Za-z0-9 .'\-/&()]+?)\s{2,}([A-Z0-9][A-Za-z0-9 .'\-/&()]+?)\s{2,}(\d+(?:\.\d+)?)\s+\$\s*([\d,]+\.\d{2})\s+\$\s*([\d,]+\.\d{2})\s*$/;
 
 let currentParish = null;
 const seen = new Set();
@@ -106,10 +117,6 @@ for (let raw of lines) {
   // Sanity floor: anything below the base rate is a parsing error.
   if (taFareJmd < 110) continue;
 
-  const key = `${cleanOrigin.toLowerCase()} → ${cleanDest.toLowerCase()}`;
-  if (seen.has(key)) continue;
-  seen.add(key);
-
   // Drop rows where the TA fare contradicts the formula by more
   // than $20 — the PDF's column layout shifts numerics across rows
   // for long-name origins, and we can't trust either field on those
@@ -117,13 +124,32 @@ for (let raw of lines) {
   const drift = Math.abs(formulaFare(distanceKm) - taFareJmd);
   if (drift > MAX_FORMULA_DRIFT_JMD) continue;
 
+  // De-dup by (origin, destination). When the same (origin, dest)
+  // pair appears with different distances — which happens when the
+  // TA lists two physically-distinct places that share a simplified
+  // name (e.g. "Shrewsbury" the village and "Shrewsbury via Logwood"
+  // a different settlement) — disambiguate by suffixing distance to
+  // the slug so both rows survive. The first occurrence keeps the
+  // canonical slug; subsequent ones get `-{km}km` appended.
+  const key = `${cleanOrigin.toLowerCase()} → ${cleanDest.toLowerCase()}`;
+  let baseSlug = slugify(`${cleanOrigin}-to-${cleanDest}`);
+  let slug = baseSlug;
+  if (seen.has(key)) {
+    slug = slugify(`${cleanOrigin}-to-${cleanDest}-${distanceKm}km`);
+    // If even the distance-suffixed slug collides (extreme edge
+    // case — same origin/dest/distance twice in the PDF), skip.
+    if (seen.has(slug)) continue;
+  }
+  seen.add(key);
+  seen.add(slug);
+
   rows.push({
     origin: cleanOrigin,
     destination: cleanDest,
     parish: currentParish ?? null,
     distanceKm,
     taFareJmd,
-    slug: slugify(`${cleanOrigin}-to-${cleanDest}`),
+    slug,
   });
 }
 

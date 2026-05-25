@@ -405,6 +405,11 @@ export function MapView({
   const boardingMarkerRef = useRef<google.maps.Marker | null>(null);
   const alightingMarkerRef = useRef<google.maps.Marker | null>(null);
   const corridorPolylineRef = useRef<google.maps.Polyline[]>([]);
+  // Small amber dots at each TA-licensed corridor endpoint — the
+  // official "stops" the route taxi serves. Without these the amber
+  // polyline just dangles off into nothing visually, which doesn't
+  // communicate that the taxi physically begins/ends at those points.
+  const corridorEndpointMarkersRef = useRef<google.maps.Marker[]>([]);
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
   // Live-position markers are tracked separately so they don't get wiped
   // when the route refreshes.
@@ -1292,6 +1297,8 @@ export function MapView({
     alightingMarkerRef.current = null;
     corridorPolylineRef.current.forEach((p) => p.setMap(null));
     corridorPolylineRef.current = [];
+    corridorEndpointMarkersRef.current.forEach((m) => m.setMap(null));
+    corridorEndpointMarkersRef.current = [];
 
     if (!boarding && !alighting && (!corridorLines || corridorLines.length === 0)) {
       return;
@@ -1386,6 +1393,58 @@ export function MapView({
     //  walk via MAX_HAILABLE_WALK_KM, so the boarding pin sits
     //  essentially at the rider's pickup. A dashed line connecting
     //  two near-overlapping pins added clutter and confused users.)
+
+    // 3b. Corridor endpoint dots — small amber circles at every TA
+    //     stop the corridor polyline passes through (its origin +
+    //     destination for each leg). Dedup shared transfer points
+    //     so a multi-leg journey where leg[N].to === leg[N+1].from
+    //     only renders one dot at the transfer. Visually subordinate
+    //     to the A/B pins (half the size, no label, lower zIndex) so
+    //     they read as "stops on the route" rather than competing for
+    //     attention with the rider's own board/alight points.
+    if (corridorLines && corridorLines.length > 0) {
+      const seen = new Set<string>();
+      const dropEndpointDot = (p: { lat: number; lng: number }) => {
+        // 6dp = ~11cm precision — enough to dedupe the same town
+        // appearing at the end of one leg and the start of the next.
+        const key = `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        // Skip if the dot would land essentially under the A or B
+        // pin — the rider's boarding/alighting markers already
+        // communicate "stop here" and an overlapping amber dot just
+        // creates visual rubble.
+        if (boarding) {
+          const dx = p.lat - boarding.coords.lat;
+          const dy = p.lng - boarding.coords.lng;
+          if (Math.hypot(dx, dy) < 0.0003) return; // ~30 m
+        }
+        if (alighting) {
+          const dx = p.lat - alighting.coords.lat;
+          const dy = p.lng - alighting.coords.lng;
+          if (Math.hypot(dx, dy) < 0.0003) return;
+        }
+        const m = new google.maps.Marker({
+          map,
+          position: p,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: "#f59e0b", // amber-500, same as corridor line
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+          },
+          title: "TA route taxi stop",
+          zIndex: 55, // above corridor lines (50), below A/B pins (70)
+        });
+        corridorEndpointMarkersRef.current.push(m);
+      };
+      for (const seg of corridorLines) {
+        dropEndpointDot(seg.from);
+        dropEndpointDot(seg.to);
+      }
+    }
 
     // 4. Boarding pin = "A" (rideshare convention: A is where you
     //    start). Uses ROUTE_COLOR_START (brand red) to match the
