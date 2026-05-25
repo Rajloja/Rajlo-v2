@@ -1315,6 +1315,11 @@ export function MapView({
     //    The road polyline is cached module-scoped so subsequent
     //    quotes through the same corridor hit zero Directions calls.
     if (corridorLines && corridorLines.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[corridor-effect] drawing ${corridorLines.length} polyline(s)`,
+        corridorLines,
+      );
       const ds = directionsServiceRef.current;
       for (const seg of corridorLines) {
         const key = corridorCacheKey(seg.from, seg.to);
@@ -1328,9 +1333,20 @@ export function MapView({
           path: initialPath,
           strokeColor: "#f59e0b", // amber-500 — distinct from route red
           strokeOpacity: 1,
-          strokeWeight: 7,
-          zIndex: 50,
+          strokeWeight: 8,
+          zIndex: 100,
         });
+        // Diagnostic: confirm the polyline actually attached to the
+        // map. If line.getMap() is null right after construction,
+        // Google Maps silently rejected it — usually because the
+        // path coords are invalid (NaN, 0,0, or outside the world).
+        if (typeof window !== "undefined") {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[corridor-effect]   polyline ${corridorPolylineRef.current.length + 1}/${corridorLines.length} — `,
+            { path: initialPath, attached: !!line.getMap() },
+          );
+        }
         corridorPolylineRef.current.push(line);
 
         // Cache miss → ask Directions for the actual road polyline.
