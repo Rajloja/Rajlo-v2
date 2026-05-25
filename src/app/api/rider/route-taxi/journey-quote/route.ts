@@ -111,8 +111,39 @@ export async function POST(request: Request) {
     });
   }
 
+  // Diagnostic — returned alongside the quote so we can correlate
+  // the rider's typed pickup with what the pathfinder projected
+  // without digging through server logs. Inspect the Network tab
+  // response in the browser when the UI shows "too far to hail" —
+  // the fields below pinpoint whether it's a Place-geocoding issue
+  // (rider's pickup landed offshore / on a side road) or a
+  // projection bug (boarding point didn't land on the corridor
+  // polyline).
+  const debug = {
+    pickup: { lat: pickup.lat, lng: pickup.lng },
+    dropoff: { lat: dropoff.lat, lng: dropoff.lng },
+    boarding: full.boarding,
+    alighting: full.alighting,
+    hailable: full.hailable,
+    corridor: full.boarding.corridorLabel,
+    legs: full.legCount,
+  };
+
+  if (!full.hailable) {
+    console.log(
+      `[route-quote] not_hailable pickup=(${pickup.lat.toFixed(5)},${pickup.lng.toFixed(5)}) ` +
+        `dropoff=(${dropoff.lat.toFixed(5)},${dropoff.lng.toFixed(5)}) ` +
+        `boarding=(${full.boarding.coords.lat.toFixed(5)},${full.boarding.coords.lng.toFixed(5)}) ` +
+        `boardingWalkKm=${full.boarding.walkKm.toFixed(2)} ` +
+        `alighting=(${full.alighting.coords.lat.toFixed(5)},${full.alighting.coords.lng.toFixed(5)}) ` +
+        `alightingWalkKm=${full.alighting.walkKm.toFixed(2)} ` +
+        `corridor="${full.boarding.corridorLabel}" legs=${full.legCount}`,
+    );
+  }
+
   return NextResponse.json({
     journey: full,
     concession: concession ?? null,
+    _debug: debug,
   });
 }
