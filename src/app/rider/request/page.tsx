@@ -744,24 +744,88 @@ export default function RiderRequestPage() {
     };
     if (mode !== "route_taxi" || !journeyQuote) return empty;
 
-    // Corridor polylines, one per leg. Skip any leg missing
-    // endpoint coords (legacy rows without the lat/lng backfill)
-    // so we don't draw bogus segments anchored at (0, 0).
-    const corridorLines = journeyQuote.legs
-      .filter(
-        (l) =>
-          l.originLat != null &&
-          l.originLng != null &&
-          l.destinationLat != null &&
-          l.destinationLng != null,
-      )
-      .map((l) => ({
-        from: { lat: l.originLat as number, lng: l.originLng as number },
-        to: {
+    // Corridor polylines, one per leg whose endpoints have coords.
+    // A leg with missing coords (an endpoint not yet geocoded in the
+    // DB) gets a STITCH that links the previous leg's geometry to
+    // the next one — without it the map would show disconnected
+    // amber segments with a visible gap, which reads as a bug to
+    // riders even though it's just a data-completeness gap.
+    //
+    // Algorithm: walk leg-by-leg, emitting a corridor line for each
+    // leg with coords. For each gap (1+ consecutive legs missing
+    // coords), emit a single stitch from the last-known coords on
+    // the left to the next-known coords on the right. MapView's
+    // DirectionsService upgrades the straight-line stitch to a
+    // road-following polyline on render, so visually the gap looks
+    // like a normal stretch of road. As a final guard, if NO legs
+    // had coords at all, fall back to a single boarding→alighting
+    // segment — guarantees the map never shows a blank corridor.
+    type Pt = { lat: number; lng: number };
+    const legs = journeyQuote.legs;
+    const corridorLines: Array<{ from: Pt; to: Pt }> = [];
+    let lastTo: Pt | null = {
+      lat: journeyQuote.boarding.coords.lat,
+      lng: journeyQuote.boarding.coords.lng,
+    };
+    for (let i = 0; i < legs.length; i++) {
+      const l = legs[i];
+      const hasCoords =
+        l.originLat != null &&
+        l.originLng != null &&
+        l.destinationLat != null &&
+        l.destinationLng != null;
+      if (hasCoords) {
+        corridorLines.push({
+          from: { lat: l.originLat as number, lng: l.originLng as number },
+          to: {
+            lat: l.destinationLat as number,
+            lng: l.destinationLng as number,
+          },
+        });
+        lastTo = {
           lat: l.destinationLat as number,
           lng: l.destinationLng as number,
-        },
-      }));
+        };
+      } else {
+        // Gap leg — find the next leg with coords; stitch lastTo to
+        // that leg's origin. If no future leg has coords, stitch to
+        // the journey alighting point as the final anchor.
+        let nextFrom: Pt | null = null;
+        for (let j = i + 1; j < legs.length; j++) {
+          const nl = legs[j];
+          if (nl.originLat != null && nl.originLng != null) {
+            nextFrom = {
+              lat: nl.originLat as number,
+              lng: nl.originLng as number,
+            };
+            break;
+          }
+        }
+        if (!nextFrom) {
+          nextFrom = {
+            lat: journeyQuote.alighting.coords.lat,
+            lng: journeyQuote.alighting.coords.lng,
+          };
+        }
+        if (lastTo) {
+          corridorLines.push({ from: lastTo, to: nextFrom });
+        }
+        lastTo = nextFrom;
+      }
+    }
+    // Final guard: zero corridor lines emitted means no leg had
+    // coords AND the loop above never produced a stitch. Render
+    // a single boarding→alighting segment as the last-resort path.
+    if (
+      corridorLines.length === 0 &&
+      journeyQuote.boarding &&
+      journeyQuote.alighting
+    ) {
+      corridorLines.push({
+        from: { ...journeyQuote.boarding.coords },
+        to: { ...journeyQuote.alighting.coords },
+      });
+    }
 
     return {
       boarding: {
