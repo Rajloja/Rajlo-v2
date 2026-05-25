@@ -1,5 +1,6 @@
 "use client";
 
+import { registerPlugin } from "@capacitor/core";
 import { isNativeApp } from "./native";
 
 /**
@@ -164,12 +165,17 @@ type CallKitPlugin = {
   ) => Promise<{ remove: () => Promise<void> }>;
 };
 
-// Plugin proxy resolved lazily on first use — see getCallKit(). We
-// cache it in a module-level slot so the JS proxy is built exactly
-// once. Returning it from an `async` function would auto-await its
-// `.then` (the Capacitor proxy intercepts every property, including
-// `then`, so Promise.resolve(proxy) would call proxy.then(...) and
-// hit "RajloCallKit.then() is not implemented on android").
+// Plugin proxy resolved lazily on first use — we cache it in a
+// module-level slot so the JS proxy is built exactly once.
+//
+// IMPORTANT: this function MUST be synchronous. Returning the
+// plugin proxy from an `async` function (or wrapping it in a
+// Promise) causes Promise resolution to call `proxy.then(...)` —
+// and Capacitor's proxy intercepts every property access, including
+// `then`, so it would try to invoke a native `then()` method on
+// RajloCallKit. That fails with "RajloCallKit.then() is not
+// implemented on android". Static import of `registerPlugin` from
+// `@capacitor/core` keeps everything sync.
 let _callKitProxy: CallKitPlugin | null | undefined;
 
 function getCallKit(): CallKitPlugin | null {
@@ -179,27 +185,12 @@ function getCallKit(): CallKitPlugin | null {
     return null;
   }
   try {
-    // Synchronous import via require-style dynamic — registerPlugin
-    // itself is sync; the dynamic-import promise is what gets us in
-    // trouble. Use the global Capacitor object instead, which is
-    // injected by the WebView and exposes registerPlugin directly.
-    const cap = (
-      window as unknown as {
-        Capacitor?: {
-          registerPlugin?: <T>(name: string) => T;
-          Plugins?: Record<string, unknown>;
-        };
-      }
-    ).Capacitor;
-    if (!cap?.registerPlugin) {
-      _callKitProxy = null;
-      return null;
-    }
-    // If MainActivity already registered it natively, it's available
-    // at Capacitor.Plugins.RajloCallKit — use that directly to avoid
-    // the "registered twice" warning.
-    const existing = cap.Plugins?.RajloCallKit as CallKitPlugin | undefined;
-    _callKitProxy = existing ?? cap.registerPlugin<CallKitPlugin>("RajloCallKit");
+    // registerPlugin is idempotent for a natively-registered name —
+    // it returns the existing proxy (with a benign console warning).
+    // We rely on it rather than `Capacitor.Plugins.RajloCallKit`
+    // because the latter isn't guaranteed to be populated by the
+    // time this is first called.
+    _callKitProxy = registerPlugin<CallKitPlugin>("RajloCallKit");
     return _callKitProxy;
   } catch {
     _callKitProxy = null;
