@@ -392,7 +392,7 @@ export function IncomingCallToast({
           <div className="flex items-center justify-between gap-12 px-10 pb-12 pt-6 sm:justify-center sm:gap-24">
             <button
               type="button"
-              onClick={decline}
+              onClick={() => void decline()}
               className="flex flex-col items-center gap-2"
             >
               <span className="grid h-16 w-16 place-items-center rounded-full bg-rajlo-red shadow-lg shadow-rajlo-red/40 transition-transform active:scale-95">
@@ -404,7 +404,7 @@ export function IncomingCallToast({
             </button>
             <button
               type="button"
-              onClick={accept}
+              onClick={() => void accept()}
               className="flex flex-col items-center gap-2"
             >
               <span className="grid h-16 w-16 place-items-center rounded-full bg-emerald-500 shadow-lg shadow-emerald-500/40 transition-transform active:scale-95">
