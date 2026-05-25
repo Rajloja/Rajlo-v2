@@ -47,8 +47,15 @@ export const MAX_SNAP_KM = 10;
  *  alighting 5 km from your destination is just as broken. */
 export const MAX_HAILABLE_WALK_KM = 1.0;
 
-/** Hard cap on path length so we don't return absurd 6-transfer chains. */
-export const MAX_LEGS = 4;
+/** Hard cap on path length. 6 covers genuine cross-island chains —
+ *  e.g. Long Bay Hanover → Maxfield Kingston naturally takes 5 legs
+ *  (Lucea→Negril, Negril→Sav-la-Mar, Sav-la-Mar→Mandeville,
+ *  Mandeville→Half-Way-Tree, Half-Way-Tree→Maxfield Ave). 4 was too
+ *  tight: cross-country routes that exist in the catalogue went
+ *  unfound and the pathfinder fell back to a worse 4-leg path whose
+ *  dropoff corridor sat km off the rider's destination. Dijkstra is
+ *  microseconds at this graph size so the wider cap is cheap. */
+export const MAX_LEGS = 6;
 
 /** Distance threshold for collapsing two TA endpoints into the same
  *  logical node. The TA catalogue treats neighbourhoods as separate
