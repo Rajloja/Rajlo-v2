@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Room, RoomEvent, Track, type LocalAudioTrack } from "livekit-client";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  type LocalAudioTrack,
+  type LocalTrackPublication,
+  type RemoteTrack,
+  type RemoteTrackPublication,
+  type RemoteParticipant,
+} from "livekit-client";
 import { Icon } from "./icons";
 
 /**
@@ -144,6 +153,96 @@ export function InCallSheet({
       );
     };
 
+    // ─── Remote audio attach ───
+    // Standard LiveKit pattern: when a remote track is subscribed,
+    // attach() returns a wired-up <audio> element that we drop into
+    // the DOM so the browser plays it. We track attached elements
+    // in a Map so we can clean them up on unmount or
+    // TrackUnsubscribed.
+    const attachedAudio = new Map<string, HTMLAudioElement[]>();
+    const attachRemoteAudio = (track: RemoteTrack | Track) => {
+      if (track.kind !== Track.Kind.Audio) return;
+      const sid = (track as { sid?: string }).sid ?? Math.random().toString();
+      if (attachedAudio.has(sid)) {
+        log("already attached audio for sid", sid);
+        return;
+      }
+      // attach() may return a new element OR re-use an existing one.
+      // We just append whatever it gives us and let the browser play.
+      const el = track.attach() as HTMLAudioElement;
+      el.autoplay = true;
+      el.setAttribute("playsinline", "true");
+      // Force volume to max — some browsers ramp this down silently.
+      el.volume = 1.0;
+      document.body.appendChild(el);
+      attachedAudio.set(sid, [el]);
+      log("attached remote audio", {
+        sid,
+        muted: el.muted,
+        volume: el.volume,
+        paused: el.paused,
+      });
+      // Some browsers refuse to autoplay even with the user
+      // gesture; try to nudge play() and log if it fails.
+      el.play().catch((err) =>
+        log("audio play() rejected — gesture-gated?", err),
+      );
+    };
+    const detachRemoteAudio = (track: RemoteTrack | Track) => {
+      const sid = (track as { sid?: string }).sid;
+      if (!sid) return;
+      const elements = attachedAudio.get(sid);
+      if (!elements) return;
+      track.detach().forEach((el) => el.remove());
+      elements.forEach((el) => el.remove());
+      attachedAudio.delete(sid);
+      log("detached remote audio", sid);
+    };
+
+    const onTrackSubscribed = (
+      track: RemoteTrack,
+      pub: RemoteTrackPublication,
+      participant: RemoteParticipant,
+    ) => {
+      log("track subscribed", {
+        kind: track.kind,
+        sid: pub.trackSid,
+        participant: participant.identity,
+      });
+      attachRemoteAudio(track);
+    };
+    const onTrackUnsubscribed = (
+      track: RemoteTrack,
+      pub: RemoteTrackPublication,
+      participant: RemoteParticipant,
+    ) => {
+      log("track unsubscribed", {
+        sid: pub.trackSid,
+        participant: participant.identity,
+      });
+      detachRemoteAudio(track);
+    };
+    const onTrackPublished = (
+      pub: RemoteTrackPublication,
+      participant: RemoteParticipant,
+    ) => {
+      log("remote published a track", {
+        sid: pub.trackSid,
+        kind: pub.kind,
+        participant: participant.identity,
+        subscribed: pub.isSubscribed,
+      });
+    };
+    const onLocalTrackPublished = (
+      pub: LocalTrackPublication,
+    ) => {
+      log("LOCAL track published", {
+        sid: pub.trackSid,
+        kind: pub.kind,
+        muted: pub.isMuted,
+      });
+    };
+
     room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
     room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
     room.on(RoomEvent.Disconnected, onDisconnected);
@@ -151,6 +250,10 @@ export function InCallSheet({
     room.on(RoomEvent.Reconnected, onReconnected);
     room.on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
     room.on(RoomEvent.MediaDevicesError, onMediaDevicesError);
+    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+    room.on(RoomEvent.TrackPublished, onTrackPublished);
+    room.on(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
 
     (async () => {
       try {
@@ -161,27 +264,63 @@ export function InCallSheet({
           await room.disconnect();
           return;
         }
-        log("connected; enabling mic");
-        await room.localParticipant.setMicrophoneEnabled(true);
+        log("connected; remoteParticipants on join =", room.remoteParticipants.size);
+        // Enable mic via the canonical API. We catch the result so a
+        // permission denial logs explicitly instead of throwing.
+        try {
+          await room.localParticipant.setMicrophoneEnabled(true);
+        } catch (micErr) {
+          log("setMicrophoneEnabled threw", micErr);
+          setError(
+            "Couldn't access your microphone. Allow mic permission in your browser settings.",
+          );
+        }
         const pub = Array.from(
           room.localParticipant.audioTrackPublications.values(),
         )[0];
         if (pub?.track) {
           localTrackRef.current = pub.track as LocalAudioTrack;
+          log("local audio track published", {
+            sid: pub.trackSid,
+            muted: pub.isMuted,
+            source: pub.source,
+          });
+        } else {
+          log(
+            "WARN: no local audio publication after setMicrophoneEnabled",
+            {
+              audioPubsCount: room.localParticipant.audioTrackPublications.size,
+              trackPubsCount: room.localParticipant.trackPublications.size,
+            },
+          );
         }
-        log(
-          "mic enabled; remoteParticipants =",
-          room.remoteParticipants.size,
-        );
+        // Manually subscribe to + attach every track on every remote
+        // participant already in the room. The TrackSubscribed event
+        // covers FUTURE subscriptions; this catches the ones that
+        // were subscribed during room.connect() before our handler
+        // was attached.
+        for (const p of room.remoteParticipants.values()) {
+          log("existing remote participant", p.identity, {
+            audioPubs: p.audioTrackPublications.size,
+            trackPubs: p.trackPublications.size,
+          });
+          for (const remotePub of p.audioTrackPublications.values()) {
+            log("existing audio pub", {
+              sid: remotePub.trackSid,
+              subscribed: remotePub.isSubscribed,
+              hasTrack: !!remotePub.track,
+            });
+            if (remotePub.track) {
+              attachRemoteAudio(remotePub.track);
+            }
+          }
+        }
         if (room.remoteParticipants.size > 0) {
           acceptedAtRef.current = Date.now();
           setPhase("in_call");
         } else if (weAreCaller) {
           setPhase("ringing");
         } else {
-          // Callee joined — caller may already have left if we hit a
-          // race, but assume they're there. Caller's
-          // ParticipantConnected will tell us if they show up later.
           setPhase("in_call");
         }
       } catch (err) {
@@ -208,6 +347,12 @@ export function InCallSheet({
       room.off(RoomEvent.Reconnected, onReconnected);
       room.off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
       room.off(RoomEvent.MediaDevicesError, onMediaDevicesError);
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+      room.off(RoomEvent.TrackPublished, onTrackPublished);
+      room.off(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
+      // Detach any audio elements we appended.
+      for (const els of attachedAudio.values()) els.forEach((el) => el.remove());
       void room.disconnect();
     };
   }, [livekitUrl, token, onClose, weAreCaller, callId, roomName]);
@@ -221,42 +366,6 @@ export function InCallSheet({
     }, 1000);
     return () => clearInterval(interval);
   }, [phase]);
-
-  // Auto-attach remote audio tracks to hidden <audio> elements.
-  useEffect(() => {
-    const room = roomRef.current;
-    if (!room) return;
-    const attached = new Map<string, HTMLAudioElement>();
-    const attach = (track: Track) => {
-      if (track.kind !== Track.Kind.Audio) return;
-      const audio = track.attach() as HTMLAudioElement;
-      audio.autoplay = true;
-      audio.setAttribute("playsinline", "true");
-      document.body.appendChild(audio);
-      attached.set(track.sid ?? Math.random().toString(), audio);
-      log("attached remote audio", track.sid);
-    };
-    const detach = (track: Track) => {
-      track.detach().forEach((el) => el.remove());
-    };
-
-    const onTrackSubscribed = (track: Track) => attach(track);
-    const onTrackUnsubscribed = (track: Track) => detach(track);
-    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
-    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
-
-    for (const p of room.remoteParticipants.values()) {
-      for (const pub of p.audioTrackPublications.values()) {
-        if (pub.track) attach(pub.track);
-      }
-    }
-
-    return () => {
-      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
-      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
-      for (const el of attached.values()) el.remove();
-    };
-  }, []);
 
   const toggleMute = async () => {
     const room = roomRef.current;

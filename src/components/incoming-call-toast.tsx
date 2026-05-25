@@ -33,6 +33,8 @@ type IncomingCall = {
   callerRole: "rider" | "driver";
 };
 
+export type PreloadedIncomingCall = IncomingCall;
+
 type ActiveCall = {
   id: string;
   roomName: string;
@@ -139,9 +141,27 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function IncomingCallToast({ userId }: { userId: string }) {
+export function IncomingCallToast({
+  userId,
+  preloaded,
+  onPreloadConsumed,
+}: {
+  userId: string;
+  preloaded?: PreloadedIncomingCall | null;
+  onPreloadConsumed?: () => void;
+}) {
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
   const [active, setActive] = useState<ActiveCall | null>(null);
+
+  // When the layout passes a preloaded call (from `?call=` URL param),
+  // promote it to the live `incoming` state so the ringer pops, then
+  // tell the parent we've consumed it so re-renders don't duplicate.
+  useEffect(() => {
+    if (preloaded) {
+      setIncoming(preloaded);
+      onPreloadConsumed?.();
+    }
+  }, [preloaded, onPreloadConsumed]);
 
   // Ring + vibrate while the overlay is showing.
   useRingtone(incoming !== null);
