@@ -99,3 +99,75 @@ export function playBusyTone(): void {
     /* swallow */
   }
 }
+
+/**
+ * Outgoing ringback tone — plays continuously on the CALLER side while
+ * the call is dialing/ringing waiting for the callee to answer.
+ *
+ * Pattern is the classic North American ringback (440 Hz + 480 Hz mixed,
+ * 2 seconds on, 4 seconds off, looped). Stops cleanly when the returned
+ * function is called — typically when the remote joins (connect tone
+ * takes over) or the call is cancelled.
+ *
+ * Returns a stop function; calling it more than once is safe.
+ */
+export function startRingbackTone(): () => void {
+  if (!AudioCtx) return () => {};
+  let stopped = false;
+  let ctx: AudioContext | null = null;
+  try {
+    ctx = new AudioCtx();
+    const localCtx = ctx;
+
+    const playOneRing = () => {
+      if (stopped || !localCtx) return;
+      // 2-second on burst with two sine oscillators mixed
+      const osc1 = localCtx.createOscillator();
+      const osc2 = localCtx.createOscillator();
+      const gain = localCtx.createGain();
+      osc1.type = "sine";
+      osc2.type = "sine";
+      osc1.frequency.value = 440;
+      osc2.frequency.value = 480;
+      const t0 = localCtx.currentTime;
+      // Soft attack + release so we don't click on start/stop.
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(0.08, t0 + 0.05);
+      gain.gain.setValueAtTime(0.08, t0 + 1.95);
+      gain.gain.linearRampToValueAtTime(0, t0 + 2.0);
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(localCtx.destination);
+      osc1.start(t0);
+      osc2.start(t0);
+      osc1.stop(t0 + 2.05);
+      osc2.stop(t0 + 2.05);
+    };
+
+    // Fire the first ring immediately, then every 6s (2s on + 4s off).
+    playOneRing();
+    const interval = window.setInterval(() => {
+      if (stopped) {
+        window.clearInterval(interval);
+        return;
+      }
+      playOneRing();
+    }, 6000);
+
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      window.clearInterval(interval);
+      // Brief grace so the tail of any in-flight beep flushes cleanly.
+      setTimeout(() => {
+        try {
+          ctx?.close();
+        } catch {
+          /* already closed */
+        }
+      }, 100);
+    };
+  } catch {
+    return () => {};
+  }
+}

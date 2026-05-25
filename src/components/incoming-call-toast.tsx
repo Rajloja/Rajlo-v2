@@ -322,6 +322,61 @@ export function IncomingCallToast({
     }
   }, [setActive]);
 
+  /**
+   * Native lockscreen "accepted" path. Fires when the user tapped
+   * Accept on the IncomingCallActivity (OS-level UI) while the
+   * WebView was asleep — so this is the FIRST time JS has heard of
+   * the call. We fetch the call info, POST /accept, and mount the
+   * in-call sheet. Skips the in-app ringer entirely.
+   */
+  const acceptFromNative = useCallback(async (callId: string) => {
+    try {
+      // Step 1: resolve caller display name. The InCallSheet renders
+      // it above the call duration counter.
+      const infoRes = await fetch(`/api/calls/${callId}`);
+      if (!infoRes.ok) return;
+      const info = (await infoRes.json()) as {
+        call: {
+          id: string;
+          status: string;
+          callerName: string;
+          viewerIsCallee: boolean;
+        };
+      };
+      if (!info.call.viewerIsCallee) return;
+
+      // Step 2: hit /accept to get the LiveKit token and flip the
+      // row to status=accepted. The caller side sees this via
+      // Realtime and stops ringing.
+      const acceptRes = await fetch(`/api/calls/${callId}/accept`, {
+        method: "POST",
+      });
+      const json = (await acceptRes.json()) as
+        | {
+            call: { id: string; roomName: string };
+            token: string;
+            livekitUrl: string;
+          }
+        | { error: string };
+      if (!acceptRes.ok || "error" in json) return;
+
+      // Step 3: push to the global active-call context — InCallSheet
+      // mounts from ActiveCallProvider with the call duration timer
+      // already wired up.
+      setActive({
+        id: json.call.id,
+        roomName: json.call.roomName,
+        token: json.token,
+        livekitUrl: json.livekitUrl,
+        otherPartyName: info.call.callerName,
+        weAreCaller: false,
+      });
+      setIncoming(null);
+    } catch {
+      /* swallow — server will time-out the call eventually */
+    }
+  }, [setActive]);
+
   const decline = useCallback(async (callOverride?: IncomingCall) => {
     const target = callOverride ?? incomingRef.current;
     if (!target) return;
@@ -336,27 +391,44 @@ export function IncomingCallToast({
 
   // Bridge from the OS call UI back to the JS flow. When the user
   // taps Accept / Decline on the lockscreen, the Connection fires
-  // emitCallEvent which surfaces here. We route to the existing
-  // accept / decline handlers so both surfaces behave identically.
+  // emitCallEvent which surfaces here. We route to the right path
+  // depending on whether the in-app ringer was also showing.
+  //
+  // Two scenarios for "accepted":
+  //   (a) In-app ringer was visible and user tapped Accept on the
+  //       lockscreen instead — `incomingRef.current` matches the
+  //       event's callId, so we run the normal accept() path.
+  //   (b) FCM arrived while the WebView was asleep, only the native
+  //       lockscreen UI showed, user accepted there. incomingRef is
+  //       null — we run acceptFromNative() which fetches the call
+  //       info, hits /accept, and mounts the InCallSheet from scratch.
   useEffect(() => {
     let cleanup: (() => void) | null = null;
     (async () => {
       cleanup = await addNativeCallEventListener((event) => {
         const target = incomingRef.current;
-        if (!target || target.id !== event.callId) return;
         if (event.action === "accepted") {
-          void accept(target);
+          if (target && target.id === event.callId) {
+            void accept(target);
+          } else {
+            void acceptFromNative(event.callId);
+          }
         } else if (event.action === "declined" || event.action === "ended") {
-          // The OS call UI is already gone by the time these fire,
-          // so just tell the server and clear our state.
-          void decline(target);
+          // For lockscreen decline, IncomingCallActivity already posted
+          // /decline natively (CallApi.postDecline), so we just clear
+          // any in-app state. For the in-app ringer case where target
+          // matches, we still run decline() so /decline is hit from
+          // the WebView too (idempotent server-side).
+          if (target && target.id === event.callId) {
+            void decline(target);
+          }
         }
       });
     })();
     return () => {
       cleanup?.();
     };
-  }, [accept, decline]);
+  }, [accept, acceptFromNative, decline]);
 
   return (
     <>

@@ -47,6 +47,14 @@ public class RajloConnectionService extends ConnectionService {
         active.remove(callId);
     }
 
+    /** Look up a still-live connection by call id. Used by
+     *  IncomingCallActivity to call back into the Connection when
+     *  the user taps Accept or Decline in the full-screen UI. */
+    public static RajloCallConnection findConnection(String callId) {
+        if (callId == null) return null;
+        return active.get(callId);
+    }
+
     /** Tear down a specific call from outside the Telecom framework.
      *  Used by the plugin when JS reports the remote side hung up
      *  (Realtime UPDATE on the calls row). */
@@ -97,14 +105,19 @@ public class RajloConnectionService extends ConnectionService {
         }
         if (callId == null) callId = "unknown";
 
-        RajloCallConnection conn = new RajloCallConnection(callId);
-        conn.setRinging();
+        RajloCallConnection conn = new RajloCallConnection(this, callId);
         if (callerName != null) {
+            conn.setCallerName(callerName);
             conn.setCallerDisplayName(
                 callerName,
                 android.telecom.TelecomManager.PRESENTATION_ALLOWED
             );
         }
+        // setRinging() AFTER setting the caller name so that when
+        // Telecom turns around and calls onShowIncomingCallUi, the
+        // Connection already has the right caller for the Activity
+        // to display.
+        conn.setRinging();
         register(conn);
         return conn;
     }
@@ -139,14 +152,14 @@ public class RajloConnectionService extends ConnectionService {
         ConnectionRequest request
     ) {
         // Outbound calls are JS-driven today — but we still need to
-        // return a Connection so the OS doesn't crash. Mark it active
+        // return a Connection so the OS doesn't crash. Mark it dialing
         // immediately since the LiveKit room is already set up by the
         // time JS reaches here.
         Bundle extras = request.getExtras();
         String callId = extras != null
             ? extras.getString(RajloCallKit.EXTRA_CALL_ID, "outgoing")
             : "outgoing";
-        RajloCallConnection conn = new RajloCallConnection(callId);
+        RajloCallConnection conn = new RajloCallConnection(this, callId);
         conn.setDialing();
         register(conn);
         return conn;

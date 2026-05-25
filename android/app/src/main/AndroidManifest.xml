@@ -31,6 +31,26 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Full-screen incoming-call UI for self-managed Telecom calls.
+             Telecom does NOT render a system call UI for PROPERTY_SELF_MANAGED
+             connections — the app must draw its own. RajloCallConnection
+             launches this activity from onShowIncomingCallUi.
+             - showWhenLocked + turnScreenOn (set programmatically) make
+               it appear over the lockscreen and wake the device.
+             - noHistory + excludeFromRecents keep it out of the recents
+               list after the call ends.
+             - launchMode=singleInstance prevents stacking duplicate
+               ringer screens when multiple FCM pushes race in. -->
+        <activity
+            android:name=".callkit.IncomingCallActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
         <!-- ConnectionService — the Android Telecom integration point.
              The BIND_TELECOM_CONNECTION_SERVICE permission is a
              signature-level permission granted automatically when the

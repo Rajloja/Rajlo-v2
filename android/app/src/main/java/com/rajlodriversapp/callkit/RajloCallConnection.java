@@ -1,5 +1,7 @@
 package com.rajlodriversapp.callkit;
 
+import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
 import android.telecom.Connection;
 import android.telecom.DisconnectCause;
@@ -27,7 +29,20 @@ public class RajloCallConnection extends Connection {
      *  native event back to the call row. */
     private final String callId;
 
-    public RajloCallConnection(String callId) {
+    /** Context used to launch IncomingCallActivity. Set by the
+     *  ConnectionService when it constructs us — Connection itself
+     *  is not a Context. */
+    private final Context appContext;
+
+    /** Caller display name, captured at construction so we can pass
+     *  it to IncomingCallActivity even though the OS won't surface
+     *  the original ConnectionRequest to onShowIncomingCallUi. */
+    private String callerName = "Caller";
+
+    public RajloCallConnection(Context context, String callId) {
+        this.appContext = context != null
+            ? context.getApplicationContext()
+            : null;
         this.callId = callId;
         // Self-managed audio — we hand the actual mic / speaker to
         // LiveKit, NOT the Telecom AudioManager. PROPERTY_SELF_MANAGED
@@ -45,17 +60,54 @@ public class RajloCallConnection extends Connection {
         return callId;
     }
 
+    void setCallerName(String name) {
+        if (name != null && !name.isEmpty()) this.callerName = name;
+    }
+
+    public String getCallerName() {
+        return callerName;
+    }
+
     /* ─────────────────── Outgoing-call lifecycle ─────────────────── */
 
     @Override
     public void onShowIncomingCallUi() {
-        // The Telecom framework calls this when the system is ready
-        // to show the incoming-call UI. For self-managed connections
-        // we must explicitly accept — the OS won't auto-route to a
-        // lockscreen activity unless we provide one.
-        // We leave the OS-default UI here; future work could swap in
-        // a custom full-screen Activity.
+        // Self-managed connections get NO system call UI. Telecom
+        // creates the Connection in RINGING state but the OS never
+        // shows anything — it expects us to draw our own.
+        //
+        // We launch IncomingCallActivity, which:
+        //   - bypasses the lockscreen / wakes the screen
+        //   - draws Accept / Decline buttons
+        //   - plays the system ringtone + vibrates
+        //
+        // Without this hook the user sees absolutely nothing on the
+        // device when an FCM-driven call arrives — exactly the bug
+        // we hit on Samsung One UI.
+        if (appContext != null) {
+            Intent intent = new Intent(appContext, IncomingCallActivity.class);
+            intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_NO_HISTORY
+                | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+            );
+            intent.putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId);
+            intent.putExtra(IncomingCallActivity.EXTRA_CALLER_NAME, callerName);
+            appContext.startActivity(intent);
+        }
         super.onShowIncomingCallUi();
+    }
+
+    /* ─────────────────── UI-button callbacks ─────────────────── */
+
+    /** Called from IncomingCallActivity when the user taps Accept. */
+    void acceptFromUi() {
+        onAnswer();
+    }
+
+    /** Called from IncomingCallActivity when the user taps Decline. */
+    void declineFromUi() {
+        onReject();
     }
 
     /* ─────────────────── User-action callbacks ─────────────────── */

@@ -172,7 +172,12 @@ public class RajloCallKit extends Plugin {
         JSObject data = new JSObject();
         data.put("action", action);
         data.put("callId", callId);
-        plugin.notifyListeners("callEvent", data);
+        // retainUntilConsumed=true keeps the event queued until the JS
+        // listener attaches. Required because the user might accept
+        // the call on the lockscreen BEFORE the WebView has even
+        // resumed — without retention, the "accepted" event would
+        // fire into a void and the in-call sheet would never mount.
+        plugin.notifyListeners("callEvent", data, true);
     }
 
     /* ─────────────────── Helpers ─────────────────── */

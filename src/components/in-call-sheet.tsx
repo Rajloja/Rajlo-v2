@@ -12,9 +12,15 @@ import {
   type RemoteParticipant,
 } from "livekit-client";
 import { Icon } from "./icons";
-import { playConnectTone, playHangupTone } from "@/lib/call-sounds";
+import { playConnectTone, playHangupTone, startRingbackTone } from "@/lib/call-sounds";
 import { haptics } from "@/lib/native";
 import { endCallNative } from "@/lib/native-call";
+
+// If the callee never answers within this window, the caller side
+// auto-hangs up. Mirrors the server-side 90s stale-call expiry but
+// kicks in fast so the user gets prompt feedback instead of staring
+// at a "calling…" screen indefinitely.
+const NO_ANSWER_TIMEOUT_MS = 30_000;
 
 /**
  * In-call audio sheet — modal bottom-sheet UI shown while a voice
@@ -86,6 +92,15 @@ export function InCallSheet({
   const localTrackRef = useRef<LocalAudioTrack | null>(null);
   const acceptedAtRef = useRef<number | null>(null);
   const remoteGraceTimerRef = useRef<number | null>(null);
+  // Caller-side ringback tone — plays in a 2s-on/4s-off loop while
+  // we're waiting for the callee to pick up. Lives in a ref so the
+  // various lifecycle hooks (remote join, hangup, unmount) can stop
+  // it without prop-drilling state.
+  const stopRingbackRef = useRef<(() => void) | null>(null);
+  // No-answer auto-hangup timer. Set when the caller side enters
+  // the "ringing" phase, cleared as soon as the remote joins or
+  // the call is cancelled.
+  const noAnswerTimerRef = useRef<number | null>(null);
 
   // Connect to LiveKit on mount; disconnect on unmount.
   useEffect(() => {
@@ -375,6 +390,44 @@ export function InCallSheet({
     }, 1000);
     return () => clearInterval(interval);
   }, [phase]);
+
+  // Caller-side ringback + no-answer timeout.
+  //
+  // While the caller is waiting for the callee to pick up, we play
+  // the classic 2s-on/4s-off ringback tone (so they hear "the call
+  // is ringing on the other end" — without this the UI just shows
+  // "Calling…" silently which feels broken).
+  //
+  // We also set a 30s no-answer ceiling. If the callee never joins
+  // the LiveKit room in that window, we hang up locally and the row
+  // gets marked as missed via the /end endpoint. Without this cap,
+  // a caller can sit indefinitely listening to ringback while the
+  // callee never sees the call (rare push delivery failure, callee
+  // offline, etc.).
+  useEffect(() => {
+    if (phase !== "ringing" || !weAreCaller) return;
+    stopRingbackRef.current = startRingbackTone();
+    noAnswerTimerRef.current = window.setTimeout(() => {
+      log("no answer after 30s — auto-cancelling");
+      // Fire-and-forget /end. Server treats a "ringing" call closed
+      // by the caller as missed (not "ended" which implies a real
+      // conversation happened).
+      void fetch(`/api/calls/${callId}/end`, { method: "POST" }).catch(
+        () => null,
+      );
+      void endCallNative(callId);
+      setPhase("ended");
+      onClose();
+    }, NO_ANSWER_TIMEOUT_MS);
+    return () => {
+      stopRingbackRef.current?.();
+      stopRingbackRef.current = null;
+      if (noAnswerTimerRef.current != null) {
+        window.clearTimeout(noAnswerTimerRef.current);
+        noAnswerTimerRef.current = null;
+      }
+    };
+  }, [phase, weAreCaller, callId, onClose]);
 
   const toggleMute = async () => {
     const room = roomRef.current;
