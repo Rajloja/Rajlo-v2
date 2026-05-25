@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { Icon } from "./icons";
 import { useActiveCall } from "./active-call-provider";
+import {
+  addIncomingCallNative,
+  addNativeCallEventListener,
+  clearIncomingCallNotification,
+  endCallNative,
+  registerCallNotificationChannel,
+  registerNativeCallKit,
+  showIncomingCallNotification,
+} from "@/lib/native-call";
 
 /**
  * Global incoming-call listener + full-screen ringer. Mount this once
@@ -158,7 +167,40 @@ export function IncomingCallToast({
     }
   }, [preloaded, onPreloadConsumed]);
 
-  // Ring + vibrate while the overlay is showing.
+  // Register the high-importance Android notification channel once
+  // per session. iOS ignores; web no-ops.
+  useEffect(() => {
+    void registerCallNotificationChannel();
+    // Also register the self-managed PhoneAccount with the Android
+    // Telecom framework. Idempotent — fine to call once per mount.
+    void registerNativeCallKit();
+  }, []);
+
+  // Fire/clear the native heads-up notification AND the OS-level
+  // Telecom ringer in sync with the in-app ringer. The Telecom call
+  // is what makes the call show on the lockscreen / system call UI;
+  // the heads-up notification is the fallback for older OS versions
+  // or if the user disables the Rajlo PhoneAccount in Settings.
+  useEffect(() => {
+    if (incoming) {
+      void showIncomingCallNotification({
+        callId: incoming.id,
+        callerName: incoming.callerName,
+        callerRole: incoming.callerRole,
+      });
+      void addIncomingCallNative({
+        callId: incoming.id,
+        callerName: incoming.callerName,
+      });
+    } else {
+      void clearIncomingCallNotification();
+    }
+  }, [incoming]);
+
+  // Ring + vibrate while the overlay is showing. The OS Telecom
+  // framework drives its own ringer when addIncomingCallNative
+  // succeeds, but the in-app one stays so the web + iOS surfaces
+  // (and pre-O Android fallback) still ring.
   useRingtone(incoming !== null);
 
   useEffect(() => {
@@ -231,10 +273,19 @@ export function IncomingCallToast({
     };
   }, [userId]);
 
-  const accept = async () => {
-    if (!incoming) return;
+  // Hold the latest `incoming` in a ref so the native event listener
+  // (set up once, lives across re-renders) can read the current call
+  // without going stale.
+  const incomingRef = useRef<IncomingCall | null>(null);
+  useEffect(() => {
+    incomingRef.current = incoming;
+  }, [incoming]);
+
+  const accept = useCallback(async (callOverride?: IncomingCall) => {
+    const target = callOverride ?? incomingRef.current;
+    if (!target) return;
     try {
-      const res = await fetch(`/api/calls/${incoming.id}/accept`, {
+      const res = await fetch(`/api/calls/${target.id}/accept`, {
         method: "POST",
       });
       const json = (await res.json()) as
@@ -246,6 +297,7 @@ export function IncomingCallToast({
         | { error: string };
       if (!res.ok || "error" in json) {
         setIncoming(null);
+        void endCallNative(target.id);
         return;
       }
       // Push into the global active-call context. The provider
@@ -256,24 +308,55 @@ export function IncomingCallToast({
         roomName: json.call.roomName,
         token: json.token,
         livekitUrl: json.livekitUrl,
-        otherPartyName: incoming.callerName,
+        otherPartyName: target.callerName,
         weAreCaller: false,
       });
       setIncoming(null);
+      // If the user accepted via the JS overlay (not the OS UI), the
+      // Telecom call is still in RINGING state — flip it active so
+      // the OS shows "ongoing call" rather than leaving the ringer up.
+      void endCallNative(target.id);
     } catch {
       setIncoming(null);
+      void endCallNative(target.id);
     }
-  };
+  }, [setActive]);
 
-  const decline = async () => {
-    if (!incoming) return;
+  const decline = useCallback(async (callOverride?: IncomingCall) => {
+    const target = callOverride ?? incomingRef.current;
+    if (!target) return;
     try {
-      await fetch(`/api/calls/${incoming.id}/decline`, { method: "POST" });
+      await fetch(`/api/calls/${target.id}/decline`, { method: "POST" });
     } catch {
       /* swallow */
     }
     setIncoming(null);
-  };
+    void endCallNative(target.id);
+  }, []);
+
+  // Bridge from the OS call UI back to the JS flow. When the user
+  // taps Accept / Decline on the lockscreen, the Connection fires
+  // emitCallEvent which surfaces here. We route to the existing
+  // accept / decline handlers so both surfaces behave identically.
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    (async () => {
+      cleanup = await addNativeCallEventListener((event) => {
+        const target = incomingRef.current;
+        if (!target || target.id !== event.callId) return;
+        if (event.action === "accepted") {
+          void accept(target);
+        } else if (event.action === "declined" || event.action === "ended") {
+          // The OS call UI is already gone by the time these fire,
+          // so just tell the server and clear our state.
+          void decline(target);
+        }
+      });
+    })();
+    return () => {
+      cleanup?.();
+    };
+  }, [accept, decline]);
 
   return (
     <>

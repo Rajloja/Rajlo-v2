@@ -29,6 +29,21 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- ConnectionService — the Android Telecom integration point.
+             The BIND_TELECOM_CONNECTION_SERVICE permission is a
+             signature-level permission granted automatically when the
+             OS binds to our service. android:exported is true so the
+             OS Telecom framework (a separate process) can reach it. -->
+        <service
+            android:name=".callkit.RajloConnectionService"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
+            android:exported="true"
+            android:foregroundServiceType="phoneCall">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
     </application>
 
     <!-- Permissions -->
@@ -49,6 +64,10 @@
          background-geolocation plugin runs its service under this type. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Android 14+ requires every typed foreground service to declare
+         its type in BOTH the manifest (on the <service> tag) AND a
+         matching permission here. phoneCall covers the ConnectionService. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
     <!-- Notifications: Android 13+ requires explicit opt-in to show any
          notification, including the foreground-service sticky one. -->
@@ -64,6 +83,14 @@
          silently fails — the OS never shows the permission dialog. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Telecom integration: lets Rajlo register a self-managed
+         PhoneAccount so incoming voice calls (LiveKit) show up on
+         the lockscreen and in the system call UI like a native
+         phone call. Together with the BIND_TELECOM_CONNECTION_SERVICE
+         permission on the service tag below, this routes the
+         "incoming call" through the OS Telecom framework. -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
 
     <!-- Camera: in-app photo capture for chat attachments (`<input
          type="file" capture="environment">` triggers the system camera). -->

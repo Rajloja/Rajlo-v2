@@ -10,6 +10,14 @@ import {
 } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { InCallSheet } from "./in-call-sheet";
+import { playHangupTone } from "@/lib/call-sounds";
+import { haptics } from "@/lib/native";
+import {
+  acquireScreenWake,
+  addNativeCallEventListener,
+  endCallNative,
+  releaseScreenWake,
+} from "@/lib/native-call";
 
 /**
  * Global active-call context. Lives in the portal layout so the
@@ -66,6 +74,17 @@ export function ActiveCallProvider({
     setActiveState(call);
   }, []);
 
+  // Keep the device screen awake for the full call. Without this
+  // a 30-minute call locks the phone every 30 s and the rider /
+  // driver has to wake + unlock to interact. No-op on web.
+  useEffect(() => {
+    if (!active) return;
+    void acquireScreenWake();
+    return () => {
+      void releaseScreenWake();
+    };
+  }, [active]);
+
   // Subscribe to UPDATEs on the active call's row. When the remote
   // side hangs up (or our own /end endpoint completes), status
   // flips to ended/missed/declined — close instantly.
@@ -87,6 +106,15 @@ export function ActiveCallProvider({
           if (["ended", "missed", "declined"].includes(row.status)) {
             // eslint-disable-next-line no-console
             console.log("[active-call] remote terminated, status =", row.status);
+            // Audible + haptic confirmation that the remote side
+            // hung up — same tone as the local-hangup case in
+            // InCallSheet so both sides hear the call close.
+            playHangupTone();
+            void haptics.medium();
+            // Drop the OS-level Telecom call if it's still up. Mostly
+            // matters when the remote side hangs up while ours was
+            // already in_call (system call log + ongoing-call status).
+            void endCallNative(row.id);
             setActiveState(null);
           }
         },
@@ -94,6 +122,35 @@ export function ActiveCallProvider({
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
+    };
+  }, [active?.id]);
+
+  // OS-driven hangup during an in-progress call (the user tapped the
+  // hang-up button on the lockscreen / system call UI / Bluetooth
+  // headset). RajloCallConnection.onDisconnect emits "ended" → we
+  // mirror what InCallSheet's own hangup does: POST /end so the row
+  // updates and the remote side is notified via Realtime.
+  useEffect(() => {
+    if (!active?.id) return;
+    let cleanup: (() => void) | null = null;
+    (async () => {
+      cleanup = await addNativeCallEventListener((event) => {
+        if (event.callId !== active.id) return;
+        if (event.action !== "ended" && event.action !== "declined") return;
+        playHangupTone();
+        void haptics.medium();
+        // Fire-and-forget the /end call — server flips the row, which
+        // hits the UPDATE subscription above and clears state. Don't
+        // await: if the network is slow the user has already lost
+        // the call UI on the OS side and we want JS-side parity ASAP.
+        void fetch(`/api/calls/${active.id}/end`, { method: "POST" }).catch(
+          () => {},
+        );
+        setActiveState(null);
+      });
+    })();
+    return () => {
+      cleanup?.();
     };
   }, [active?.id]);
 

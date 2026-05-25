@@ -1,0 +1,272 @@
+"use client";
+
+import { isNativeApp } from "./native";
+
+/**
+ * Native-call helpers wrapping the Capacitor plugins. All functions
+ * are no-ops on web — only the Capacitor WebView ever hits the real
+ * APIs. Lazy-imports the plugins so the web bundle stays lean.
+ *
+ *   • showIncomingCallNotification — fires a heads-up notification
+ *     with Accept/Decline action buttons. Used as a backup to the
+ *     in-app full-screen ringer for the case where the app is in
+ *     the background and the WebView is paused.
+ *
+ *   • clearIncomingCallNotification — dismisses the notification
+ *     once the user accepts/declines from inside the app, so the
+ *     OS notification tray doesn't show a stale "ringing" item.
+ *
+ *   • acquireScreenWake / releaseScreenWake — keep the screen
+ *     awake while in a call so a 30-min call doesn't lock the
+ *     device every 30 seconds.
+ */
+
+const NOTIFICATION_ID = 99001;
+
+export async function showIncomingCallNotification(args: {
+  callId: string;
+  callerName: string;
+  callerRole: "rider" | "driver";
+}): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    // Ensure we have permission first. The driver app's onboarding
+    // already requests notifications for trip alerts, but be defensive.
+    const perms = await LocalNotifications.requestPermissions();
+    if (perms.display !== "granted") return;
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: NOTIFICATION_ID,
+          title: `Incoming call · ${args.callerName}`,
+          body:
+            args.callerRole === "rider"
+              ? "Your passenger is calling"
+              : "Your driver is calling",
+          sound: "default",
+          // Heads-up priority on Android so it slides down from the
+          // top even with the app open. iOS treats this as a
+          // standard banner — true full-screen lockscreen UI is
+          // a CallKit-only feature.
+          channelId: "rajlo-calls",
+          ongoing: false,
+          autoCancel: true,
+          extra: { callId: args.callId, type: "incoming_call" },
+        },
+      ],
+    });
+  } catch {
+    /* plugin missing / permission denied — silent fallback to the
+       in-app ringer */
+  }
+}
+
+export async function clearIncomingCallNotification(): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    await LocalNotifications.cancel({
+      notifications: [{ id: NOTIFICATION_ID }],
+    });
+  } catch {
+    /* silent */
+  }
+}
+
+/**
+ * One-time channel registration for the call notifications. Android
+ * needs the channel to exist before any notification on it shows
+ * heads-up. iOS ignores channels — no-op there.
+ */
+export async function registerCallNotificationChannel(): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
+    const { LocalNotifications } = await import(
+      "@capacitor/local-notifications"
+    );
+    // Channels API exists on Android; createChannel is idempotent
+    // (re-registering is fine).
+    if (
+      "createChannel" in LocalNotifications &&
+      typeof (LocalNotifications as { createChannel?: unknown })
+        .createChannel === "function"
+    ) {
+      await (
+        LocalNotifications as unknown as {
+          createChannel: (opts: {
+            id: string;
+            name: string;
+            importance: number;
+            visibility?: number;
+            vibration?: boolean;
+            sound?: string;
+          }) => Promise<void>;
+        }
+      ).createChannel({
+        id: "rajlo-calls",
+        name: "Rajlo voice calls",
+        // 5 = MAX importance (heads-up banner + sound + vibrate)
+        importance: 5,
+        visibility: 1, // VISIBILITY_PUBLIC — show on lockscreen
+        vibration: true,
+        sound: "default",
+      });
+    }
+  } catch {
+    /* silent */
+  }
+}
+
+/* ─── Android Telecom integration (RajloCallKit plugin) ─── */
+
+/**
+ * Native RajloCallKit bridge — see
+ * `android/app/src/main/java/com/rajlodriversapp/callkit/`.
+ *
+ * What it gives us that local notifications + in-app sheet don't:
+ *   • Real lockscreen incoming-call UI (the OS draws it, not us),
+ *     so the call rings through even with the WebView paused.
+ *   • Bluetooth headset hook button answers/hangs up the call.
+ *   • Appears in the system call log + recent calls list.
+ *   • Audio routing (earpiece / speaker / Bluetooth) handled by the
+ *     OS rather than the WebView audio element.
+ *
+ * Three operations:
+ *   • registerNativeCallKit()       — register the Rajlo PhoneAccount.
+ *                                     Idempotent. Must be called once
+ *                                     per app launch BEFORE any
+ *                                     incoming call is announced.
+ *   • addIncomingCallNative({...})  — tell the OS an inbound call is
+ *                                     ringing. The OS handles the UI.
+ *   • endCallNative(callId)         — programmatic teardown (remote
+ *                                     side hung up, OS UI still open).
+ *
+ * Plus `addNativeCallEventListener(fn)` for the OS → JS callbacks
+ * (`accepted` / `declined` / `ended`). The IncomingCallToast wires
+ * this up to the existing accept / decline / end flow.
+ */
+
+type CallKitPlugin = {
+  register: () => Promise<void>;
+  addIncomingCall: (opts: {
+    callId: string;
+    callerName: string;
+  }) => Promise<void>;
+  endCall: (opts: { callId: string }) => Promise<{ closed: boolean }>;
+  addListener: (
+    eventName: string,
+    cb: (data: { action: string; callId: string }) => void,
+  ) => Promise<{ remove: () => Promise<void> }> & {
+    remove?: () => Promise<void>;
+  };
+};
+
+async function getCallKit(): Promise<CallKitPlugin | null> {
+  if (!isNativeApp()) return null;
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    return registerPlugin<CallKitPlugin>("RajloCallKit");
+  } catch {
+    return null;
+  }
+}
+
+let _callKitRegistered = false;
+
+export async function registerNativeCallKit(): Promise<void> {
+  if (_callKitRegistered) return;
+  const plugin = await getCallKit();
+  if (!plugin) return;
+  try {
+    await plugin.register();
+    _callKitRegistered = true;
+  } catch (err) {
+    // Most common cause: pre-O Android. Silent fallback — the
+    // in-app ringer + heads-up notification still work.
+    console.warn("[native-call] CallKit register failed:", err);
+  }
+}
+
+export async function addIncomingCallNative(args: {
+  callId: string;
+  callerName: string;
+}): Promise<boolean> {
+  const plugin = await getCallKit();
+  if (!plugin) return false;
+  // Lazy register on first use — guards against the boot wiring
+  // not running for some reason (deep-link cold start, etc).
+  await registerNativeCallKit();
+  try {
+    await plugin.addIncomingCall({
+      callId: args.callId,
+      callerName: args.callerName,
+    });
+    return true;
+  } catch (err) {
+    console.warn("[native-call] addIncomingCall failed:", err);
+    return false;
+  }
+}
+
+export async function endCallNative(callId: string): Promise<void> {
+  const plugin = await getCallKit();
+  if (!plugin) return;
+  try {
+    await plugin.endCall({ callId });
+  } catch {
+    /* call already gone — fine */
+  }
+}
+
+/**
+ * Subscribe to `accepted` / `declined` / `ended` / `held` / `unheld`
+ * events from the system call UI. Returns an unsubscribe function.
+ */
+export async function addNativeCallEventListener(
+  handler: (event: { action: string; callId: string }) => void,
+): Promise<() => void> {
+  const plugin = await getCallKit();
+  if (!plugin) return () => {};
+  try {
+    const sub = await plugin.addListener("callEvent", handler);
+    return () => {
+      void sub.remove?.();
+    };
+  } catch {
+    return () => {};
+  }
+}
+
+/* ─── Screen wake-lock during active call ─── */
+
+let _wakeHeld = false;
+
+export async function acquireScreenWake(): Promise<void> {
+  if (!isNativeApp()) return;
+  if (_wakeHeld) return;
+  try {
+    const { KeepAwake } = await import("@capacitor-community/keep-awake");
+    await KeepAwake.keepAwake();
+    _wakeHeld = true;
+  } catch {
+    /* silent */
+  }
+}
+
+export async function releaseScreenWake(): Promise<void> {
+  if (!isNativeApp()) return;
+  if (!_wakeHeld) return;
+  try {
+    const { KeepAwake } = await import("@capacitor-community/keep-awake");
+    await KeepAwake.allowSleep();
+  } catch {
+    /* silent */
+  } finally {
+    _wakeHeld = false;
+  }
+}

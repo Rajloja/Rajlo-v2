@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.webkit.CookieManager;
 
 import com.getcapacitor.BridgeActivity;
+import com.rajlodriversapp.callkit.RajloCallKit;
 
 /**
  * Rajlo Driver — main Capacitor activity.
@@ -18,6 +19,12 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Register custom Capacitor plugins BEFORE super.onCreate so
+        // the bridge sees them when JS calls `Capacitor.Plugins.X`.
+        // RajloCallKit is the bridge to Android's Telecom framework
+        // for native lockscreen / system call UI on incoming calls.
+        registerPlugin(RajloCallKit.class);
+
         super.onCreate(savedInstanceState);
 
         // Belt-and-suspenders: cookies are accepted by default in

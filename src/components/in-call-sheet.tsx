@@ -12,6 +12,9 @@ import {
   type RemoteParticipant,
 } from "livekit-client";
 import { Icon } from "./icons";
+import { playConnectTone, playHangupTone } from "@/lib/call-sounds";
+import { haptics } from "@/lib/native";
+import { endCallNative } from "@/lib/native-call";
 
 /**
  * In-call audio sheet — modal bottom-sheet UI shown while a voice
@@ -112,8 +115,14 @@ export function InCallSheet({
       log("remote participant connected", p.identity ?? p.sid ?? "?");
       clearGrace();
       if (room.remoteParticipants.size > 0) {
-        if (acceptedAtRef.current == null) {
+        const firstTimeAccepting = acceptedAtRef.current == null;
+        if (firstTimeAccepting) {
           acceptedAtRef.current = Date.now();
+          // "Tee-doo" connect tone — confirms the other side picked
+          // up. Skipped on subsequent ParticipantConnected events
+          // (LiveKit re-fires on reconnects).
+          playConnectTone();
+          void haptics.medium();
         }
         setPhase("in_call");
       }
@@ -378,6 +387,16 @@ export function InCallSheet({
 
   const hangup = async () => {
     log("hangup tapped");
+    // Play the "doo-dat" hangup tone + a short haptic so the user
+    // gets immediate confirmation the call is ending — the network
+    // round-trip to /end can take 100-300ms and feels unresponsive
+    // without it.
+    playHangupTone();
+    void haptics.medium();
+    // Tear down the OS-level Telecom call so the system call UI / log
+    // doesn't show "ongoing" after the user has hung up from inside
+    // the app. No-op on web / pre-O Android.
+    void endCallNative(callId);
     try {
       await fetch(`/api/calls/${callId}/end`, { method: "POST" });
     } catch {
