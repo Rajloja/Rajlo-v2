@@ -156,6 +156,38 @@ const JAMAICA_BBOX = {
 // the routes table uses — "St. " not "Saint "). Normalise the lookup
 // key the same way at the call site.
 const OVERRIDES = {
+  // ─── Bare-name fallbacks ───
+  // Towns with exactly ONE location in Jamaica — safe to look up by
+  // name alone, regardless of what parish the routes table tags them
+  // with. Catches the case where the TA seed has wrong parish labels
+  // (e.g. Lucea + Orange Bay are tagged "Westmoreland" in the seed
+  // but both are actually in Hanover — without these bare-name
+  // entries the parish-qualified lookup misses and Google's geocoder
+  // falls back to junk coordinates inside Westmoreland).
+  //
+  // ONLY add a bare-name entry for a name you've verified is unique
+  // across all 14 parishes. For ambiguous names (Hopewell, Richmond,
+  // Hampton Court) leave only the parish-qualified entries so we
+  // don't lock the wrong location.
+  Lucea: { lat: 18.4500, lng: -78.1700 },
+  "Orange Bay": { lat: 18.4500, lng: -78.1810 },
+  Mandeville: { lat: 18.0400, lng: -77.5010 },
+  Christiana: { lat: 18.1710, lng: -77.4900 },
+  Falmouth: { lat: 18.4929, lng: -77.6517 },
+  "Spanish Town": { lat: 17.9920, lng: -76.9570 },
+  "Montego Bay": { lat: 18.4720, lng: -77.9200 },
+  "Ocho Rios": { lat: 18.4080, lng: -77.1030 },
+  "Port Antonio": { lat: 18.1800, lng: -76.4530 },
+  "Black River": { lat: 18.0260, lng: -77.8440 },
+  "May Pen": { lat: 17.9670, lng: -77.2430 },
+  Linstead: { lat: 18.1350, lng: -77.0300 },
+  "Morant Bay": { lat: 17.8810, lng: -76.4080 },
+  "Port Maria": { lat: 18.3710, lng: -76.8920 },
+  "Half Way Tree": { lat: 18.0120, lng: -76.7980 },
+  "Half-Way Tree": { lat: 18.0120, lng: -76.7980 },
+  "Cross Roads": { lat: 18.0010, lng: -76.7850 },
+  Papine: { lat: 18.0220, lng: -76.7450 },
+
   // ─── Hanover ───
   "Lucea|Hanover": { lat: 18.4500, lng: -78.1700 },
   "Orange Bay|Hanover": { lat: 18.4500, lng: -78.1810 },

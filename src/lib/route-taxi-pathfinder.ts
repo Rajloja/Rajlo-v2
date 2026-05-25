@@ -40,12 +40,13 @@ import { fetchCorridorPolyline } from "@/lib/directions";
 export const MAX_SNAP_KM = 10;
 
 /** Real walking distance — how far a rider may walk to a corridor and
- *  still hail directly. 1.0 km ≈ 12 min walk on flat ground; beyond
- *  that no one will actually do it (you'd take a private ride to the
- *  road, then hail). This is the hard gate on whether the rider can
- *  book a route taxi at all. Apply identically on the alighting end —
- *  alighting 5 km from your destination is just as broken. */
-export const MAX_HAILABLE_WALK_KM = 1.0;
+ *  still see Route Taxi as an option. 2.0 km ≈ 24 min walk on flat
+ *  ground; beyond that the rider should book a private ride to the
+ *  road first (which the UI suggests). The UI tiers language by walk
+ *  distance INSIDE this gate — green at < 300 m, amber to 1 km,
+ *  orange to 2 km — so the rider's friction is visible upfront and
+ *  they can self-select rather than being silently blocked at 1.01 km. */
+export const MAX_HAILABLE_WALK_KM = 2.0;
 
 /** Hard cap on path length. 6 covers genuine cross-island chains —
  *  e.g. Long Bay Hanover → Maxfield Kingston naturally takes 5 legs

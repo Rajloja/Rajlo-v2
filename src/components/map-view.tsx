@@ -1387,41 +1387,15 @@ export function MapView({
     //  essentially at the rider's pickup. A dashed line connecting
     //  two near-overlapping pins added clutter and confused users.)
 
-    // 4. Boarding pin — orange disc with "B" label. Sits at the
-    //    rider's projected board point on the corridor.
+    // 4. Boarding pin = "A" (rideshare convention: A is where you
+    //    start). Uses ROUTE_COLOR_START (brand red) to match the
+    //    pickup pin colour in private-ride mode — visual consistency
+    //    across both modes since suppressStaticRoute hides the
+    //    private-ride A pin and this one stands in for it.
     if (boarding) {
       boardingMarkerRef.current = new google.maps.Marker({
         map,
         position: { lat: boarding.coords.lat, lng: boarding.coords.lng },
-        label: {
-          text: "B",
-          color: "#ffffff",
-          fontWeight: "800",
-          fontSize: "12px",
-        },
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 13,
-          fillColor: "#f97316", // orange-500
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: 3,
-        },
-        title: "Board the route taxi here",
-        zIndex: 70,
-      });
-    }
-
-    // 5. Alighting pin — teal disc with "A" label. Distinct hue
-    //    from the boarding orange so the rider can tell at a glance
-    //    which pin is which.
-    if (alighting) {
-      alightingMarkerRef.current = new google.maps.Marker({
-        map,
-        position: {
-          lat: alighting.coords.lat,
-          lng: alighting.coords.lng,
-        },
         label: {
           text: "A",
           color: "#ffffff",
@@ -1431,7 +1405,36 @@ export function MapView({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 13,
-          fillColor: "#0d9488", // teal-600
+          fillColor: ROUTE_COLOR_START,
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        },
+        title: "Board the route taxi here",
+        zIndex: 70,
+      });
+    }
+
+    // 5. Alighting pin = "B" (end of the trip). Uses ROUTE_COLOR_END
+    //    (deep crimson) to match the dropoff pin colour in
+    //    private-ride mode.
+    if (alighting) {
+      alightingMarkerRef.current = new google.maps.Marker({
+        map,
+        position: {
+          lat: alighting.coords.lat,
+          lng: alighting.coords.lng,
+        },
+        label: {
+          text: "B",
+          color: "#ffffff",
+          fontWeight: "800",
+          fontSize: "12px",
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 13,
+          fillColor: ROUTE_COLOR_END,
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 3,

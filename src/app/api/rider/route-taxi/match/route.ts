@@ -66,13 +66,12 @@ type RouteRow = {
 };
 
 /** How far (km) a rider's pickup/dropoff may sit from the corridor
- *  line and still count as "on the corridor". Route taxis are
- *  traditional hail-from-the-road service — if you're not on the
- *  road, you can't flag one down. 1.0 km ≈ a 12-minute walk; keep
- *  this in lockstep with MAX_HAILABLE_WALK_KM in the pathfinder so
- *  the two surfaces (direct match + multi-leg journey) reject the
- *  same off-corridor riders. */
-const CORRIDOR_RADIUS_KM = 1.0;
+ *  line and still count as "on the corridor". Keep this in lockstep
+ *  with MAX_HAILABLE_WALK_KM in the pathfinder so the two surfaces
+ *  (direct match + multi-leg journey) accept/reject the same riders.
+ *  2.0 km ≈ 24 min walk; longer walks get visible UI warnings rather
+ *  than being silently locked out. */
+const CORRIDOR_RADIUS_KM = 2.0;
 
 const STOPWORDS = new Set([
   "jamaica",

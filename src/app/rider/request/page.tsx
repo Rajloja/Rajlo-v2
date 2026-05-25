@@ -1100,52 +1100,74 @@ export default function RiderRequestPage() {
                         ? " · scan to transfer between legs"
                         : ""}
                     </p>
-                    {/* On-corridor confirmation pill. The pathfinder
-                        only reaches this branch when both walks are
-                        within MAX_HAILABLE_WALK_KM (~1 km), so a tiny
-                        residual walk just gets factored into the
-                        "hail here" copy — we never tell the rider to
-                        walk multiple km to a route taxi. */}
+                    {/* Tiered walk-distance pill. Hard gate at 2 km is
+                        enforced upstream (MAX_HAILABLE_WALK_KM). Inside
+                        that, the language graduates with distance so
+                        the rider's friction is visible BEFORE they
+                        book — rather than them silently discovering
+                        a 1.8 km walk after committing the fare. */}
                     {(() => {
                       const pWalk = journeyQuote.boarding.walkKm;
                       const dWalk = journeyQuote.alighting.walkKm;
-                      const pickupOnRoad = pWalk < 0.15;
-                      const dropoffOnRoad = dWalk < 0.15;
+                      const maxWalk = Math.max(pWalk, dWalk);
                       const fmtWalk = (km: number) =>
                         km < 1
                           ? `${Math.round(km * 1000)} m`
                           : `${km.toFixed(1)} km`;
-                      if (pickupOnRoad && dropoffOnRoad) {
+                      // Tier 1 — on the road (≤ 300 m max walk).
+                      if (maxWalk <= 0.3) {
                         return (
                           <p className="mt-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-emerald-900 ring-1 ring-emerald-200">
                             <Icon
                               name="check-circle"
                               className="mr-1 inline h-2.5 w-2.5"
                             />
-                            You&apos;re on the route. Hail here — driver
-                            will pass you on the{" "}
+                            You&apos;re on the{" "}
+                            <span className="font-extrabold">
+                              {journeyQuote.boarding.corridorLabel}
+                            </span>{" "}
+                            road. Hail right here — driver will pass you.
+                          </p>
+                        );
+                      }
+                      // Tier 2 — short walk (300 m – 1 km max).
+                      if (maxWalk <= 1.0) {
+                        return (
+                          <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-900 ring-1 ring-amber-200">
+                            <Icon
+                              name="navigation"
+                              className="mr-1 inline h-2.5 w-2.5"
+                            />
+                            Short walk to the{" "}
                             <span className="font-extrabold">
                               {journeyQuote.boarding.corridorLabel}
                             </span>{" "}
                             road.
+                            {pWalk >= 0.15 &&
+                              ` Pickup ${fmtWalk(pWalk)} away.`}
+                            {dWalk >= 0.15 &&
+                              ` Alight ${fmtWalk(dWalk)} from your dropoff.`}
                           </p>
                         );
                       }
+                      // Tier 3 — longer walk (1 km – 2 km max).
                       return (
-                        <p className="mt-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-emerald-900 ring-1 ring-emerald-200">
+                        <p className="mt-1 rounded-lg bg-orange-50 px-2.5 py-1.5 text-[10px] font-semibold leading-relaxed text-orange-900 ring-1 ring-orange-200">
                           <Icon
-                            name="check-circle"
+                            name="alert-triangle"
                             className="mr-1 inline h-2.5 w-2.5"
                           />
-                          Hail here on the{" "}
+                          Longer walk to the{" "}
                           <span className="font-extrabold">
                             {journeyQuote.boarding.corridorLabel}
                           </span>{" "}
-                          road.
-                          {!pickupOnRoad &&
-                            ` Pickup ${fmtWalk(pWalk)} from the road.`}
-                          {!dropoffOnRoad &&
-                            ` Alight ${fmtWalk(dWalk)} from your dropoff.`}
+                          road — bring water.
+                          {pWalk >= 0.15 &&
+                            ` Pickup ${fmtWalk(pWalk)} away`}
+                          {pWalk >= 0.15 && dWalk >= 0.15 && ", "}
+                          {dWalk >= 0.15 &&
+                            ` alight ${fmtWalk(dWalk)} from your dropoff`}
+                          {(pWalk >= 0.15 || dWalk >= 0.15) && "."}
                         </p>
                       );
                     })()}
