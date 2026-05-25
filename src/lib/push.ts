@@ -44,6 +44,15 @@ export type PushPayload = {
   vibrate?: number[];
   /** Arbitrary payload routed back via the `notificationclick` event. */
   data?: Record<string, unknown>;
+  /** Send the FCM message as data-only (no `notification` field). FCM's
+   *  default behavior with a `notification` field is to auto-display the
+   *  push in the system tray and SKIP onMessageReceived when the app is
+   *  backgrounded — which kills our ability to intercept the push and
+   *  call TelecomManager. Setting this true forces FCM to deliver the
+   *  payload as data, which always invokes onMessageReceived so our
+   *  RajloMessagingService can drive the native call UI directly.
+   *  Web-push is unaffected (it always uses the data payload anyway). */
+  androidDataOnly?: boolean;
 };
 
 type SendResult =
@@ -202,27 +211,49 @@ async function sendNativeFcmBatch(
         // as a system notification when the app is backgrounded. The
         // data payload is forwarded to the app for in-app handling
         // (e.g., deep-linking to a chat thread).
+        //
+        // For payloads marked `androidDataOnly`, we skip the notification
+        // field entirely. That forces FCM to invoke our service's
+        // onMessageReceived even when the app is backgrounded — without
+        // this, FCM auto-displays a tray notification and silently skips
+        // our handler, killing the native call UI path.
+        const fcmData = buildFcmData(payload);
+        // Also include title/body inside data so the native service can
+        // render its own fallback notification if Telecom rejects the
+        // call (e.g. on devices that disable self-managed accounts).
+        if (payload.androidDataOnly) {
+          fcmData.title = payload.title;
+          fcmData.body = payload.body;
+        }
         await messaging.send({
           token,
-          notification: {
-            title: payload.title,
-            body: payload.body,
-          },
-          data: buildFcmData(payload),
+          ...(payload.androidDataOnly
+            ? {}
+            : {
+                notification: {
+                  title: payload.title,
+                  body: payload.body,
+                },
+              }),
+          data: fcmData,
           android: {
             // `high` so FCM wakes the device from doze for ride
             // requests + safety alerts — both time-sensitive.
             priority: "high",
-            notification: {
-              // Target the high-importance `rajlo_alerts` channel
-              // created client-side at app start. Without referencing
-              // this channel explicitly the notification falls back
-              // to Android's default which has IMPORTANCE_DEFAULT
-              // (no heads-up banner). The channel ID is mirrored
-              // in src/lib/native.ts so keep them in sync.
-              channelId: "rajlo_alerts",
-              tag: payload.tag,
-            },
+            ...(payload.androidDataOnly
+              ? {}
+              : {
+                  notification: {
+                    // Target the high-importance `rajlo_alerts` channel
+                    // created client-side at app start. Without referencing
+                    // this channel explicitly the notification falls back
+                    // to Android's default which has IMPORTANCE_DEFAULT
+                    // (no heads-up banner). The channel ID is mirrored
+                    // in src/lib/native.ts so keep them in sync.
+                    channelId: "rajlo_alerts",
+                    tag: payload.tag,
+                  },
+                }),
           },
         });
         sent += 1;

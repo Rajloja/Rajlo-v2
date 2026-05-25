@@ -51,6 +51,10 @@ type NotifyArgs = {
    *  calls — the native FirebaseMessagingService reads `type` and
    *  `callId` from here to drive the Telecom lockscreen UI). */
   pushData?: Record<string, string>;
+  /** Send the FCM message as data-only so our native service's
+   *  onMessageReceived ALWAYS runs (even when the app is backgrounded).
+   *  Required for incoming calls — see RajloMessagingService. */
+  androidDataOnly?: boolean;
 };
 
 /**
@@ -104,6 +108,7 @@ export async function notifyRider(
             riderId: args.riderId,
             ...(args.pushData ?? {}),
           },
+          androidDataOnly: args.androidDataOnly,
         };
         return pushToUser(supabase, args.riderId, payload).catch(() => null);
       }),
@@ -196,6 +201,10 @@ type DriverNotifyArgs = {
    *  pushes the native app handles before showing UI (e.g. incoming
    *  calls — see RajloMessagingService). */
   pushData?: Record<string, string>;
+  /** Send the FCM message as data-only so our native service's
+   *  onMessageReceived ALWAYS runs (even when the app is backgrounded).
+   *  Required for incoming calls — see RajloMessagingService. */
+  androidDataOnly?: boolean;
 };
 
 /**
@@ -242,6 +251,7 @@ export async function notifyDriver(
           driverUserId: args.driverUserId,
           ...(args.pushData ?? {}),
         },
+        androidDataOnly: args.androidDataOnly,
       }).catch(() => null),
     );
   }

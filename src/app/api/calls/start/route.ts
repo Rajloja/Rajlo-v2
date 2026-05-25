@@ -221,6 +221,11 @@ export async function POST(request: Request) {
           requireInteraction: true,
           pushOnly: true,
           pushData: callPushData,
+          // Data-only — without this FCM auto-displays a tray
+          // notification and skips RajloMessagingService.onMessageReceived
+          // when the app is backgrounded, so the Telecom lockscreen UI
+          // never fires.
+          androidDataOnly: true,
         })
       : notifyRider(supabase, {
           riderId: calleeUserId,
@@ -232,6 +237,7 @@ export async function POST(request: Request) {
           pushRenotify: true,
           pushOnly: true,
           pushData: callPushData,
+          androidDataOnly: true,
         });
   void notifyTarget.catch(() => null);
 
