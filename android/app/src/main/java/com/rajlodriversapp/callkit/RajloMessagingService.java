@@ -48,6 +48,11 @@ public class RajloMessagingService extends MessagingService {
 
     private static final String TAG = "RajloMessagingService";
     private static final String CALL_TYPE = "incoming_call";
+    /** Sent by the server when the CALLER hangs up while the call is
+     *  still ringing on the callee side. Lets us dismiss the
+     *  lockscreen ringer immediately even when the WebView is asleep
+     *  and can't pick up the Realtime UPDATE in time. */
+    private static final String CANCEL_TYPE = "call_cancelled";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
@@ -76,6 +81,21 @@ public class RajloMessagingService extends MessagingService {
                 // notification + in-app ringer (once the app wakes)
                 // still get the user.
             }
+        }
+
+        if (CANCEL_TYPE.equals(type)) {
+            String callId = data.get("callId");
+            if (callId != null && !callId.isEmpty()) {
+                Log.i(TAG, "call_cancelled push for " + callId + " — dismissing ringer");
+                // closeCall finishes IncomingCallActivity (if showing)
+                // AND tears down the Telecom Connection. No /decline
+                // POST — the server already marked the row missed
+                // server-side via the caller's /end call.
+                RajloConnectionService.closeCall(callId);
+            }
+            // Don't forward to Capacitor — silent dismissal, no
+            // user-facing notification.
+            return;
         }
 
         super.onMessageReceived(remoteMessage);

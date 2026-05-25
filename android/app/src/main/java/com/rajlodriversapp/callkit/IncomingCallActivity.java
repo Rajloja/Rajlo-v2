@@ -1,18 +1,15 @@
 package com.rajlodriversapp.callkit;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.widget.ImageView;
+import com.rajlodriversapp.R;
 import android.media.AudioAttributes;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
@@ -81,6 +78,12 @@ public class IncomingCallActivity extends Activity {
     private Handler timeoutHandler;
     private final Runnable autoDeclineTask = this::onAutoDecline;
 
+    /** Static handle to whichever IncomingCallActivity is currently
+     *  visible. Lets RajloConnectionService.closeCall (which can fire
+     *  from FCM's call_cancelled push or a programmatic teardown)
+     *  dismiss the ringer Activity immediately. Stays null otherwise. */
+    private static IncomingCallActivity currentInstance;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -115,6 +118,22 @@ public class IncomingCallActivity extends Activity {
         setContentView(buildUi(callerName));
         startRingerLoop();
         scheduleAutoDecline();
+        currentInstance = this;
+    }
+
+    /** Dismiss the live ringer Activity if it's showing this callId.
+     *  Used when the rider hangs up while we're still ringing — the
+     *  server sends a `call_cancelled` FCM that triggers
+     *  RajloConnectionService.closeCall, which calls this. */
+    public static void finishIfShowing(String callId) {
+        IncomingCallActivity inst = currentInstance;
+        if (inst == null || callId == null) return;
+        if (!callId.equals(inst.callId)) return;
+        inst.runOnUiThread(() -> {
+            inst.stopRinger();
+            inst.cancelAutoDecline();
+            inst.finish();
+        });
     }
 
     @Override
@@ -274,9 +293,9 @@ public class IncomingCallActivity extends Activity {
         return root;
     }
 
-    /** A round red/green button with the phone icon drawn inside.
-     *  declined=true → red with the "hung up" icon (rotated phone).
-     *  declined=false → green with the regular phone receiver icon. */
+    /** A round red/green button with a Material Design phone icon.
+     *  declined=true → red with the "call_end" icon (horizontal phone).
+     *  declined=false → green with the "call" icon (upright phone). */
     private View makeActionButton(
         String label,
         int color,
@@ -298,7 +317,13 @@ public class IncomingCallActivity extends Activity {
         circle.setBackground(bg);
         circle.setElevation(dp(8));
 
-        PhoneIconView icon = new PhoneIconView(this, declined);
+        // Standard Material Design phone icons — instantly recognisable
+        // as Accept (upright receiver) vs Decline (call_end / receiver
+        // lying flat). Tinted white via the drawable resource.
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(
+            declined ? R.drawable.ic_call_decline : R.drawable.ic_call_accept
+        );
         FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(
             dp(32), dp(32)
         );
@@ -356,43 +381,6 @@ public class IncomingCallActivity extends Activity {
             scale.start();
             fade.start();
         }, delayMs);
-    }
-
-    /** Simple phone icon drawn programmatically so we don't need a
-     *  vector drawable resource. Accept = upright receiver, decline =
-     *  receiver rotated 135° (universal "end call" icon). */
-    private static class PhoneIconView extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final boolean declined;
-
-        PhoneIconView(Context ctx, boolean declined) {
-            super(ctx);
-            this.declined = declined;
-            paint.setColor(Color.WHITE);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(8f);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            float w = getWidth();
-            float h = getHeight();
-            float cx = w / 2f;
-            float cy = h / 2f;
-            float r = Math.min(w, h) * 0.30f;
-
-            if (declined) {
-                canvas.rotate(135f, cx, cy);
-            }
-
-            // Stylized phone receiver — short horizontal handle with
-            // earpiece + mouthpiece bumps. Drawn as a single curve.
-            // For simplicity, draw two arcs joined by a line.
-            canvas.drawLine(cx - r, cy + r * 0.6f, cx + r, cy - r * 0.6f, paint);
-            canvas.drawCircle(cx - r, cy + r * 0.6f, r * 0.30f, paint);
-            canvas.drawCircle(cx + r, cy - r * 0.6f, r * 0.30f, paint);
-        }
     }
 
     private int dp(int value) {
@@ -525,6 +513,7 @@ public class IncomingCallActivity extends Activity {
     protected void onDestroy() {
         stopRinger();
         cancelAutoDecline();
+        if (currentInstance == this) currentInstance = null;
         super.onDestroy();
     }
 }

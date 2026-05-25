@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
+import { pushToUser } from "@/lib/push";
 
 /**
  * POST /api/calls/[id]/end
@@ -75,6 +76,32 @@ export async function POST(
       end_reason: endReason,
     })
     .eq("id", call.id);
+
+  // If the CALLER hung up while the callee hadn't accepted yet, send
+  // a data-only `call_cancelled` push to the callee. The native
+  // Android RajloMessagingService picks this up and dismisses the
+  // lockscreen IncomingCallActivity immediately — without this the
+  // callee's phone keeps ringing until the in-app Realtime UPDATE
+  // gets delivered, which can be 10+ seconds when the WebView is
+  // asleep. Fire-and-forget so a flaky FCM doesn't block /end.
+  if (
+    !wasAccepted &&
+    call.caller_id === user.id &&
+    typeof call.callee_id === "string"
+  ) {
+    void pushToUser(supabase, call.callee_id, {
+      // title / body aren't displayed (data-only) but the FCM SDK
+      // still wants them present.
+      title: "Call cancelled",
+      body: "The caller hung up.",
+      tag: `call-${call.id}`,
+      androidDataOnly: true,
+      data: {
+        type: "call_cancelled",
+        callId: call.id,
+      },
+    }).catch(() => null);
+  }
 
   return NextResponse.json({
     ok: true,

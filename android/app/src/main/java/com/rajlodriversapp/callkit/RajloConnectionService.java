@@ -57,8 +57,14 @@ public class RajloConnectionService extends ConnectionService {
 
     /** Tear down a specific call from outside the Telecom framework.
      *  Used by the plugin when JS reports the remote side hung up
-     *  (Realtime UPDATE on the calls row). */
+     *  (Realtime UPDATE on the calls row), and by RajloMessagingService
+     *  when the server sends a `call_cancelled` FCM (rider hangs up
+     *  while the driver is still seeing the ringer). */
     public static boolean closeCall(String callId) {
+        // Dismiss the lockscreen ringer first so the visible UI goes
+        // away immediately; tearing down the Connection alone won't
+        // close the Activity since they're decoupled.
+        IncomingCallActivity.finishIfShowing(callId);
         RajloCallConnection conn = active.remove(callId);
         if (conn == null) return false;
         conn.closeFromRemote();
