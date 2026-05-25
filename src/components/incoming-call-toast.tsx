@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { Icon } from "./icons";
-import { InCallSheet } from "./in-call-sheet";
+import { useActiveCall } from "./active-call-provider";
 
 /**
  * Global incoming-call listener + full-screen ringer. Mount this once
@@ -34,14 +34,6 @@ type IncomingCall = {
 };
 
 export type PreloadedIncomingCall = IncomingCall;
-
-type ActiveCall = {
-  id: string;
-  roomName: string;
-  token: string;
-  livekitUrl: string;
-  otherPartyName: string;
-};
 
 // Two-tone ringtone built with Web Audio — no asset upload needed.
 // 0.4s on / 0.6s off, repeated, sweeping between A4 and E5 for the
@@ -151,7 +143,10 @@ export function IncomingCallToast({
   onPreloadConsumed?: () => void;
 }) {
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
-  const [active, setActive] = useState<ActiveCall | null>(null);
+  // The accept handler pushes into the global active-call context.
+  // The provider's <InCallSheet> takes over from there — this toast
+  // doesn't render the sheet anymore.
+  const { setActive } = useActiveCall();
 
   // When the layout passes a preloaded call (from `?call=` URL param),
   // promote it to the live `incoming` state so the ringer pops, then
@@ -253,12 +248,16 @@ export function IncomingCallToast({
         setIncoming(null);
         return;
       }
+      // Push into the global active-call context. The provider
+      // renders the InCallSheet from there, so navigating away from
+      // this toast (e.g. across page routes) doesn't kill the call.
       setActive({
         id: json.call.id,
         roomName: json.call.roomName,
         token: json.token,
         livekitUrl: json.livekitUrl,
         otherPartyName: incoming.callerName,
+        weAreCaller: false,
       });
       setIncoming(null);
     } catch {
@@ -334,17 +333,6 @@ export function IncomingCallToast({
             </button>
           </div>
         </div>
-      )}
-      {active && (
-        <InCallSheet
-          callId={active.id}
-          roomName={active.roomName}
-          token={active.token}
-          livekitUrl={active.livekitUrl}
-          otherPartyName={active.otherPartyName}
-          weAreCaller={false}
-          onClose={() => setActive(null)}
-        />
       )}
     </>
   );

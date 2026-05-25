@@ -11,6 +11,7 @@ import { PullToRefresh } from "@/components/pull-to-refresh";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
 import { IncomingCallProvider } from "@/components/incoming-call-provider";
+import { ActiveCallProvider } from "@/components/active-call-provider";
 import { driverNav } from "@/lib/mock-data";
 import { getDriverStatus } from "@/lib/driver-status";
 
@@ -64,6 +65,7 @@ export default async function DriverPortalLayout({
       subtitle="Manage verification, trips, seats, and payouts."
       nav={driverNav}
     >
+      <ActiveCallProvider>
       <SessionGuard />
       {/* One-time launch warm-up: holds a branded loader until the
          bottom-nav tab chunks + data caches are prefetched, so the
@@ -105,6 +107,7 @@ export default async function DriverPortalLayout({
          The server-side getDriverStatus above already handles
          the unverified-redirect-to-pending/onboarding flow. */}
       <DriverPortalGate>{children}</DriverPortalGate>
+      </ActiveCallProvider>
     </PortalLayout>
   );
 }
