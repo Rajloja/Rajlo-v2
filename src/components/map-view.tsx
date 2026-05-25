@@ -1314,24 +1314,35 @@ export function MapView({
     //    road-following polyline once DirectionsService responds.
     //    The road polyline is cached module-scoped so subsequent
     //    quotes through the same corridor hit zero Directions calls.
-    if (corridorLines && corridorLines.length > 0) {
-      // Single continuous polyline for the whole journey — origin =
-      // first leg's `from`, destination = last leg's `to`, every
-      // intermediate transfer point in between as a waypoint. ONE
-      // Directions API call gives ONE smooth road-following line,
-      // visually identical to the private-ride polyline. The old
-      // per-leg approach created tiny gaps at every transfer point
-      // (because adjacent legs' endpoint coords didn't always
-      // coincide exactly) which looked fragmented to riders.
-      const origin = corridorLines[0].from;
-      const destination = corridorLines[corridorLines.length - 1].to;
+    if (corridorLines && corridorLines.length > 0 && boarding && alighting) {
+      // Polyline traces ONLY the rider's actual journey — from
+      // where they BOARD to where they ALIGHT, through each transfer
+      // point in between. Previously the line ran from the first
+      // corridor's named origin to the last corridor's named
+      // destination, which often extended well past the rider's
+      // pickup and dropoff (the TA-listed corridor endpoints sit at
+      // town centres, but the rider boards mid-corridor where they
+      // ARE). Drawing past their actual board / alight was confusing
+      // — riders read it as "the taxi keeps going after I'm gone".
+      const origin = {
+        lat: boarding.coords.lat,
+        lng: boarding.coords.lng,
+      };
+      const destination = {
+        lat: alighting.coords.lat,
+        lng: alighting.coords.lng,
+      };
+      // Waypoints = the transfer points the rider switches taxis at.
+      // For an N-leg journey: leg destinations 1..N-1. Leg N's
+      // destination is the journey's final stop (not a transfer).
+      // For a single-leg journey: empty waypoints.
       const waypoints = corridorLines.slice(0, -1).map((seg) => ({
         location: new google.maps.LatLng(seg.to.lat, seg.to.lng),
         stopover: false,
       }));
-      // Initial path: a single straight line strung through the
-      // origin + every waypoint + destination. Replaced by the
-      // road-following geometry as soon as Directions responds.
+      // Initial path: a single straight line through boarding +
+      // every transfer point + alighting. Replaced by the road-
+      // following geometry as soon as Directions responds.
       const initialPath: google.maps.LatLngLiteral[] = [
         origin,
         ...corridorLines.slice(0, -1).map((seg) => seg.to),
@@ -1405,35 +1416,33 @@ export function MapView({
     //  essentially at the rider's pickup. A dashed line connecting
     //  two near-overlapping pins added clutter and confused users.)
 
-    // 3b. Corridor endpoint dots — small amber circles at every TA
-    //     stop the corridor polyline passes through (its origin +
-    //     destination for each leg). Dedup shared transfer points
-    //     so a multi-leg journey where leg[N].to === leg[N+1].from
-    //     only renders one dot at the transfer. Visually subordinate
-    //     to the A/B pins (half the size, no label, lower zIndex) so
-    //     they read as "stops on the route" rather than competing for
-    //     attention with the rider's own board/alight points.
-    if (corridorLines && corridorLines.length > 0) {
+    // 3b. Transfer-point dots — small orange circles at each spot the
+    //     rider physically changes taxis. For an N-leg journey these
+    //     are leg destinations 1..N-1 (the last leg's destination is
+    //     the rider's final alighting point, marked by the B pin —
+    //     not a transfer). Single-leg journeys have zero transfer
+    //     dots. Visually subordinate to the A/B pins (smaller, no
+    //     label) so they read as "stops on the route" rather than
+    //     competing with the rider's own board/alight points.
+    if (corridorLines && corridorLines.length > 1) {
       const seen = new Set<string>();
-      const dropEndpointDot = (p: { lat: number; lng: number }) => {
-        // 6dp = ~11cm precision — enough to dedupe the same town
-        // appearing at the end of one leg and the start of the next.
+      for (const seg of corridorLines.slice(0, -1)) {
+        const p = seg.to;
         const key = `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
-        if (seen.has(key)) return;
+        if (seen.has(key)) continue;
         seen.add(key);
-        // Skip if the dot would land essentially under the A or B
-        // pin — the rider's boarding/alighting markers already
-        // communicate "stop here" and an overlapping amber dot just
-        // creates visual rubble.
+        // Skip if the transfer dot would land essentially under the
+        // A or B pin (rare — only when boarding/alighting projects
+        // exactly at a corridor endpoint).
         if (boarding) {
           const dx = p.lat - boarding.coords.lat;
           const dy = p.lng - boarding.coords.lng;
-          if (Math.hypot(dx, dy) < 0.0003) return; // ~30 m
+          if (Math.hypot(dx, dy) < 0.0003) continue;
         }
         if (alighting) {
           const dx = p.lat - alighting.coords.lat;
           const dy = p.lng - alighting.coords.lng;
-          if (Math.hypot(dx, dy) < 0.0003) return;
+          if (Math.hypot(dx, dy) < 0.0003) continue;
         }
         const m = new google.maps.Marker({
           map,
@@ -1441,19 +1450,15 @@ export function MapView({
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
             scale: 6,
-            fillColor: "#f59e0b", // amber-500, same as corridor line
+            fillColor: "#f97316", // orange-500, same as the corridor line
             fillOpacity: 1,
             strokeColor: "#ffffff",
             strokeWeight: 2,
           },
-          title: "TA route taxi stop",
+          title: "Transfer here — switch taxis",
           zIndex: 55, // above corridor lines (50), below A/B pins (70)
         });
         corridorEndpointMarkersRef.current.push(m);
-      };
-      for (const seg of corridorLines) {
-        dropEndpointDot(seg.from);
-        dropEndpointDot(seg.to);
       }
     }
 
