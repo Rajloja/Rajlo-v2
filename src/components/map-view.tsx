@@ -1327,8 +1327,8 @@ export function MapView({
           map,
           path: initialPath,
           strokeColor: "#f59e0b", // amber-500 — distinct from route red
-          strokeOpacity: 0.85,
-          strokeWeight: 5,
+          strokeOpacity: 1,
+          strokeWeight: 7,
           zIndex: 50,
         });
         corridorPolylineRef.current.push(line);

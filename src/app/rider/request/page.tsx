@@ -827,7 +827,7 @@ export default function RiderRequestPage() {
       });
     }
 
-    return {
+    const result = {
       boarding: {
         coords: journeyQuote.boarding.coords,
         walkKm: journeyQuote.boarding.walkKm,
@@ -838,6 +838,30 @@ export default function RiderRequestPage() {
       },
       corridorLines: corridorLines.length > 0 ? corridorLines : null,
     };
+    // Diagnostic — visible in the browser console when route taxi
+    // mode is active. Tells us in one glance whether the pathfinder
+    // returned legs with usable coords, how many corridor lines the
+    // map will try to render, and which boarding/alighting points
+    // anchor them.
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line no-console
+      console.log("[route-taxi-overlays]", {
+        mode,
+        legCount: journeyQuote.legs.length,
+        legsWithCoords: journeyQuote.legs.filter(
+          (l) =>
+            l.originLat != null &&
+            l.originLng != null &&
+            l.destinationLat != null &&
+            l.destinationLng != null,
+        ).length,
+        corridorLines: result.corridorLines?.length ?? 0,
+        boarding: result.boarding.coords,
+        alighting: result.alighting.coords,
+        firstLeg: journeyQuote.legs[0],
+      });
+    }
+    return result;
   }, [mode, journeyQuote]);
 
   if (bootstrapping) {
