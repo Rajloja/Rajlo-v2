@@ -1315,93 +1315,99 @@ export function MapView({
     //    The road polyline is cached module-scoped so subsequent
     //    quotes through the same corridor hit zero Directions calls.
     if (corridorLines && corridorLines.length > 0) {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[corridor-effect] drawing ${corridorLines.length} polyline(s)`,
-        corridorLines,
-      );
-      const ds = directionsServiceRef.current;
-      for (const seg of corridorLines) {
-        const key = corridorCacheKey(seg.from, seg.to);
-        const cached = corridorPolylineCache.get(key);
-        const initialPath: google.maps.LatLngLiteral[] = cached ?? [
-          { lat: seg.from.lat, lng: seg.from.lng },
-          { lat: seg.to.lat, lng: seg.to.lng },
-        ];
-        const line = new google.maps.Polyline({
-          map,
-          path: initialPath,
-          strokeColor: "#f59e0b", // amber-500 — distinct from route red
-          strokeOpacity: 1,
-          strokeWeight: 8,
-          zIndex: 100,
-        });
-        // Diagnostic: confirm the polyline actually attached to the
-        // map. If line.getMap() is null right after construction,
-        // Google Maps silently rejected it — usually because the
-        // path coords are invalid (NaN, 0,0, or outside the world).
-        if (typeof window !== "undefined") {
-          // eslint-disable-next-line no-console
-          console.log(
-            `[corridor-effect]   polyline ${corridorPolylineRef.current.length + 1}/${corridorLines.length} — `,
-            { path: initialPath, attached: !!line.getMap() },
-          );
-        }
-        corridorPolylineRef.current.push(line);
+      // Single continuous polyline for the whole journey — origin =
+      // first leg's `from`, destination = last leg's `to`, every
+      // intermediate transfer point in between as a waypoint. ONE
+      // Directions API call gives ONE smooth road-following line,
+      // visually identical to the private-ride polyline. The old
+      // per-leg approach created tiny gaps at every transfer point
+      // (because adjacent legs' endpoint coords didn't always
+      // coincide exactly) which looked fragmented to riders.
+      const origin = corridorLines[0].from;
+      const destination = corridorLines[corridorLines.length - 1].to;
+      const waypoints = corridorLines.slice(0, -1).map((seg) => ({
+        location: new google.maps.LatLng(seg.to.lat, seg.to.lng),
+        stopover: false,
+      }));
+      // Initial path: a single straight line strung through the
+      // origin + every waypoint + destination. Replaced by the
+      // road-following geometry as soon as Directions responds.
+      const initialPath: google.maps.LatLngLiteral[] = [
+        origin,
+        ...corridorLines.slice(0, -1).map((seg) => seg.to),
+        destination,
+      ];
+      // Halo underneath — wide white polyline so the orange line on
+      // top stands out against Maps' default road tinting.
+      const halo = new google.maps.Polyline({
+        map,
+        path: initialPath,
+        strokeColor: "#ffffff",
+        strokeOpacity: 0.95,
+        strokeWeight: 12,
+        zIndex: 95,
+      });
+      corridorPolylineRef.current.push(halo);
+      // Main corridor line — bright orange, on top of the halo.
+      const line = new google.maps.Polyline({
+        map,
+        path: initialPath,
+        strokeColor: "#f97316",
+        strokeOpacity: 1,
+        strokeWeight: 7,
+        zIndex: 100,
+      });
+      corridorPolylineRef.current.push(line);
 
-        // Cache miss → ask Directions for the actual road polyline.
-        // We capture the polyline ref in the closure so we can swap
-        // its path when the response arrives. Skip if the polyline
-        // was torn down by a prop change in the meantime (getMap()
-        // returns null after setMap(null)).
-        if (!cached && ds) {
-          const polyline = line;
-          ds.route(
-            {
-              origin: seg.from,
-              destination: seg.to,
-              travelMode: google.maps.TravelMode.DRIVING,
-            },
-            (result, status) => {
-              if (
-                status !== google.maps.DirectionsStatus.OK ||
-                !result?.routes?.[0]
-              ) {
-                // Straight line stays — better than nothing if
-                // Directions is rate-limited or the corridor doesn't
-                // resolve to a road route.
-                return;
-              }
-              // Stitch every step's full path instead of using
-              // `overview_path`. The overview is Google's simplified
-              // geometry — it drops vertices, so long corridors
-              // visibly "cut corners" and read as straight diagonals
-              // that don't match the visible road. Step paths bend
-              // with every curve. Same approach as the private-ride
-              // polyline via fullRoutePath().
-              const route = result.routes[0];
-              const points: { lat: number; lng: number }[] = [];
-              for (const leg of route.legs ?? []) {
-                for (const step of leg.steps ?? []) {
-                  for (const pt of step.path ?? []) {
-                    points.push({ lat: pt.lat(), lng: pt.lng() });
-                  }
+      const ds = directionsServiceRef.current;
+      if (ds) {
+        const polyline = line;
+        const haloLine = halo;
+        ds.route(
+          {
+            origin,
+            destination,
+            waypoints,
+            travelMode: google.maps.TravelMode.DRIVING,
+            optimizeWaypoints: false, // preserve leg order
+          },
+          (result, status) => {
+            if (
+              status !== google.maps.DirectionsStatus.OK ||
+              !result?.routes?.[0]
+            ) {
+              // Straight-line initial path stays — better than nothing
+              // if Directions is rate-limited or no road route exists.
+              return;
+            }
+            // Stitch every step's full path (same fidelity as the
+            // private-ride polyline via fullRoutePath()) instead of
+            // overview_path, which drops vertices and "cuts corners"
+            // on long corridors.
+            const route = result.routes[0];
+            const points: { lat: number; lng: number }[] = [];
+            for (const leg of route.legs ?? []) {
+              for (const step of leg.steps ?? []) {
+                for (const pt of step.path ?? []) {
+                  points.push({ lat: pt.lat(), lng: pt.lng() });
                 }
               }
-              const finalPoints =
-                points.length > 1
-                  ? points
-                  : route.overview_path.map((p) => ({
-                      lat: p.lat(),
-                      lng: p.lng(),
-                    }));
-              corridorPolylineCache.set(key, finalPoints);
-              if (polyline.getMap()) {
-                polyline.setPath(finalPoints);
-              }
-            },
-          );
-        }
+            }
+            const finalPoints =
+              points.length > 1
+                ? points
+                : route.overview_path.map((p) => ({
+                    lat: p.lat(),
+                    lng: p.lng(),
+                  }));
+            if (polyline.getMap()) {
+              polyline.setPath(finalPoints);
+            }
+            if (haloLine.getMap()) {
+              haloLine.setPath(finalPoints);
+            }
+          },
+        );
       }
     }
 
