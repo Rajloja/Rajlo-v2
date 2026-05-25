@@ -75,6 +75,14 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // Firebase Messaging — RajloMessagingService extends FirebaseMessagingService
+    // (via Capacitor's MessagingService base class). The Capacitor plugin pulls
+    // it in transitively but at `implementation` scope, so our own source files
+    // can't see the symbols without declaring it explicitly here. Using the
+    // Firebase BOM keeps the version aligned with whatever the plugin picks.
+    implementation platform("com.google.firebase:firebase-bom:33.1.2")
+    implementation "com.google.firebase:firebase-messaging"
 }
 
 apply from: 'capacitor.build.gradle'

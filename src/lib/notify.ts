@@ -46,6 +46,11 @@ type NotifyArgs = {
   pushImage?: string;
   /** Optional buttons inside the push. */
   pushActions?: Array<{ action: string; title: string }>;
+  /** Extra string fields merged into the FCM data payload. Used for
+   *  pushes the native app handles before showing UI (e.g. incoming
+   *  calls — the native FirebaseMessagingService reads `type` and
+   *  `callId` from here to drive the Telecom lockscreen UI). */
+  pushData?: Record<string, string>;
 };
 
 /**
@@ -94,7 +99,11 @@ export async function notifyRider(
           image: args.pushImage,
           actions: args.pushActions,
           requireInteraction: args.kind === "safety",
-          data: { kind: args.kind, riderId: args.riderId },
+          data: {
+            kind: args.kind,
+            riderId: args.riderId,
+            ...(args.pushData ?? {}),
+          },
         };
         return pushToUser(supabase, args.riderId, payload).catch(() => null);
       }),
@@ -183,6 +192,10 @@ type DriverNotifyArgs = {
   /** Skip the push — inbox only. Use for non-urgent items where the
    *  driver shouldn't be buzzed (e.g. weekly summary). */
   inboxOnly?: boolean;
+  /** Extra string fields merged into the FCM data payload. Used for
+   *  pushes the native app handles before showing UI (e.g. incoming
+   *  calls — see RajloMessagingService). */
+  pushData?: Record<string, string>;
 };
 
 /**
@@ -224,7 +237,11 @@ export async function notifyDriver(
         actions: args.pushActions,
         requireInteraction:
           args.requireInteraction ?? args.kind === "ride_available",
-        data: { kind: args.kind, driverUserId: args.driverUserId },
+        data: {
+          kind: args.kind,
+          driverUserId: args.driverUserId,
+          ...(args.pushData ?? {}),
+        },
       }).catch(() => null),
     );
   }

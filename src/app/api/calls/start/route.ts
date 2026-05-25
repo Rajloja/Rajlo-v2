@@ -197,6 +197,17 @@ export async function POST(request: Request) {
   // Fire the push notification to the callee. Best-effort — the
   // Realtime subscription on `calls` is the primary signal; push is
   // the redundant fallback when the app is backgrounded.
+  // FCM data fields the native Android side reads to drive the
+  // Telecom lockscreen UI BEFORE the WebView is awake. See
+  // android/.../callkit/RajloMessagingService.java — when `type`
+  // is `incoming_call`, the service calls TelecomManager.addNew
+  // IncomingCall directly with these fields.
+  const callPushData: Record<string, string> = {
+    type: "incoming_call",
+    callId: callRow.id,
+    callerName: callerDisplayName,
+  };
+
   const notifyTarget =
     callerRole === "rider"
       ? notifyDriver(supabase, {
@@ -209,6 +220,7 @@ export async function POST(request: Request) {
           pushRenotify: true,
           requireInteraction: true,
           pushOnly: true,
+          pushData: callPushData,
         })
       : notifyRider(supabase, {
           riderId: calleeUserId,
@@ -219,6 +231,7 @@ export async function POST(request: Request) {
           pushTag: `call-${callRow.id}`,
           pushRenotify: true,
           pushOnly: true,
+          pushData: callPushData,
         });
   void notifyTarget.catch(() => null);
 

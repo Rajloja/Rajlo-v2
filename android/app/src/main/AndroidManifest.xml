@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -44,6 +45,29 @@
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
+
+        <!-- Intercept FCM pushes BEFORE Capacitor sees them. Required so
+             we can call TelecomManager.addNewIncomingCall directly when
+             a call push arrives — the JS-driven path doesn't fire when
+             the app is backgrounded / killed, but a native FCM service
+             runs regardless of WebView state. Non-call pushes fall
+             through to super (Capacitor's MessagingService base class)
+             so chat / trip / ride notifications keep working unchanged. -->
+        <service
+            android:name=".callkit.RajloMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Remove Capacitor's auto-merged MessagingService — our own
+             service above extends it and handles the same intent filter,
+             so we'd otherwise have two services racing for FCM messages.
+             Manifest-merger removes the duplicate cleanly with this tag. -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
     </application>
 
     <!-- Permissions -->

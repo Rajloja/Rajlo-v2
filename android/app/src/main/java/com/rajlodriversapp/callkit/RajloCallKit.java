@@ -111,6 +111,12 @@ public class RajloCallKit extends Plugin {
                 call.reject("TelecomManager unavailable");
                 return;
             }
+            // Defensive cleanup — kill any leftover self-managed calls
+            // from a previous session. Without this, a stale RINGING
+            // call (e.g. from a process crash mid-accept) blocks the
+            // OS from accepting our new addNewIncomingCall with a
+            // CREATE_CONNECTION_FAILED / WAITING_CALL event.
+            RajloConnectionService.closeAll();
             // Bundle the call metadata so the Connection can read it
             // when the OS instantiates it.
             Bundle clientExtras = new Bundle();

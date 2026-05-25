@@ -57,6 +57,25 @@ public class RajloConnectionService extends ConnectionService {
         return true;
     }
 
+    /** Tear down every active Rajlo connection. Called by the plugin
+     *  right before addIncomingCall so that a stale call left over
+     *  from a previous session (process crash, accept-with-no-close,
+     *  etc) doesn't sit in RINGING state and block Telecom from
+     *  accepting our new addNewIncomingCall request. Symptom of the
+     *  bug this guards against: CREATE_CONNECTION_FAILED with a
+     *  WAITING_CALL referencing an old TC@N at state=RINGING. */
+    public static void closeAll() {
+        if (active.isEmpty()) return;
+        for (RajloCallConnection conn : active.values()) {
+            try {
+                conn.closeFromRemote();
+            } catch (Exception ignored) {
+                /* connection already gone — fine */
+            }
+        }
+        active.clear();
+    }
+
     @Override
     public Connection onCreateIncomingConnection(
         PhoneAccountHandle connectionManagerPhoneAccount,
