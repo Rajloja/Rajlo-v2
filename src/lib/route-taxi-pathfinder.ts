@@ -253,45 +253,72 @@ async function buildGraph(supabase: SupabaseClient): Promise<CorridorGraph> {
   // straight-line projection). Capped at modest parallelism via
   // Promise.allSettled's natural behaviour; the corridor catalogue
   // is small enough that an unbounded fan-out is fine.
-  const fetchTasks: Promise<void>[] = [];
+  const fetchTasks: Array<Promise<{ ok: boolean; routeId: string }>> = [];
+  let skippedMissingCoords = 0;
+  let alreadyHave = 0;
   for (const r of rows) {
-    if (
-      r.path_polyline === null &&
-      r.origin_lat != null &&
-      r.origin_lng != null &&
-      r.destination_lat != null &&
-      r.destination_lng != null
-    ) {
-      const oLat = r.origin_lat;
-      const oLng = r.origin_lng;
-      const dLat = r.destination_lat;
-      const dLng = r.destination_lng;
-      const row = r;
-      fetchTasks.push(
-        (async () => {
-          try {
-            const polyline = await fetchCorridorPolyline(
-              { lat: oLat, lng: oLng },
-              { lat: dLat, lng: dLng },
-            );
-            if (!polyline) return;
-            row.path_polyline = polyline;
-            // Best-effort write-back. A failure here is harmless —
-            // the polyline is in memory for this build and the next
-            // build will simply re-fetch.
-            await supabase
-              .from("routes")
-              .update({ path_polyline: polyline })
-              .eq("id", row.id);
-          } catch {
-            // Swallow — straight-line fallback is correctness-safe.
-          }
-        })(),
-      );
+    if (r.path_polyline !== null) {
+      alreadyHave++;
+      continue;
     }
+    if (
+      r.origin_lat == null ||
+      r.origin_lng == null ||
+      r.destination_lat == null ||
+      r.destination_lng == null
+    ) {
+      skippedMissingCoords++;
+      continue;
+    }
+    const oLat = r.origin_lat;
+    const oLng = r.origin_lng;
+    const dLat = r.destination_lat;
+    const dLng = r.destination_lng;
+    const row = r;
+    fetchTasks.push(
+      (async () => {
+        try {
+          const polyline = await fetchCorridorPolyline(
+            { lat: oLat, lng: oLng },
+            { lat: dLat, lng: dLng },
+          );
+          if (!polyline) return { ok: false, routeId: row.id };
+          row.path_polyline = polyline;
+          // Best-effort write-back. A failure here is harmless —
+          // the polyline is in memory for this build and the next
+          // build will simply re-fetch.
+          await supabase
+            .from("routes")
+            .update({ path_polyline: polyline })
+            .eq("id", row.id);
+          return { ok: true, routeId: row.id };
+        } catch {
+          // Swallow — straight-line fallback is correctness-safe.
+          return { ok: false, routeId: row.id };
+        }
+      })(),
+    );
   }
   if (fetchTasks.length > 0) {
-    await Promise.allSettled(fetchTasks);
+    const settled = await Promise.allSettled(fetchTasks);
+    const fetched = settled.filter(
+      (s) => s.status === "fulfilled" && s.value.ok,
+    ).length;
+    const failed = settled.length - fetched;
+    // Diagnostic: lets us see in server logs whether the lazy-fetch
+    // is actually populating polylines. Without these, the snap
+    // step silently falls back to straight-line projection, which
+    // wildly over-estimates walk distance on curved coastal roads.
+    console.log(
+      `[route-pathfinder] polyline fetch — cached=${alreadyHave} ` +
+        `fetched=${fetched} failed=${failed} skipped_no_coords=${skippedMissingCoords} ` +
+        `total_routes=${rows.length}`,
+    );
+  } else if (alreadyHave > 0 || skippedMissingCoords > 0) {
+    console.log(
+      `[route-pathfinder] polylines — cached=${alreadyHave} ` +
+        `skipped_no_coords=${skippedMissingCoords} (no fetches needed)`,
+    );
   }
 
   const nodes = new Map<string, GraphNode>();

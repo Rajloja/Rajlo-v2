@@ -65,9 +65,19 @@ export const PARISHES = [
 
 export type Parish = (typeof PARISHES)[number];
 
+/** Subset of Google's `GeocoderAddressComponent` we actually read.
+ *  Declared locally instead of pulling the `google.maps` namespace
+ *  so this module stays importable from server-only code (e.g. the
+ *  route-taxi pathfinder) without dragging the browser-only Maps
+ *  type globals into the server bundle's typecheck. */
+export type AddressComponent = {
+  types: ReadonlyArray<string>;
+  long_name: string;
+};
+
 /** Pull the parish name out of a Google `address_components` array. */
 export function detectParish(
-  components: google.maps.GeocoderAddressComponent[] | undefined,
+  components: ReadonlyArray<AddressComponent> | undefined,
 ): string | null {
   if (!components) return null;
   for (const c of components) {
