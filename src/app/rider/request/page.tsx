@@ -6,7 +6,6 @@ import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { PlacesAutocomplete } from "@/components/places-autocomplete";
 import { MapView } from "@/components/map-view";
-import { RiderWeatherStrip } from "@/components/rider-weather-strip";
 import { SavedPlaceChips } from "@/components/saved-place-chips";
 import { Skeleton } from "@/components/skeleton";
 import { InsufficientFundsDialog } from "@/components/insufficient-funds-dialog";
@@ -72,6 +71,19 @@ export default function RiderRequestPage() {
   // matcher has nothing to chew on. Default mode is `private` because
   // route taxi may not even be available for this trip.
   const [mode, setMode] = useState<"private" | "route_taxi">("private");
+  // Multi-step wizard inside the request page:
+  //   step 1 "locations"   — pickup / stops / dropoff inputs
+  //   step 2 "choose-ride" — locations as read-only summary + ride
+  //                          cards (private + route taxi) + tiered
+  //                          walk pill + leg breakdown dropdown
+  //   step 3 "summary"     — locations text + selected mode + seats
+  //                          + notes + fare breakdown + confirm CTA
+  // Keeping everything on one route (no URL change) means back/
+  // forward arrows + a partially-completed booking survive a tab
+  // accidentally swiping away to /dashboard mid-flow.
+  const [step, setStep] = useState<"locations" | "choose-ride" | "summary">(
+    "locations",
+  );
   const [matches, setMatches] = useState<RouteTaxiMatch[] | null>(null);
   const [matching, setMatching] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
@@ -82,6 +94,10 @@ export default function RiderRequestPage() {
   // card instead of the single-corridor variant.
   const [journeyQuote, setJourneyQuote] = useState<CorridorPath | null>(null);
   const [journeyQuoting, setJourneyQuoting] = useState(false);
+  // Collapses the leg-by-leg breakdown on the Route Taxi card.
+  // Default open when a journey first loads so the rider sees the
+  // detail without an extra tap; they can collapse if they want.
+  const [legsExpanded, setLegsExpanded] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Triggered when the booking API returns 402 (insufficient wallet
@@ -911,30 +927,99 @@ export default function RiderRequestPage() {
         </div>
       )}
 
-      {/* Welcoming hero — local weather with a contextual quip. Renders
-         nothing if location permission was denied or the upstream is
-         unreachable, so the form below sits flush against the top. */}
-      <FadeUp>
-        <div className="mb-5">
-          <RiderWeatherStrip />
-        </div>
-      </FadeUp>
+      {/* Back link for step 2 and 3 — clicking returns to the
+         previous step. Steps 2/3 hide the waypoint inputs so the
+         "Back" gesture is the only way to edit locations again. */}
+      {step !== "locations" && (
+        <FadeUp>
+          <button
+            type="button"
+            onClick={() => {
+              if (step === "summary") setStep("choose-ride");
+              else if (step === "choose-ride") setStep("locations");
+            }}
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-muted transition-colors hover:text-rajlo-red"
+          >
+            <Icon name="chevron-left" className="h-4 w-4" />
+            Back
+          </button>
+        </FadeUp>
+      )}
 
       <FadeUp delay={0.04}>
         <div className="mb-2 flex items-center gap-2">
           <span className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
-            Where to?
+            {step === "locations"
+              ? "Where to?"
+              : step === "choose-ride"
+                ? "Pick your ride"
+                : "Trip summary"}
           </span>
           <span className="h-px flex-1 bg-line" />
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
-          Plan your trip
+          {step === "locations"
+            ? "Plan your trip"
+            : step === "choose-ride"
+              ? "Choose your ride"
+              : "Confirm and request"}
         </h1>
-        <p className="mt-2 max-w-md text-sm text-muted">
-          Add up to 4 stops along the way — pick up groceries, grab a BBQ, swing
-          by a friend. We&apos;ll route through every one.
-        </p>
+        {step === "locations" && (
+          <p className="mt-2 max-w-md text-sm text-muted">
+            Add up to 4 stops along the way — pick up groceries, grab a BBQ,
+            swing by a friend. We&apos;ll route through every one.
+          </p>
+        )}
+        {step === "choose-ride" && (
+          <p className="mt-2 max-w-md text-sm text-muted">
+            Private ride door-to-door, or route taxi at TA-regulated rates.
+          </p>
+        )}
       </FadeUp>
+
+      {/* Locations summary — shows the pickup and dropoff as
+         read-only text on steps 2 and 3, replacing the editable
+         waypoint inputs from step 1. Tap "Back" to edit. */}
+      {step !== "locations" && pickup && dropoff && (
+        <FadeUp delay={0.06}>
+          <div className="mt-4 space-y-2.5 rounded-2xl border border-line bg-surface-soft p-4">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-500 text-[10px] font-extrabold text-white">
+                A
+              </span>
+              <p className="min-w-0 truncate text-sm font-semibold">
+                {pickup.name}
+              </p>
+            </div>
+            {stops
+              .filter((s): s is Place => !!s)
+              .map((s, i) => (
+                <div key={`sum-stop-${i}`} className="flex items-start gap-3">
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-black text-[10px] font-extrabold text-white">
+                    {String.fromCharCode(66 + i)}
+                  </span>
+                  <p className="min-w-0 truncate text-sm font-semibold">
+                    {s.name}
+                  </p>
+                </div>
+              ))}
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-red text-[10px] font-extrabold text-white">
+                {String.fromCharCode(66 + stops.filter(Boolean).length)}
+              </span>
+              <p className="min-w-0 truncate text-sm font-semibold">
+                {dropoff.name}
+              </p>
+            </div>
+          </div>
+        </FadeUp>
+      )}
+
+      {/* ═════════════════ STEP 1 · LOCATIONS ═════════════════
+         Pickup, optional stops, dropoff. The only step where the
+         rider can edit endpoints. Step 1's CTA is "Next" — shown
+         in the action bar at the bottom of the page. */}
+      {step === "locations" && (<>
 
       {/* Saved-place chips. Tap one to fill pickup if empty, otherwise
          dropoff — the most common "go from where I am to a saved
@@ -1014,6 +1099,12 @@ export default function RiderRequestPage() {
         </div>
       </FadeUp>
 
+      </>)}
+      {/* ═════════════════ END STEP 1 ═════════════════ */}
+
+      {/* ═════════════════ STEP 2 · CHOOSE RIDE ═════════════════ */}
+      {step === "choose-ride" && (<>
+
       {/* Ride mode picker. Only renders once we have both endpoints —
          before that, the matcher has nothing to look at. The card
          layout collapses gracefully:
@@ -1038,12 +1129,36 @@ export default function RiderRequestPage() {
                 type="button"
                 onClick={() => setMode("private")}
                 aria-pressed={mode === "private"}
-                className={`group relative flex flex-col items-stretch gap-2 rounded-2xl border p-4 text-left transition-all ${
+                className={`group relative flex flex-col items-stretch gap-2 overflow-hidden rounded-2xl border p-4 text-left transition-all ${
                   mode === "private"
                     ? "border-rajlo-red bg-primary-soft shadow-md shadow-rajlo-red/15"
                     : "border-line bg-surface hover:border-rajlo-red/40 hover:bg-primary-soft/40"
                 }`}
               >
+                {/* Vehicle illustration — inline SVG side-on sedan in
+                   Rajlo brand red, positioned bottom-right of the card.
+                   Pure SVG (no asset upload) so it's crisp at any size
+                   and recolours via fill/stroke. */}
+                <svg
+                  aria-hidden
+                  viewBox="0 0 120 60"
+                  className="pointer-events-none absolute -bottom-2 -right-3 h-16 w-28 opacity-90"
+                >
+                  <path
+                    d="M10 42 L20 28 Q24 22 32 22 L78 22 Q86 22 92 28 L106 42 Z"
+                    fill="#f10100"
+                  />
+                  <path
+                    d="M32 22 L40 14 L72 14 L82 22 Z"
+                    fill="#6a0000"
+                  />
+                  <line x1="56" y1="14" x2="56" y2="22" stroke="#f10100" strokeWidth="1.5" />
+                  <rect x="14" y="38" width="92" height="6" rx="3" fill="#111906" />
+                  <circle cx="28" cy="46" r="6" fill="#111906" />
+                  <circle cx="28" cy="46" r="2.5" fill="#ffffff" />
+                  <circle cx="92" cy="46" r="6" fill="#111906" />
+                  <circle cx="92" cy="46" r="2.5" fill="#ffffff" />
+                </svg>
                 <div className="flex items-center gap-2">
                   <span
                     className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
@@ -1067,10 +1182,10 @@ export default function RiderRequestPage() {
                     "Tap to choose"
                   )}
                 </p>
-                <p className="text-[11px] leading-relaxed text-muted">
+                <p className="relative z-[1] max-w-[60%] text-[11px] leading-relaxed text-muted">
                   {fareCalculating
                     ? "Working out the exact road distance…"
-                    : `Door to door, your stops, ~${formatEta(fare.etaMinutes)} ETA. Multi-stop ready.`}
+                    : `Door to door, ~${formatEta(fare.etaMinutes)} ETA. Multi-stop ready.`}
                 </p>
               </button>
 
@@ -1143,51 +1258,119 @@ export default function RiderRequestPage() {
                 (!matches || matches.length === 0) &&
                 journeyQuote &&
                 journeyQuote.hailable && (
-                  <button
-                    type="button"
-                    onClick={() => setMode("route_taxi")}
-                    aria-pressed={mode === "route_taxi"}
-                    className={`group relative flex flex-col items-stretch gap-2 rounded-2xl border p-4 text-left transition-all ${
+                  <div
+                    className={`group relative flex flex-col items-stretch gap-2 overflow-hidden rounded-2xl border p-4 text-left transition-all ${
                       mode === "route_taxi"
                         ? "border-rajlo-red bg-primary-soft shadow-md shadow-rajlo-red/15"
                         : "border-line bg-surface hover:border-rajlo-red/40 hover:bg-primary-soft/40"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
-                          mode === "route_taxi"
-                            ? "bg-rajlo-red text-white"
-                            : "bg-primary-soft text-rajlo-red"
-                        }`}
-                      >
-                        <Icon name="navigation" className="h-4 w-4" />
-                      </span>
-                      <span className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                        Route Taxi
+                    {/* Vehicle illustration — route taxi minivan. Taller +
+                       more boxy than the private-ride sedan, with a
+                       sliding-door panel line on the side so the rider
+                       reads it as a route taxi at a glance. */}
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 120 60"
+                      className="pointer-events-none absolute -bottom-2 -right-3 h-16 w-28 opacity-90"
+                    >
+                      <path
+                        d="M8 44 L10 18 Q10 12 16 12 L96 12 Q104 12 110 22 L114 44 Z"
+                        fill="#f10100"
+                      />
+                      <rect x="20" y="16" width="22" height="14" rx="2" fill="#6a0000" />
+                      <rect x="46" y="16" width="22" height="14" rx="2" fill="#6a0000" />
+                      <rect x="72" y="16" width="22" height="14" rx="2" fill="#6a0000" />
+                      <line x1="44" y1="16" x2="44" y2="30" stroke="#f10100" strokeWidth="1" />
+                      <line x1="70" y1="16" x2="70" y2="30" stroke="#f10100" strokeWidth="1" />
+                      <rect x="12" y="40" width="98" height="6" rx="3" fill="#111906" />
+                      <circle cx="28" cy="48" r="6" fill="#111906" />
+                      <circle cx="28" cy="48" r="2.5" fill="#ffffff" />
+                      <circle cx="94" cy="48" r="6" fill="#111906" />
+                      <circle cx="94" cy="48" r="2.5" fill="#ffffff" />
+                    </svg>
+                    <button
+                      type="button"
+                      onClick={() => setMode("route_taxi")}
+                      aria-pressed={mode === "route_taxi"}
+                      className="text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                            mode === "route_taxi"
+                              ? "bg-rajlo-red text-white"
+                              : "bg-primary-soft text-rajlo-red"
+                          }`}
+                        >
+                          <Icon name="navigation" className="h-4 w-4" />
+                        </span>
+                        <span className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+                          Route Taxi
+                          {journeyQuote.legCount > 1
+                            ? ` · ${journeyQuote.legCount} legs`
+                            : ""}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-base font-extrabold tracking-tight">
+                        {formatJMD(journeyQuote.totalFareJmd)}
+                      </p>
+                      <p className="relative z-[1] max-w-[60%] text-[11px] leading-relaxed text-muted">
+                        {journeyQuote.totalDistanceKm.toFixed(1)} km
                         {journeyQuote.legCount > 1
-                          ? ` · ${journeyQuote.legCount} legs`
+                          ? ` · ${journeyQuote.legCount} taxis`
                           : ""}
-                      </span>
+                      </p>
+                    </button>
+                    {/* Detailed corridor breakdown — collapsible dropdown.
+                       Each leg gets a numbered row showing origin →
+                       destination, per-leg fare, distance. Replaces the
+                       cramped arrow chain that used to live above. */}
+                    <div className="relative z-[1] mt-3 rounded-xl border border-line/60 bg-white/70">
+                      <button
+                        type="button"
+                        onClick={() => setLegsExpanded((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-[11px] font-bold text-foreground"
+                      >
+                        <span>
+                          {journeyQuote.legCount === 1
+                            ? "Corridor details"
+                            : `${journeyQuote.legCount} legs · transfer details`}
+                        </span>
+                        <Icon
+                          name={legsExpanded ? "chevron-up" : "chevron-down"}
+                          className="h-3.5 w-3.5"
+                        />
+                      </button>
+                      {legsExpanded && (
+                        <ul className="space-y-1.5 border-t border-line/60 px-3 py-2.5">
+                          {journeyQuote.legs.map((l, i) => (
+                            <li
+                              key={`legs-${i}`}
+                              className="flex items-start gap-2 text-[11px] leading-tight"
+                            >
+                              <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rajlo-black text-[9px] font-extrabold text-white">
+                                {i + 1}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-semibold">
+                                  {l.origin} → {l.destination}
+                                </p>
+                                <p className="truncate text-muted">
+                                  {formatJMD(l.fareJmd)} · {l.distanceKm.toFixed(1)} km
+                                </p>
+                              </div>
+                            </li>
+                          ))}
+                          <li className="mt-1 flex items-center justify-between border-t border-line/60 pt-1.5 text-[11px] font-bold">
+                            <span>Total</span>
+                            <span className="text-rajlo-red">
+                              {formatJMD(journeyQuote.totalFareJmd)}
+                            </span>
+                          </li>
+                        </ul>
+                      )}
                     </div>
-                    <p className="text-base font-extrabold tracking-tight">
-                      {formatJMD(journeyQuote.totalFareJmd)}
-                    </p>
-                    <p className="text-[11px] leading-relaxed text-muted">
-                      <span className="font-semibold text-foreground">
-                        {journeyQuote.legs
-                          .map((l, i) =>
-                            i === 0 ? l.origin : `→ ${l.origin}`,
-                          )
-                          .join(" ")}{" "}
-                        → {journeyQuote.legs[journeyQuote.legs.length - 1].destination}
-                      </span>
-                      <br />
-                      {journeyQuote.totalDistanceKm.toFixed(1)} km
-                      {journeyQuote.legCount > 1
-                        ? " · scan to transfer between legs"
-                        : ""}
-                    </p>
                     {/* Tiered walk-distance pill. Hard gate at 2 km is
                         enforced upstream (MAX_HAILABLE_WALK_KM). Inside
                         that, the language graduates with distance so
@@ -1259,7 +1442,7 @@ export default function RiderRequestPage() {
                         </p>
                       );
                     })()}
-                  </button>
+                  </div>
                 )}
 
               {/* Off-corridor info card. The pathfinder found a route
@@ -1367,6 +1550,12 @@ export default function RiderRequestPage() {
         </FadeUp>
       )}
 
+      </>)}
+      {/* ═════════════════ END STEP 2 ═════════════════ */}
+
+      {/* ═════════════════ STEP 3 · SUMMARY ═════════════════ */}
+      {step === "summary" && (<>
+
       <FadeUp delay={0.15}>
         <div className={`mt-6 ${mode === "route_taxi" ? "hidden" : ""}`}>
           <div className="mb-2 flex items-center justify-between">
@@ -1466,6 +1655,66 @@ export default function RiderRequestPage() {
           </div>
         </FadeUp>
       )}
+
+      {/* Route taxi fare breakdown — leg-by-leg fares + total. Shown
+         on step 3 when the rider picked Route Taxi. Replaces the
+         private-ride breakdown above (which is mode-gated to
+         private). For 1-leg trips this is a single-line breakdown
+         that's still useful for the "where's my money going" view. */}
+      {mode === "route_taxi" && journeyQuote && (
+        <FadeUp delay={0.25}>
+          <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface-soft">
+            <div className="flex items-center justify-between border-b border-line bg-white px-5 py-4">
+              <div>
+                <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-muted">
+                  Route taxi fare · {journeyQuote.legCount} leg
+                  {journeyQuote.legCount === 1 ? "" : "s"}
+                </p>
+                <p className="mt-0.5 text-3xl font-extrabold tracking-tight text-rajlo-red">
+                  {formatJMD(journeyQuote.totalFareJmd)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                  Distance
+                </p>
+                <p className="mt-0.5 text-base font-extrabold">
+                  {journeyQuote.totalDistanceKm.toFixed(1)} km
+                </p>
+              </div>
+            </div>
+            <ul className="space-y-1.5 px-5 py-4">
+              {journeyQuote.legs.map((l, i) => (
+                <li
+                  key={`fare-leg-${i}`}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-rajlo-black text-[10px] font-extrabold text-white">
+                      {i + 1}
+                    </span>
+                    <span className="truncate text-muted">
+                      {l.origin} → {l.destination}
+                    </span>
+                  </div>
+                  <span className="shrink-0 font-semibold text-foreground">
+                    {formatJMD(l.fareJmd)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="border-t border-line/60 bg-white px-5 py-2.5 text-[11px] leading-relaxed text-muted">
+              Total locked at booking — each leg debits separately when the
+              driver scans your QR. {journeyQuote.legCount > 1
+                ? "Scan to transfer at each numbered stop."
+                : ""}
+            </p>
+          </div>
+        </FadeUp>
+      )}
+
+      </>)}
+      {/* ═════════════════ END STEP 3 ═════════════════ */}
     </>
   );
 
@@ -1496,24 +1745,84 @@ export default function RiderRequestPage() {
         ? "Start journey"
         : "Request ride";
 
+  // Step-aware bar copy + CTA:
+  //   step 1 "locations"   → "Next" → goes to "choose-ride"
+  //                          (disabled until pickup+dropoff set)
+  //   step 2 "choose-ride" → "Next" → goes to "summary"
+  //                          (disabled until a ride mode is selectable)
+  //   step 3 "summary"     → "Request ride" / "Start journey" → submits
+  const stepBarLabel = (() => {
+    if (step === "locations") return "Where are you going?";
+    if (step === "choose-ride")
+      return mode === "route_taxi"
+        ? journeyQuote
+          ? `Route taxi · ${journeyQuote.legCount} leg${journeyQuote.legCount === 1 ? "" : "s"}`
+          : selectedMatch
+            ? "Route taxi"
+            : "Pick your ride"
+        : "Private ride";
+    return barLabel; // summary uses the original fare/mode-aware label
+  })();
+  const stepBarPrice = (() => {
+    if (step === "locations") return "—";
+    if (step === "choose-ride") {
+      if (mode === "route_taxi") {
+        if (selectedMatch) return formatJMD(selectedMatch.fareJmd);
+        if (journeyQuote) return formatJMD(journeyQuote.totalFareJmd);
+      }
+      if (mode === "private" && !fareCalculating && fare.fareJMD > 0)
+        return formatJMD(fare.fareJMD);
+      if (mode === "private" && fareCalculating) return "…";
+      return "—";
+    }
+    // summary
+    return mode !== "route_taxi" && fareCalculating
+      ? "…"
+      : barFareJmd > 0
+        ? formatJMD(barFareJmd)
+        : "—";
+  })();
+  const stepCtaLabel = (() => {
+    if (step === "summary") return ctaLabel;
+    return "Next";
+  })();
+  const stepCtaDisabled = (() => {
+    if (step === "locations") return !pickup || !dropoff;
+    if (step === "choose-ride") {
+      // Need a real fare for whichever mode is selected.
+      if (mode === "private") return fareCalculating || fare.fareJMD <= 0;
+      if (mode === "route_taxi")
+        return !(
+          selectedMatch || (journeyQuote && journeyQuote.hailable)
+        );
+      return true;
+    }
+    return !canSubmit;
+  })();
+  const stepCtaClick = () => {
+    if (step === "locations") {
+      setStep("choose-ride");
+      return;
+    }
+    if (step === "choose-ride") {
+      setStep("summary");
+      return;
+    }
+    void handleSubmit();
+  };
+
   const barContent = (
     <>
       <div className="min-w-0">
         <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
-          {barLabel}
+          {stepBarLabel}
         </p>
-        <p className="text-lg font-extrabold tracking-tight">
-          {mode !== "route_taxi" && fareCalculating
-            ? "…"
-            : barFareJmd > 0
-            ? formatJMD(barFareJmd)
-            : "—"}
-        </p>
+        <p className="text-lg font-extrabold tracking-tight">{stepBarPrice}</p>
       </div>
       <button
         type="button"
-        onClick={handleSubmit}
-        disabled={!canSubmit}
+        onClick={stepCtaClick}
+        disabled={stepCtaDisabled || submitting}
         className="group inline-flex shrink-0 items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white shadow-lg shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-xl hover:shadow-rajlo-red/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:-translate-y-0 disabled:hover:bg-rajlo-red"
       >
         {submitting ? (
@@ -1523,7 +1832,7 @@ export default function RiderRequestPage() {
           </>
         ) : (
           <>
-            {ctaLabel}
+            {stepCtaLabel}
             <Icon
               name="arrow-right"
               className="h-4 w-4 transition-transform group-hover:translate-x-0.5"

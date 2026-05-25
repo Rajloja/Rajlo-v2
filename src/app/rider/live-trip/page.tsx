@@ -937,18 +937,20 @@ export default function RiderLiveTripPage() {
             vehicleYear={driver.vehicleYear}
             vehicleColor={driver.vehicleColor}
             extraAction={
-              <div className="flex items-center gap-2">
-                <ChatLauncher
-                  rideId={ride.id}
-                  myRole="rider"
-                  peerName={driver.name}
-                  peerAvatarUrl={driver.avatarUrl}
-                  peerPhone={driver.phone}
-                  rideActive
-                  variant="soft"
-                />
-                <CallButton rideId={ride.id} variant="subtle" label="Call" />
-              </div>
+              isTerminal ? null : (
+                <div className="flex items-center gap-2">
+                  <ChatLauncher
+                    rideId={ride.id}
+                    myRole="rider"
+                    peerName={driver.name}
+                    peerAvatarUrl={driver.avatarUrl}
+                    peerPhone={driver.phone}
+                    rideActive
+                    variant="soft"
+                  />
+                  <CallButton rideId={ride.id} variant="subtle" label="Call" />
+                </div>
+              )
             }
           />
           {/* Live "X km · Y min" pill — only renders while the driver

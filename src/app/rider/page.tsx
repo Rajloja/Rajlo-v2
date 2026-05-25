@@ -13,6 +13,7 @@ import {
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { formatJMD } from "@/lib/jamaica";
 import { useT } from "@/lib/i18n";
+import { RiderWeatherStrip } from "@/components/rider-weather-strip";
 
 /**
  * Rider home / dashboard. All sections are backed by real endpoints —
@@ -319,6 +320,13 @@ export default function RiderDashboardPage() {
         </section>
       </FadeUp>
 
+      {/* ============== WEATHER STRIP ==============
+         Lives on the dashboard (was previously on /rider/request).
+         Riders see today's conditions before they head out to book
+         a trip, not after they've already typed pickup + dropoff. */}
+      <FadeUp delay={0.03}>
+        <RiderWeatherStrip />
+      </FadeUp>
 
       {/* ============== LOADING SHIMMER ==============
          While the three parallel fetches are in flight, render

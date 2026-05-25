@@ -7,6 +7,7 @@ import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { MapView } from "@/components/map-view";
 import { ChatLauncher } from "@/components/chat-launcher";
+import { CallButton } from "@/components/call-button";
 import { CancelReasonDialog } from "@/components/cancel-reason-dialog";
 import { PinEntryDialog } from "@/components/pin-entry-dialog";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -771,16 +772,9 @@ export default function DriverActiveTripPage() {
               </div>
               {/* Tap-to-call sits next to the chat icon so drivers
                  can reach the rider with one tap ("I'm at your
-                 gate"). */}
-              {rider.phone && (
-                <a
-                  href={`tel:${rider.phone}`}
-                  aria-label={`Call ${rider.name}`}
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700 shadow-md transition-all hover:-translate-y-0.5 hover:bg-emerald-100"
-                >
-                  <Icon name="phone" className="h-4 w-4" />
-                </a>
-              )}
+                 gate"). In-app voice via LiveKit — the rider's
+                 PSTN number is never exposed. */}
+              <CallButton rideId={ride.id} variant="subtle" label="" />
               {/* Chat icon — `soft` variant (NOT dark) because this
                  card is on a white surface; the dark variant would be
                  invisible white-on-white. */}

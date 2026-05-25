@@ -768,7 +768,7 @@ export function MapView({
       polylineRef.current = drawGradientPolyline(
         map,
         points.map((p) => ({ lat: p.place.lat, lng: p.place.lng })),
-        7,
+        5,
       );
       const bounds = new google.maps.LatLngBounds();
       points.forEach((p) =>
@@ -815,7 +815,7 @@ export function MapView({
         polylineRef.current = drawGradientPolyline(
           map,
           fullRoutePath(route),
-          7,
+          5,
         );
         // Use the route's own bounds — tighter than fitting to stops alone.
         if (route.bounds) {
@@ -979,7 +979,7 @@ export function MapView({
         livePolylineRef.current = drawGradientPolyline(
           map,
           fullRoutePath(route),
-          7,
+          5,
         );
         // Fit the camera to driver+target the first time we draw the
         // route OR when the target changes. Subsequent refetches keep
@@ -1349,7 +1349,7 @@ export function MapView({
         destination,
       ];
       // Single corridor line — matches the private-ride polyline's
-      // dimensions exactly (strokeWeight 7, opacity 0.92) so the
+      // dimensions exactly (strokeWeight 5, opacity 0.92) so the
       // two modes feel visually consistent. Just a different colour
       // (orange vs the private-ride red gradient) to signal "this
       // is a route taxi corridor" without changing weight or style.
@@ -1358,7 +1358,7 @@ export function MapView({
         path: initialPath,
         strokeColor: "#f97316",
         strokeOpacity: 0.92,
-        strokeWeight: 7,
+        strokeWeight: 5,
         zIndex: 100,
       });
       corridorPolylineRef.current.push(line);
@@ -1416,24 +1416,24 @@ export function MapView({
     //  essentially at the rider's pickup. A dashed line connecting
     //  two near-overlapping pins added clutter and confused users.)
 
-    // 3b. Transfer-point dots — small orange circles at each spot the
-    //     rider physically changes taxis. For an N-leg journey these
-    //     are leg destinations 1..N-1 (the last leg's destination is
-    //     the rider's final alighting point, marked by the B pin —
-    //     not a transfer). Single-leg journeys have zero transfer
-    //     dots. Visually subordinate to the A/B pins (smaller, no
-    //     label) so they read as "stops on the route" rather than
-    //     competing with the rider's own board/alight points.
+    // 3b. Transfer-point pins — same size + style as the A/B pins
+    //     but labelled with the transfer's ordinal number (1, 2, 3…)
+    //     and in dark Rajlo-black to distinguish them from the
+    //     boarding (red) and alighting (deep crimson) pins. Rendered
+    //     for every leg N where 0 < N < legs.length, i.e. the points
+    //     where the rider hops between corridors. Single-leg
+    //     journeys have zero transfer pins.
     if (corridorLines && corridorLines.length > 1) {
       const seen = new Set<string>();
+      let transferIdx = 0;
       for (const seg of corridorLines.slice(0, -1)) {
         const p = seg.to;
         const key = `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        // Skip if the transfer dot would land essentially under the
-        // A or B pin (rare — only when boarding/alighting projects
-        // exactly at a corridor endpoint).
+        // Skip if the transfer pin would land essentially under the
+        // A or B pin (only when boarding/alighting projects exactly
+        // at a corridor endpoint).
         if (boarding) {
           const dx = p.lat - boarding.coords.lat;
           const dy = p.lng - boarding.coords.lng;
@@ -1444,19 +1444,26 @@ export function MapView({
           const dy = p.lng - alighting.coords.lng;
           if (Math.hypot(dx, dy) < 0.0003) continue;
         }
+        transferIdx += 1;
         const m = new google.maps.Marker({
           map,
           position: p,
+          label: {
+            text: String(transferIdx),
+            color: "#ffffff",
+            fontWeight: "800",
+            fontSize: "12px",
+          },
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
-            scale: 6,
-            fillColor: "#f97316", // orange-500, same as the corridor line
+            scale: 13, // matches A/B pin scale
+            fillColor: "#111906", // Rajlo black — distinct from red A / crimson B
             fillOpacity: 1,
             strokeColor: "#ffffff",
-            strokeWeight: 2,
+            strokeWeight: 3,
           },
-          title: "Transfer here — switch taxis",
-          zIndex: 55, // above corridor lines (50), below A/B pins (70)
+          title: `Transfer ${transferIdx} — switch taxis here`,
+          zIndex: 65, // above corridor lines (50), just below A/B pins (70)
         });
         corridorEndpointMarkersRef.current.push(m);
       }

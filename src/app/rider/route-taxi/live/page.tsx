@@ -352,6 +352,9 @@ function LiveInner() {
             chatEnabled={
               hail.status === "accepted" || hail.status === "picked_up"
             }
+            callEnabled={
+              hail.status === "accepted" || hail.status === "picked_up"
+            }
             onOpenChat={() => setChatOpen(true)}
             hailId={hail.id}
           />
@@ -767,6 +770,7 @@ function DriverCard({
   seatsTaken,
   vehicleCapacity,
   chatEnabled,
+  callEnabled,
   onOpenChat,
   hailId,
 }: {
@@ -774,6 +778,7 @@ function DriverCard({
   seatsTaken: number;
   vehicleCapacity: number;
   chatEnabled: boolean;
+  callEnabled: boolean;
   onOpenChat: () => void;
   hailId: string;
 }) {
@@ -812,7 +817,9 @@ function DriverCard({
             {vehicle ?? "Vehicle details unavailable"}
           </p>
         </div>
-        <CallButton hailId={hailId} label="Call driver" variant="primary" />
+        {callEnabled && (
+          <CallButton hailId={hailId} label="Call driver" variant="primary" />
+        )}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
