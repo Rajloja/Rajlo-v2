@@ -105,23 +105,13 @@ export function DriverVehicleCard({
             ))}
         </div>
 
-        {/* Action group — call (tel: link) + any extra action passed
-           in by the parent (e.g. the chat launcher). They sit
-           side-by-side at the same height so the rider doesn't have
-           to look twice to know which icon does what. */}
-        {(phone || extraAction) && (
-          <div className="flex shrink-0 items-center gap-2">
-            {phone && (
-              <a
-                href={`tel:${phone.replace(/\s+/g, "")}`}
-                aria-label={`Call ${name}`}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rajlo-red text-white shadow-md transition-transform hover:-translate-y-0.5"
-              >
-                <Icon name="phone" className="h-4 w-4" />
-              </a>
-            )}
-            {extraAction}
-          </div>
+        {/* Action group — in-app call + chat launcher come in via
+           `extraAction` from the parent. The legacy `tel:` PSTN link
+           was removed: rider/driver privacy means phone numbers are
+           never exposed in the UI, and the in-app voice flow
+           (LiveKit) handles all rider↔driver voice contact. */}
+        {extraAction && (
+          <div className="flex shrink-0 items-center gap-2">{extraAction}</div>
         )}
       </div>
 

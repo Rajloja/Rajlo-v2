@@ -98,8 +98,20 @@ export async function POST(request: Request) {
   const { callerRole, calleeUserId, calleeDisplayName, callerDisplayName, kind, tripId } =
     ctx;
 
-  // Block if there's already an active call on this trip — avoids the
-  // confusing "two phones ringing" state if the caller double-taps.
+  // Block if there's already an active call on this trip — avoids
+  // the confusing "two phones ringing" state if the caller double-
+  // taps. BUT: abandoned rows are common (caller closed the tab
+  // mid-ring, browser crashed, network drop with no clean hangup).
+  // Without auto-expiry the next call attempt would forever return
+  // "call_in_progress". So we treat rows older than the thresholds
+  // below as stale and re-claim them.
+  //
+  //   initiated / ringing → 90 s (a real callee picks up well
+  //                                before this)
+  //   accepted            → 60 min (real voice calls don't run
+  //                                  longer; if they do, the row
+  //                                  is almost certainly a stuck
+  //                                  WebRTC session)
   const tripFilter =
     kind === "ride"
       ? { ride_id: tripId }
@@ -107,22 +119,47 @@ export async function POST(request: Request) {
         ? { hail_id: tripId }
         : { journey_id: tripId };
 
-  const { data: active } = await supabase
+  const { data: existingCalls } = await supabase
     .from("calls")
-    .select("id, status, caller_id, callee_id")
+    .select("id, status, started_at, accepted_at")
     .match(tripFilter)
     .in("status", ["initiated", "ringing", "accepted"])
-    .limit(1)
-    .maybeSingle();
+    .order("started_at", { ascending: false })
+    .limit(1);
+  const active = existingCalls?.[0];
   if (active) {
-    return NextResponse.json(
-      {
-        error: "call_in_progress",
-        message: "A call on this trip is already in progress.",
-        call: { id: active.id, status: active.status },
-      },
-      { status: 409 },
-    );
+    const ageMs = Date.now() - new Date(active.started_at).getTime();
+    const RING_STALE_MS = 90 * 1000;
+    const ACCEPTED_STALE_MS = 60 * 60 * 1000;
+    const stale =
+      (["initiated", "ringing"].includes(active.status) &&
+        ageMs > RING_STALE_MS) ||
+      (active.status === "accepted" && ageMs > ACCEPTED_STALE_MS);
+    if (stale) {
+      // Sweep the stale row before letting the new call proceed.
+      // status=missed for ringing/initiated, ended otherwise — gives
+      // support an honest record of what really happened.
+      await supabase
+        .from("calls")
+        .update({
+          status: ["initiated", "ringing"].includes(active.status)
+            ? "missed"
+            : "ended",
+          ended_at: new Date().toISOString(),
+          end_reason: "stale_cleanup",
+        })
+        .eq("id", active.id);
+      // Fall through — we now claim the trip is free.
+    } else {
+      return NextResponse.json(
+        {
+          error: "call_in_progress",
+          message: "A call on this trip is already in progress.",
+          call: { id: active.id, status: active.status },
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Build the room + tokens, persist the row, then return.

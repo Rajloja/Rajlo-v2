@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { Icon } from "./icons";
+import { CallButton } from "./call-button";
 import { Skeleton } from "./skeleton";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { compressImage, CHAT_COMPRESS } from "@/lib/compress-image";
@@ -22,8 +23,9 @@ import type { ChatMessage } from "@/lib/use-ride-chat";
  *   the realtime payload doesn't carry)
  * - Composer supports text, image attachments (camera or gallery),
  *   and voice notes recorded via the MediaRecorder API
- * - "Call" button is just a `tel:` link — no in-app calling per the
- *   product spec; the OS dialer opens
+ * - "Call" button is an in-app voice call via LiveKit (no PSTN, no
+ *   phone-number exposure). Tapping it opens the LiveKit room scoped
+ *   to this ride; the chat composer stays usable underneath.
  *
  * After the ride flips to a closed status (completed/cancelled),
  * server-side RLS stops returning messages to participants. The sheet
@@ -456,16 +458,10 @@ export function ChatSheet({
                 : "Trip ended · Chat archived"}
             </p>
           </div>
-          {peerPhone && (
-            <a
-              href={`tel:${peerPhone}`}
-              aria-label={`Call ${peerName}`}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-500 text-white shadow-md transition-transform hover:-translate-y-0.5 active:translate-y-0"
-              title="Opens your phone app — calls aren't placed in-browser"
-            >
-              <Icon name="phone" className="h-4 w-4" />
-            </a>
-          )}
+          {/* In-app voice call via LiveKit. PSTN numbers are never
+             surfaced — the rider and driver are entirely insulated
+             from each other's real phone number. */}
+          {rideActive && <CallButton rideId={rideId} variant="subtle" label="" />}
         </header>
 
         {/* Message stream — the only scrollable region. `min-h-0` is
