@@ -18,6 +18,7 @@ import { SafetyCheckModal } from "@/components/safety-check-modal";
 import { useUnusualStopDetector } from "@/lib/use-unusual-stop-detector";
 import { useOffRouteDetector } from "@/lib/use-off-route-detector";
 import { ChatLauncher } from "@/components/chat-launcher";
+import { CallButton } from "@/components/call-button";
 import { DriverVehicleCard } from "@/components/driver-vehicle-card";
 import {
   DriverVehicleCardSkeleton,
@@ -936,15 +937,18 @@ export default function RiderLiveTripPage() {
             vehicleYear={driver.vehicleYear}
             vehicleColor={driver.vehicleColor}
             extraAction={
-              <ChatLauncher
-                rideId={ride.id}
-                myRole="rider"
-                peerName={driver.name}
-                peerAvatarUrl={driver.avatarUrl}
-                peerPhone={driver.phone}
-                rideActive
-                variant="soft"
-              />
+              <div className="flex items-center gap-2">
+                <ChatLauncher
+                  rideId={ride.id}
+                  myRole="rider"
+                  peerName={driver.name}
+                  peerAvatarUrl={driver.avatarUrl}
+                  peerPhone={driver.phone}
+                  rideActive
+                  variant="soft"
+                />
+                <CallButton rideId={ride.id} variant="subtle" label="Call" />
+              </div>
             }
           />
           {/* Live "X km · Y min" pill — only renders while the driver

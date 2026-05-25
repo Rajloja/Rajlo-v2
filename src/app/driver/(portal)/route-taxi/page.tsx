@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { AnimatePresence, m } from "motion/react";
 import { MapView } from "@/components/map-view";
 import { HailChatSheet } from "@/components/hail-chat-sheet";
+import { CallButton } from "@/components/call-button";
 import { nearestParish, type Place } from "@/lib/jamaica";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
@@ -739,12 +740,14 @@ function CapacityStepper({
  */
 function RiderBadge({
   rider,
+  hailId,
   pickupLat,
   pickupLng,
   tone,
   onMessage,
 }: {
   rider: RiderInfo;
+  hailId: string;
   pickupLat: number | null | undefined;
   pickupLng: number | null | undefined;
   tone: "amber" | "emerald";
@@ -801,15 +804,7 @@ function RiderBadge({
             <Icon name="mail" className="h-3.5 w-3.5" />
           </button>
         )}
-        {rider.phone && (
-          <a
-            href={`tel:${rider.phone}`}
-            aria-label="Call rider"
-            className="grid h-9 w-9 place-items-center rounded-xl bg-white text-rajlo-red ring-1 ring-rajlo-red/30 hover:bg-primary-soft"
-          >
-            <Icon name="phone" className="h-3.5 w-3.5" />
-          </a>
-        )}
+        <CallButton hailId={hailId} variant="subtle" label="" />
       </div>
     </div>
   );
@@ -1256,6 +1251,7 @@ function ActiveSessionMonitor({
                   {h.rider && (
                     <RiderBadge
                       rider={h.rider}
+                      hailId={h.id}
                       pickupLat={h.pickupLat}
                       pickupLng={h.pickupLng}
                       tone="amber"
@@ -1410,6 +1406,7 @@ function ActiveSessionMonitor({
                   {h.rider && (
                     <RiderBadge
                       rider={h.rider}
+                      hailId={h.id}
                       pickupLat={h.pickupLat}
                       pickupLng={h.pickupLng}
                       tone="emerald"

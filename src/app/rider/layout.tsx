@@ -3,6 +3,7 @@ import { SessionGuard } from "@/components/session-guard";
 import { PreferencesProvider } from "@/components/preferences-provider";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
+import { IncomingCallProvider } from "@/components/incoming-call-provider";
 import { riderNav } from "@/lib/mock-data";
 
 export default function RiderLayout({ children }: { children: React.ReactNode }) {
@@ -20,6 +21,10 @@ export default function RiderLayout({ children }: { children: React.ReactNode })
       <LegalConsentGate />
       {/* Submits this device's fraud fingerprint once per session. */}
       <DeviceFingerprintBeacon />
+      {/* Listens for incoming voice calls from the rider's active
+         driver and pops a toast with Accept / Decline. Subscribes
+         to Supabase Realtime on the `calls` table. */}
+      <IncomingCallProvider />
       {children}
     </PortalLayout>
   );

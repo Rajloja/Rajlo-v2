@@ -9,6 +9,7 @@ import { FadeUp } from "@/components/anim";
 import { Skeleton } from "@/components/skeleton";
 import { MapView } from "@/components/map-view";
 import { HailChatSheet } from "@/components/hail-chat-sheet";
+import { CallButton } from "@/components/call-button";
 import { extractSessionId } from "@/components/session-qr";
 import { playScanBeep } from "@/lib/play-scan-beep";
 import { normalizePickupCode } from "@/lib/route-taxi-pickup-code";
@@ -352,6 +353,7 @@ function LiveInner() {
               hail.status === "accepted" || hail.status === "picked_up"
             }
             onOpenChat={() => setChatOpen(true)}
+            hailId={hail.id}
           />
         </FadeUp>
       )}
@@ -766,12 +768,14 @@ function DriverCard({
   vehicleCapacity,
   chatEnabled,
   onOpenChat,
+  hailId,
 }: {
   driver: NonNullable<NonNullable<Hail["session"]>["driver"]>;
   seatsTaken: number;
   vehicleCapacity: number;
   chatEnabled: boolean;
   onOpenChat: () => void;
+  hailId: string;
 }) {
   const fullName =
     [driver.firstName, driver.lastName].filter(Boolean).join(" ") ||
@@ -808,15 +812,7 @@ function DriverCard({
             {vehicle ?? "Vehicle details unavailable"}
           </p>
         </div>
-        {driver.phone && (
-          <a
-            href={`tel:${driver.phone}`}
-            aria-label="Call driver"
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-rajlo-red text-white shadow-md shadow-rajlo-red/25 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
-          >
-            <Icon name="phone" className="h-4 w-4" />
-          </a>
-        )}
+        <CallButton hailId={hailId} label="Call driver" variant="primary" />
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">

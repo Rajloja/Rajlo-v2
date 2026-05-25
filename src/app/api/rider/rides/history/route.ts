@@ -121,14 +121,33 @@ export async function GET(request: Request) {
     (ratingsRes.data ?? []).map((r) => [r.ride_id, r.stars]),
   );
 
-  // Pull route taxi hails too. The history page shows everything the
-  // rider has booked — Mode A (rides) and Mode B (route_hails) — with
-  // a small badge so they can tell them apart at a glance.
+  // Pull route taxi history too. The page shows everything the rider
+  // has booked — Mode A (rides) and Mode B (route_taxi) — with a
+  // small badge so they can tell them apart at a glance.
   //
-  // We over-fetch (limit + offset of EACH source) then merge + sort
-  // by requestedAt descending and slice to the page window. Cheap at
-  // rider scale (no rider has thousands of hails) and avoids a fragile
-  // "two-cursor" pagination scheme.
+  // Mode B has two shapes in the data model:
+  //
+  //   1. JOURNEYS — every booking made through /rider/request is a
+  //      `route_journeys` row that owns 1..N `route_hails` rows (one
+  //      per corridor leg). The history surfaces these as ONE
+  //      consolidated entry with a `legs[]` breakdown — a 3-leg
+  //      Negril→Mandeville→Sav-la-Mar trip shouldn't read like 3
+  //      separate trips in the rider's history.
+  //
+  //   2. SOLO HAILS — legacy single-leg hails created via the older
+  //      /api/rider/route-taxi/hail endpoint (before the journey
+  //      table existed). `journey_id IS NULL` on these rows; they
+  //      remain as standalone entries with the existing shape.
+  //
+  // We over-fetch each source then merge + sort by requestedAt and
+  // page-slice. Cheap at rider scale (no rider has thousands of
+  // trips) and avoids a fragile "three-cursor" pagination scheme.
+  const journeyStatusFilter = (() => {
+    if (statusParam === "ongoing") return ["planning", "active"];
+    if (statusParam === "completed") return ["completed"];
+    if (statusParam === "cancelled") return ["cancelled"];
+    return ["planning", "active", "completed", "cancelled"];
+  })();
   const hailStatusFilter = (() => {
     if (statusParam === "ongoing") return ["requested", "accepted", "picked_up"];
     if (statusParam === "completed") return ["completed"];
@@ -143,26 +162,61 @@ export async function GET(request: Request) {
     ];
   })();
 
+  // 1. Journeys — one row per multi-leg (or 1-leg journey-tracked) trip.
+  const { data: journeys } = await supabase
+    .from("route_journeys")
+    .select(
+      "id, status, origin_name, origin_lat, origin_lng, destination_name, destination_lat, destination_lng, total_fare_jmd, planned_leg_count, completed_leg_count, concession, started_at, completed_at, cancelled_at, cancellation_reason, created_at",
+    )
+    .eq("rider_id", user.id)
+    .in("status", journeyStatusFilter)
+    .order("created_at", { ascending: false })
+    .limit(offset + limit);
+
+  // 2. Fetch every leg (hail) belonging to those journeys in one shot.
+  const journeyIds = (journeys ?? []).map((j) => j.id);
+  const { data: journeyHails } = journeyIds.length
+    ? await supabase
+        .from("route_hails")
+        .select(
+          "id, journey_id, leg_order, is_transfer_leg, status, route_id, session_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, fare_jmd, distance_km, requested_at, accepted_at, picked_up_at, completed_at, cancelled_at, cancellation_reason",
+        )
+        .in("journey_id", journeyIds)
+        .order("leg_order", { ascending: true })
+    : { data: [] as Array<Record<string, unknown>> };
+
+  // 3. Solo hails — legacy single-leg bookings (no journey row).
   const { data: hails } = await supabase
     .from("route_hails")
     .select(
       "id, status, route_id, session_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, fare_jmd, requested_at, accepted_at, picked_up_at, completed_at, cancelled_at, cancellation_reason, concession",
     )
     .eq("rider_id", user.id)
+    .is("journey_id", null)
     .in("status", hailStatusFilter)
     .order("requested_at", { ascending: false })
     .limit(offset + limit);
 
-  // Hydrate hail driver names via the session → driver chain.
-  const sessionIds = Array.from(
-    new Set((hails ?? []).map((h) => h.session_id).filter((x): x is string => !!x)),
+  // Hydrate driver names for both solo hails AND journey legs via the
+  // session → driver chain. We pool the session IDs across both
+  // sources and run a single batched lookup.
+  const allSessionIds = Array.from(
+    new Set(
+      [
+        ...(hails ?? []).map((h) => h.session_id),
+        ...(journeyHails ?? []).map(
+          (h) => (h as { session_id: string | null }).session_id,
+        ),
+      ].filter((x): x is string => !!x),
+    ),
   );
   const sessionDriverByHail = new Map<string, string | null>();
-  if (sessionIds.length > 0) {
+  const sessionDriverByLeg = new Map<string, string | null>();
+  if (allSessionIds.length > 0) {
     const { data: sessions } = await supabase
       .from("driver_sessions")
       .select("id, driver_id")
-      .in("id", sessionIds);
+      .in("id", allSessionIds);
     const driverIds = Array.from(
       new Set((sessions ?? []).map((s) => s.driver_id)),
     );
@@ -186,6 +240,17 @@ export async function GET(request: Request) {
         sessionDriverByHail.set(h.id, driverNameById.get(driverId) ?? null);
       }
     }
+    for (const h of journeyHails ?? []) {
+      const sid = (h as { session_id: string | null }).session_id;
+      if (!sid) continue;
+      const driverId = driverIdBySession.get(sid);
+      if (driverId) {
+        sessionDriverByLeg.set(
+          (h as { id: string }).id,
+          driverNameById.get(driverId) ?? null,
+        );
+      }
+    }
   }
 
   // Map hail status into the ride-shaped status the page already
@@ -197,7 +262,10 @@ export async function GET(request: Request) {
     return s as RideShapedStatus;
   };
 
-  type Row = ReturnType<typeof shapePrivate> | ReturnType<typeof shapeHail>;
+  type Row =
+    | ReturnType<typeof shapePrivate>
+    | ReturnType<typeof shapeHail>
+    | ReturnType<typeof shapeJourney>;
 
   function shapePrivate(r: (typeof list)[number]) {
     const d = r.driver_id
@@ -281,9 +349,143 @@ export async function GET(request: Request) {
     };
   }
 
+  // Map journey status into the same RideShapedStatus enum the page
+  // already renders. `planning` is too short-lived to surface; we
+  // treat it as `requested`. `active` becomes `in_progress` once the
+  // first leg picks up, otherwise `accepted` if some legs are still
+  // requested. Conservative — better to under-state progress than to
+  // over-state it in the rider's history.
+  const journeyStatusToRide = (
+    j: NonNullable<typeof journeys>[number],
+    legs: NonNullable<typeof journeyHails>,
+  ): RideShapedStatus => {
+    if (j.status === "cancelled") return "cancelled";
+    if (j.status === "completed") return "completed";
+    // active or planning — derive from legs
+    const anyPickedUp = legs.some((l) =>
+      ["picked_up", "completed"].includes(
+        (l as { status: string }).status,
+      ),
+    );
+    if (anyPickedUp) return "in_progress";
+    const anyAccepted = legs.some(
+      (l) => (l as { status: string }).status === "accepted",
+    );
+    if (anyAccepted) return "accepted";
+    return "requested";
+  };
+
+  function shapeJourney(j: NonNullable<typeof journeys>[number]) {
+    const legs = (journeyHails ?? [])
+      .filter((h) => (h as { journey_id: string | null }).journey_id === j.id)
+      .map((h) => {
+        const raw = h as {
+          id: string;
+          leg_order: number | null;
+          is_transfer_leg: boolean | null;
+          status: string;
+          pickup_name: string;
+          pickup_lat: number | null;
+          pickup_lng: number | null;
+          dropoff_name: string;
+          dropoff_lat: number | null;
+          dropoff_lng: number | null;
+          fare_jmd: number;
+          distance_km: number | string | null;
+          accepted_at: string | null;
+          picked_up_at: string | null;
+          completed_at: string | null;
+          cancelled_at: string | null;
+          cancellation_reason: string | null;
+        };
+        return {
+          id: raw.id,
+          legOrder: raw.leg_order,
+          isTransferLeg: raw.is_transfer_leg ?? false,
+          status: hailStatusToRide(raw.status),
+          pickup: {
+            name: raw.pickup_name,
+            lat: raw.pickup_lat,
+            lng: raw.pickup_lng,
+          },
+          dropoff: {
+            name: raw.dropoff_name,
+            lat: raw.dropoff_lat,
+            lng: raw.dropoff_lng,
+          },
+          fareJmd: raw.fare_jmd,
+          distanceKm:
+            raw.distance_km == null ? null : Number(raw.distance_km),
+          acceptedAt: raw.accepted_at,
+          pickedUpAt: raw.picked_up_at,
+          completedAt: raw.completed_at,
+          cancelledAt: raw.cancelled_at,
+          cancellationReason: raw.cancellation_reason,
+          driverName: sessionDriverByLeg.get(raw.id) ?? null,
+        };
+      })
+      .sort((a, b) => (a.legOrder ?? 0) - (b.legOrder ?? 0));
+
+    // requestedAt = earliest leg's accepted_at, falling back to the
+    // journey's created_at if no leg has been accepted yet.
+    const firstAcceptedAt = legs
+      .map((l) => l.acceptedAt)
+      .filter((x): x is string => !!x)
+      .sort()[0];
+    const lastCompletedAt = legs
+      .map((l) => l.completedAt)
+      .filter((x): x is string => !!x)
+      .sort()
+      .pop();
+    const firstPickedUpAt = legs
+      .map((l) => l.pickedUpAt)
+      .filter((x): x is string => !!x)
+      .sort()[0];
+
+    return {
+      id: j.id,
+      kind: "route_taxi_journey" as const,
+      status: journeyStatusToRide(j, journeyHails ?? []),
+      pickup: {
+        name: j.origin_name,
+        address: j.origin_name,
+        lat: j.origin_lat,
+        lng: j.origin_lng,
+        placeId: null,
+      },
+      dropoff: {
+        name: j.destination_name,
+        address: j.destination_name,
+        lat: j.destination_lat,
+        lng: j.destination_lng,
+        placeId: null,
+      },
+      seats: 1,
+      fareJMD: j.total_fare_jmd,
+      requestedAt: j.created_at,
+      acceptedAt: firstAcceptedAt ?? null,
+      arrivedAt: null,
+      startedAt: j.started_at ?? firstPickedUpAt ?? null,
+      endedAt: j.completed_at ?? j.cancelled_at ?? lastCompletedAt ?? null,
+      cancellationReason: j.cancellation_reason,
+      // Journey-level driver name is the first leg's driver (rider
+      // sees per-leg drivers in the detail breakdown).
+      driverName: legs[0]?.driverName ?? null,
+      driverRating: null,
+      driverRatingCount: 0,
+      myRatingStars: null,
+      carpool: false,
+      concession: j.concession,
+      legCount: j.planned_leg_count,
+      completedLegCount: j.completed_leg_count,
+      legs,
+    };
+  }
+
   const merged: Row[] = [
     ...list.map(shapePrivate),
     ...(hails ?? []).map(shapeHail),
+    ...(journeys ?? []).map(shapeJourney),
   ];
   merged.sort(
     (a, b) =>

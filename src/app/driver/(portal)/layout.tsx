@@ -10,6 +10,7 @@ import { ConnectivityMonitor } from "@/components/connectivity-monitor";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
+import { IncomingCallProvider } from "@/components/incoming-call-provider";
 import { driverNav } from "@/lib/mock-data";
 import { getDriverStatus } from "@/lib/driver-status";
 
@@ -80,6 +81,10 @@ export default async function DriverPortalLayout({
       <LegalConsentGate />
       {/* Submits this device's fraud fingerprint once per session. */}
       <DeviceFingerprintBeacon />
+      {/* Listens for incoming voice calls from the active rider and
+         pops a toast with Accept / Decline. Subscribes to Supabase
+         Realtime on the `calls` table. */}
+      <IncomingCallProvider />
       {/* Pull-to-refresh — touch-only, mobile-only. The driver
          portal runs inside the Capacitor WebView where the native
          browser refresh isn't reachable, so the gesture is the only

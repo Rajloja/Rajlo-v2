@@ -32,8 +32,12 @@ type RideStatus =
 
 type HistoryRow = {
   id: string;
-  /** Mode A or Mode B. Used for the badge + the row's deep link. */
-  kind?: "private" | "route_taxi";
+  /** Mode A (private), legacy Mode B single-leg (route_taxi), or
+   *  multi-leg Mode B journey (route_taxi_journey). The journey
+   *  variant carries a `legs[]` breakdown so a 3-corridor trip
+   *  renders as ONE history row with all the legs collapsed under it,
+   *  not three disconnected hails. */
+  kind?: "private" | "route_taxi" | "route_taxi_journey";
   status: RideStatus;
   pickup: { name: string; address: string };
   dropoff: { name: string; address: string };
@@ -52,6 +56,26 @@ type HistoryRow = {
   carpool: boolean;
   /** Set on route taxi entries that paid the half-fare concession. */
   concession?: boolean;
+  /** Multi-leg journey breakdown. Only present when
+   *  `kind === "route_taxi_journey"`. */
+  legCount?: number;
+  completedLegCount?: number;
+  legs?: Array<{
+    id: string;
+    legOrder: number | null;
+    isTransferLeg: boolean;
+    status: RideStatus;
+    pickup: { name: string; lat: number | null; lng: number | null };
+    dropoff: { name: string; lat: number | null; lng: number | null };
+    fareJmd: number;
+    distanceKm: number | null;
+    acceptedAt: string | null;
+    pickedUpAt: string | null;
+    completedAt: string | null;
+    cancelledAt: string | null;
+    cancellationReason: string | null;
+    driverName: string | null;
+  }>;
 };
 
 type Tab = "all" | "ongoing" | "cancelled";
@@ -408,6 +432,9 @@ function HistoryCard({ row, onRate }: { row: HistoryRow; onRate: () => void }) {
 
   const statusBadge = STATUS_BADGE[row.status];
   const isRouteTaxi = row.kind === "route_taxi";
+  const isJourney = row.kind === "route_taxi_journey";
+  const isRouteTaxiAny = isRouteTaxi || isJourney;
+  const isMultiLeg = isJourney && (row.legCount ?? 1) > 1;
   const isOngoing = [
     "requested",
     "accepted",
@@ -416,16 +443,23 @@ function HistoryCard({ row, onRate }: { row: HistoryRow; onRate: () => void }) {
   ].includes(row.status);
 
   // Route taxi rows have their own dedicated screens:
-  //   • In-flight  → /rider/route-taxi/live?id=  (live status + map)
-  //   • Terminal   → /rider/route-taxi/history/[id]  (full receipt)
+  //   • Solo hail in-flight  → /rider/route-taxi/live?id=  (live status + map)
+  //   • Solo hail terminal   → /rider/route-taxi/history/[id]
+  //   • Journey in-flight    → /rider/route-taxi/live?journey=...
+  //                            (the live page resolves the active leg)
+  //   • Journey terminal     → /rider/route-taxi/history/journey/[id]
   // Private rides keep the existing routing.
-  const href = isRouteTaxi
+  const href = isJourney
     ? isOngoing
-      ? `/rider/route-taxi/live?id=${row.id}`
-      : `/rider/route-taxi/history/${row.id}`
-    : isOngoing
-      ? "/rider/live-trip"
-      : `/rider/history/${row.id}`;
+      ? `/rider/route-taxi/live?journey=${row.id}`
+      : `/rider/route-taxi/history/journey/${row.id}`
+    : isRouteTaxi
+      ? isOngoing
+        ? `/rider/route-taxi/live?id=${row.id}`
+        : `/rider/route-taxi/history/${row.id}`
+      : isOngoing
+        ? "/rider/live-trip"
+        : `/rider/history/${row.id}`;
 
   return (
     <Link
@@ -440,10 +474,11 @@ function HistoryCard({ row, onRate }: { row: HistoryRow; onRate: () => void }) {
             >
               {statusBadge.label}
             </span>
-            {isRouteTaxi && (
+            {isRouteTaxiAny && (
               <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-black px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                 <Icon name="navigation" className="h-3 w-3" />
                 Route Taxi
+                {isMultiLeg ? ` · ${row.legCount} legs` : ""}
               </span>
             )}
             {row.concession && (
@@ -492,6 +527,48 @@ function HistoryCard({ row, onRate }: { row: HistoryRow; onRate: () => void }) {
         </div>
       </div>
 
+      {/* Multi-leg journey breakdown — collapsed list of the corridors
+          + per-leg fare/distance so the rider sees at a glance how a
+          single trip was actually 3 taxis. Hidden on solo hails and
+          1-leg journeys (where the headline A→B already says it all). */}
+      {isJourney && row.legs && row.legs.length > 1 && (
+        <div className="mt-4 rounded-xl border border-line bg-surface-soft px-3 py-2.5">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted">
+            {row.legs.length} legs · scan-to-transfer between taxis
+          </p>
+          <ol className="space-y-1.5">
+            {row.legs.map((leg, i) => (
+              <li
+                key={leg.id}
+                className="flex items-start gap-2 text-[11px] leading-tight"
+              >
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rajlo-black text-[9px] font-extrabold text-white">
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold">
+                    {leg.pickup.name} → {leg.dropoff.name}
+                  </p>
+                  <p className="truncate text-muted">
+                    {formatJMD(leg.fareJmd)}
+                    {leg.distanceKm != null
+                      ? ` · ${leg.distanceKm.toFixed(1)} km`
+                      : ""}
+                    {leg.driverName ? ` · ${leg.driverName}` : ""}
+                    {leg.pickedUpAt
+                      ? ` · ${new Date(leg.pickedUpAt).toLocaleTimeString(
+                          "en-JM",
+                          { hour: "numeric", minute: "2-digit" },
+                        )}`
+                      : ""}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs text-muted">
@@ -512,7 +589,7 @@ function HistoryCard({ row, onRate }: { row: HistoryRow; onRate: () => void }) {
             <Icon name="star" className="h-3.5 w-3.5" />
             You rated · {row.myRatingStars}
           </p>
-        ) : row.status === "completed" && row.driverName && !isRouteTaxi ? (
+        ) : row.status === "completed" && row.driverName && !isRouteTaxiAny ? (
           // Rating today is wired to the rides table only — route taxi
           // ratings need their own model (Phase 9). Until then, hide
           // the CTA on hail rows so taps don't 404.
