@@ -768,7 +768,7 @@ export function MapView({
       polylineRef.current = drawGradientPolyline(
         map,
         points.map((p) => ({ lat: p.place.lat, lng: p.place.lng })),
-        4,
+        7,
       );
       const bounds = new google.maps.LatLngBounds();
       points.forEach((p) =>
@@ -815,7 +815,7 @@ export function MapView({
         polylineRef.current = drawGradientPolyline(
           map,
           fullRoutePath(route),
-          5,
+          7,
         );
         // Use the route's own bounds — tighter than fitting to stops alone.
         if (route.bounds) {
@@ -979,7 +979,7 @@ export function MapView({
         livePolylineRef.current = drawGradientPolyline(
           map,
           fullRoutePath(route),
-          5,
+          7,
         );
         // Fit the camera to driver+target the first time we draw the
         // route OR when the target changes. Subsequent refetches keep
@@ -1337,23 +1337,16 @@ export function MapView({
         ...corridorLines.slice(0, -1).map((seg) => seg.to),
         destination,
       ];
-      // Halo underneath — wide white polyline so the orange line on
-      // top stands out against Maps' default road tinting.
-      const halo = new google.maps.Polyline({
-        map,
-        path: initialPath,
-        strokeColor: "#ffffff",
-        strokeOpacity: 0.95,
-        strokeWeight: 12,
-        zIndex: 95,
-      });
-      corridorPolylineRef.current.push(halo);
-      // Main corridor line — bright orange, on top of the halo.
+      // Single corridor line — matches the private-ride polyline's
+      // dimensions exactly (strokeWeight 7, opacity 0.92) so the
+      // two modes feel visually consistent. Just a different colour
+      // (orange vs the private-ride red gradient) to signal "this
+      // is a route taxi corridor" without changing weight or style.
       const line = new google.maps.Polyline({
         map,
         path: initialPath,
         strokeColor: "#f97316",
-        strokeOpacity: 1,
+        strokeOpacity: 0.92,
         strokeWeight: 7,
         zIndex: 100,
       });
@@ -1362,7 +1355,6 @@ export function MapView({
       const ds = directionsServiceRef.current;
       if (ds) {
         const polyline = line;
-        const haloLine = halo;
         ds.route(
           {
             origin,
@@ -1402,9 +1394,6 @@ export function MapView({
                   }));
             if (polyline.getMap()) {
               polyline.setPath(finalPoints);
-            }
-            if (haloLine.getMap()) {
-              haloLine.setPath(finalPoints);
             }
           },
         );

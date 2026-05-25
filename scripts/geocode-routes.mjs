@@ -104,6 +104,14 @@ const PARISH_CENTERS = {
   "St. Elizabeth": { lat: 18.03, lng: -77.85 },
   Westmoreland: { lat: 18.22, lng: -78.13 },
   Hanover: { lat: 18.45, lng: -78.18 },
+  // ─── Westmoreland ───
+  "Banbury|Westmoreland": { lat: 18.245, lng: -78.082 },
+
+  // ─── Hanover ───
+  "Bulls Bay|Hanover": { lat: 18.46, lng: -78.17 },
+  "Dias|Hanover": { lat: 18.43, lng: -78.16 },
+  "Claremont|Hanover": { lat: 18.42, lng: -78.16 },
+
   "St. James": { lat: 18.47, lng: -77.92 },
   Trelawny: { lat: 18.49, lng: -77.66 },
   "St. Ann": { lat: 18.43, lng: -77.2 },
@@ -169,110 +177,110 @@ const OVERRIDES = {
   // across all 14 parishes. For ambiguous names (Hopewell, Richmond,
   // Hampton Court) leave only the parish-qualified entries so we
   // don't lock the wrong location.
-  Lucea: { lat: 18.4500, lng: -78.1700 },
-  "Orange Bay": { lat: 18.4500, lng: -78.1810 },
-  Mandeville: { lat: 18.0400, lng: -77.5010 },
-  Christiana: { lat: 18.1710, lng: -77.4900 },
+  Lucea: { lat: 18.45, lng: -78.17 },
+  "Orange Bay": { lat: 18.45, lng: -78.181 },
+  Mandeville: { lat: 18.04, lng: -77.501 },
+  Christiana: { lat: 18.171, lng: -77.49 },
   Falmouth: { lat: 18.4929, lng: -77.6517 },
-  "Spanish Town": { lat: 17.9920, lng: -76.9570 },
-  "Montego Bay": { lat: 18.4720, lng: -77.9200 },
-  "Ocho Rios": { lat: 18.4080, lng: -77.1030 },
-  "Port Antonio": { lat: 18.1800, lng: -76.4530 },
-  "Black River": { lat: 18.0260, lng: -77.8440 },
-  "May Pen": { lat: 17.9670, lng: -77.2430 },
-  Linstead: { lat: 18.1350, lng: -77.0300 },
-  "Morant Bay": { lat: 17.8810, lng: -76.4080 },
-  "Port Maria": { lat: 18.3710, lng: -76.8920 },
-  "Half Way Tree": { lat: 18.0120, lng: -76.7980 },
-  "Half-Way Tree": { lat: 18.0120, lng: -76.7980 },
-  "Cross Roads": { lat: 18.0010, lng: -76.7850 },
-  Papine: { lat: 18.0220, lng: -76.7450 },
+  "Spanish Town": { lat: 17.992, lng: -76.957 },
+  "Montego Bay": { lat: 18.472, lng: -77.92 },
+  "Ocho Rios": { lat: 18.408, lng: -77.103 },
+  "Port Antonio": { lat: 18.18, lng: -76.453 },
+  "Black River": { lat: 18.026, lng: -77.844 },
+  "May Pen": { lat: 17.967, lng: -77.243 },
+  Linstead: { lat: 18.135, lng: -77.03 },
+  "Morant Bay": { lat: 17.881, lng: -76.408 },
+  "Port Maria": { lat: 18.371, lng: -76.892 },
+  "Half Way Tree": { lat: 18.012, lng: -76.798 },
+  "Half-Way Tree": { lat: 18.012, lng: -76.798 },
+  "Cross Roads": { lat: 18.001, lng: -76.785 },
+  Papine: { lat: 18.022, lng: -76.745 },
 
   // ─── Hanover ───
-  "Lucea|Hanover": { lat: 18.4500, lng: -78.1700 },
-  "Orange Bay|Hanover": { lat: 18.4500, lng: -78.1810 },
-  "Green Island|Hanover": { lat: 18.2810, lng: -78.3454 },
-  "Hopewell|Hanover": { lat: 18.4350, lng: -78.1070 },
-  "Sandy Bay|Hanover": { lat: 18.4500, lng: -78.0700 },
-  "Cousins Cove|Hanover": { lat: 18.4515, lng: -78.2050 },
+  "Lucea|Hanover": { lat: 18.45, lng: -78.17 },
+  "Orange Bay|Hanover": { lat: 18.45, lng: -78.181 },
+  "Green Island|Hanover": { lat: 18.281, lng: -78.3454 },
+  "Hopewell|Hanover": { lat: 18.435, lng: -78.107 },
+  "Sandy Bay|Hanover": { lat: 18.45, lng: -78.07 },
+  "Cousins Cove|Hanover": { lat: 18.4515, lng: -78.205 },
 
   // ─── Westmoreland ───
-  Negril: { lat: 18.2700, lng: -78.3480 },
-  "Negril|Westmoreland": { lat: 18.2700, lng: -78.3480 },
-  "Savanna La Mar|Westmoreland": { lat: 18.2200, lng: -78.1330 },
-  "Sav-la-Mar|Westmoreland": { lat: 18.2200, lng: -78.1330 },
-  "Sheffield|Westmoreland": { lat: 18.2780, lng: -78.3040 },
-  "Revival|Westmoreland": { lat: 18.2260, lng: -78.2860 },
-  "Whithorn|Westmoreland": { lat: 18.2400, lng: -78.0050 },
-  "Bluefields|Westmoreland": { lat: 18.1700, lng: -78.0400 },
-  "Little London|Westmoreland": { lat: 18.2400, lng: -78.1900 },
-  "Grange Hill|Westmoreland": { lat: 18.3120, lng: -78.1880 },
+  Negril: { lat: 18.27, lng: -78.348 },
+  "Negril|Westmoreland": { lat: 18.27, lng: -78.348 },
+  "Savanna La Mar|Westmoreland": { lat: 18.22, lng: -78.133 },
+  "Sav-la-Mar|Westmoreland": { lat: 18.22, lng: -78.133 },
+  "Sheffield|Westmoreland": { lat: 18.278, lng: -78.304 },
+  "Revival|Westmoreland": { lat: 18.226, lng: -78.286 },
+  "Whithorn|Westmoreland": { lat: 18.24, lng: -78.005 },
+  "Bluefields|Westmoreland": { lat: 18.17, lng: -78.04 },
+  "Little London|Westmoreland": { lat: 18.24, lng: -78.19 },
+  "Grange Hill|Westmoreland": { lat: 18.312, lng: -78.188 },
 
   // ─── St. James ───
-  "Montego Bay|St. James": { lat: 18.4720, lng: -77.9200 },
-  "Reading|St. James": { lat: 18.4560, lng: -77.9990 },
-  "Cornwall|St. James": { lat: 18.4640, lng: -77.9160 },
-  "Cornwall Courts|St. James": { lat: 18.4640, lng: -77.9160 },
-  "Anchovy|St. James": { lat: 18.4250, lng: -77.8920 },
+  "Montego Bay|St. James": { lat: 18.472, lng: -77.92 },
+  "Reading|St. James": { lat: 18.456, lng: -77.999 },
+  "Cornwall|St. James": { lat: 18.464, lng: -77.916 },
+  "Cornwall Courts|St. James": { lat: 18.464, lng: -77.916 },
+  "Anchovy|St. James": { lat: 18.425, lng: -77.892 },
 
   // ─── Trelawny ───
   "Falmouth|Trelawny": { lat: 18.4929, lng: -77.6517 },
-  "Duncans|Trelawny": { lat: 18.4660, lng: -77.5190 },
-  "Clarks Town|Trelawny": { lat: 18.4480, lng: -77.5610 },
-  "Albert Town|Trelawny": { lat: 18.2940, lng: -77.5760 },
+  "Duncans|Trelawny": { lat: 18.466, lng: -77.519 },
+  "Clarks Town|Trelawny": { lat: 18.448, lng: -77.561 },
+  "Albert Town|Trelawny": { lat: 18.294, lng: -77.576 },
 
   // ─── St. Ann ───
-  "Ocho Rios|St. Ann": { lat: 18.4080, lng: -77.1030 },
-  "Brown's Town|St. Ann": { lat: 18.3850, lng: -77.3590 },
-  "St. Ann's Bay|St. Ann": { lat: 18.4340, lng: -77.2070 },
-  "Cave Valley|St. Ann": { lat: 18.2080, lng: -77.2410 },
-  "Discovery Bay|St. Ann": { lat: 18.4630, lng: -77.4170 },
-  "Runaway Bay|St. Ann": { lat: 18.4570, lng: -77.3360 },
+  "Ocho Rios|St. Ann": { lat: 18.408, lng: -77.103 },
+  "Brown's Town|St. Ann": { lat: 18.385, lng: -77.359 },
+  "St. Ann's Bay|St. Ann": { lat: 18.434, lng: -77.207 },
+  "Cave Valley|St. Ann": { lat: 18.208, lng: -77.241 },
+  "Discovery Bay|St. Ann": { lat: 18.463, lng: -77.417 },
+  "Runaway Bay|St. Ann": { lat: 18.457, lng: -77.336 },
 
   // ─── St. Mary ───
-  "Port Maria|St. Mary": { lat: 18.3710, lng: -76.8920 },
-  "Annotto Bay|St. Mary": { lat: 18.2750, lng: -76.7700 },
-  "Highgate|St. Mary": { lat: 18.2620, lng: -76.8950 },
-  "Richmond|St. Mary": { lat: 18.2270, lng: -76.9270 },
+  "Port Maria|St. Mary": { lat: 18.371, lng: -76.892 },
+  "Annotto Bay|St. Mary": { lat: 18.275, lng: -76.77 },
+  "Highgate|St. Mary": { lat: 18.262, lng: -76.895 },
+  "Richmond|St. Mary": { lat: 18.227, lng: -76.927 },
 
   // ─── Portland ───
-  "Port Antonio|Portland": { lat: 18.1800, lng: -76.4530 },
-  "Buff Bay|Portland": { lat: 18.2340, lng: -76.6600 },
+  "Port Antonio|Portland": { lat: 18.18, lng: -76.453 },
+  "Buff Bay|Portland": { lat: 18.234, lng: -76.66 },
 
   // ─── St. Thomas ───
-  "Morant Bay|St. Thomas": { lat: 17.8810, lng: -76.4080 },
-  "Yallahs|St. Thomas": { lat: 17.8790, lng: -76.5660 },
+  "Morant Bay|St. Thomas": { lat: 17.881, lng: -76.408 },
+  "Yallahs|St. Thomas": { lat: 17.879, lng: -76.566 },
 
   // ─── Kingston / St. Andrew ───
-  "Half Way Tree|Kingston": { lat: 18.0120, lng: -76.7980 },
-  "Half Way Tree|St. Andrew": { lat: 18.0120, lng: -76.7980 },
-  "Half-Way Tree|Kingston": { lat: 18.0120, lng: -76.7980 },
-  "Half-Way Tree|St. Andrew": { lat: 18.0120, lng: -76.7980 },
-  "Cross Roads|Kingston": { lat: 18.0010, lng: -76.7850 },
-  "Cross Roads|St. Andrew": { lat: 18.0010, lng: -76.7850 },
-  "Downtown|Kingston": { lat: 17.9680, lng: -76.7930 },
-  "Papine|St. Andrew": { lat: 18.0220, lng: -76.7450 },
-  "Constant Spring|St. Andrew": { lat: 18.0480, lng: -76.7950 },
-  "Maxfield Avenue|St. Andrew": { lat: 17.9980, lng: -76.8044 },
-  "Liguanea|St. Andrew": { lat: 18.0140, lng: -76.7670 },
-  "Mona|St. Andrew": { lat: 18.0095, lng: -76.7460 },
-  "Bull Bay|St. Thomas": { lat: 17.8950, lng: -76.6500 },
-  "Nine Miles|St. Andrew": { lat: 18.0270, lng: -76.8730 },
-  "August Town|St. Andrew": { lat: 18.0240, lng: -76.7370 },
-  "Stony Hill|St. Andrew": { lat: 18.0790, lng: -76.7820 },
-  "Mount James|St. Andrew": { lat: 18.0810, lng: -76.7530 },
-  "Golden Spring|St. Andrew": { lat: 18.0900, lng: -76.8010 },
-  "Jones Town|Kingston": { lat: 17.9810, lng: -76.7950 },
-  "Cane River|St. Andrew": { lat: 17.9650, lng: -76.6920 },
+  "Half Way Tree|Kingston": { lat: 18.012, lng: -76.798 },
+  "Half Way Tree|St. Andrew": { lat: 18.012, lng: -76.798 },
+  "Half-Way Tree|Kingston": { lat: 18.012, lng: -76.798 },
+  "Half-Way Tree|St. Andrew": { lat: 18.012, lng: -76.798 },
+  "Cross Roads|Kingston": { lat: 18.001, lng: -76.785 },
+  "Cross Roads|St. Andrew": { lat: 18.001, lng: -76.785 },
+  "Downtown|Kingston": { lat: 17.968, lng: -76.793 },
+  "Papine|St. Andrew": { lat: 18.022, lng: -76.745 },
+  "Constant Spring|St. Andrew": { lat: 18.048, lng: -76.795 },
+  "Maxfield Avenue|St. Andrew": { lat: 17.998, lng: -76.8044 },
+  "Liguanea|St. Andrew": { lat: 18.014, lng: -76.767 },
+  "Mona|St. Andrew": { lat: 18.0095, lng: -76.746 },
+  "Bull Bay|St. Thomas": { lat: 17.895, lng: -76.65 },
+  "Nine Miles|St. Andrew": { lat: 18.027, lng: -76.873 },
+  "August Town|St. Andrew": { lat: 18.024, lng: -76.737 },
+  "Stony Hill|St. Andrew": { lat: 18.079, lng: -76.782 },
+  "Mount James|St. Andrew": { lat: 18.081, lng: -76.753 },
+  "Golden Spring|St. Andrew": { lat: 18.09, lng: -76.801 },
+  "Jones Town|Kingston": { lat: 17.981, lng: -76.795 },
+  "Cane River|St. Andrew": { lat: 17.965, lng: -76.692 },
 
   // ─── St. Catherine ───
-  "Spanish Town|St. Catherine": { lat: 17.9920, lng: -76.9570 },
-  "Linstead|St. Catherine": { lat: 18.1350, lng: -77.0300 },
-  "Old Harbour|St. Catherine": { lat: 17.9390, lng: -77.1140 },
-  "Old Harbour Bay|St. Catherine": { lat: 17.8860, lng: -77.1050 },
-  "Bog Walk|St. Catherine": { lat: 18.1010, lng: -76.9970 },
-  "Ewarton|St. Catherine": { lat: 18.1830, lng: -77.0680 },
-  "Portmore|St. Catherine": { lat: 17.9530, lng: -76.8800 },
+  "Spanish Town|St. Catherine": { lat: 17.992, lng: -76.957 },
+  "Linstead|St. Catherine": { lat: 18.135, lng: -77.03 },
+  "Old Harbour|St. Catherine": { lat: 17.939, lng: -77.114 },
+  "Old Harbour Bay|St. Catherine": { lat: 17.886, lng: -77.105 },
+  "Bog Walk|St. Catherine": { lat: 18.101, lng: -76.997 },
+  "Ewarton|St. Catherine": { lat: 18.183, lng: -77.068 },
+  "Portmore|St. Catherine": { lat: 17.953, lng: -76.88 },
   "Portmore Mall|St. Catherine": { lat: 17.9701, lng: -76.8655 },
   "Waterford|St. Catherine": { lat: 17.9874, lng: -76.8707 },
   "Gregory Park|St. Catherine": { lat: 17.9987, lng: -76.8865 },
@@ -281,24 +289,24 @@ const OVERRIDES = {
   "Free Town|St. Catherine": { lat: 18.0179, lng: -76.8099 },
 
   // ─── Clarendon ───
-  "May Pen|Clarendon": { lat: 17.9670, lng: -77.2430 },
-  "Chapelton|Clarendon": { lat: 18.0830, lng: -77.2700 },
-  "Lionel Town|Clarendon": { lat: 17.8120, lng: -77.2360 },
-  "Mocho|Clarendon": { lat: 18.0750, lng: -77.2720 },
-  "Frankfield|Clarendon": { lat: 18.1530, lng: -77.3490 },
+  "May Pen|Clarendon": { lat: 17.967, lng: -77.243 },
+  "Chapelton|Clarendon": { lat: 18.083, lng: -77.27 },
+  "Lionel Town|Clarendon": { lat: 17.812, lng: -77.236 },
+  "Mocho|Clarendon": { lat: 18.075, lng: -77.272 },
+  "Frankfield|Clarendon": { lat: 18.153, lng: -77.349 },
 
   // ─── Manchester ───
-  "Mandeville|Manchester": { lat: 18.0400, lng: -77.5010 },
-  "Christiana|Manchester": { lat: 18.1710, lng: -77.4900 },
-  "Williamsfield|Manchester": { lat: 18.0750, lng: -77.4870 },
-  "Spaldings|Manchester": { lat: 18.1840, lng: -77.4090 },
-  "Porus|Manchester": { lat: 18.0270, lng: -77.4170 },
+  "Mandeville|Manchester": { lat: 18.04, lng: -77.501 },
+  "Christiana|Manchester": { lat: 18.171, lng: -77.49 },
+  "Williamsfield|Manchester": { lat: 18.075, lng: -77.487 },
+  "Spaldings|Manchester": { lat: 18.184, lng: -77.409 },
+  "Porus|Manchester": { lat: 18.027, lng: -77.417 },
 
   // ─── St. Elizabeth ───
-  "Black River|St. Elizabeth": { lat: 18.0260, lng: -77.8440 },
-  "Santa Cruz|St. Elizabeth": { lat: 18.0540, lng: -77.6940 },
-  "Junction|St. Elizabeth": { lat: 17.9620, lng: -77.7060 },
-  "Malvern|St. Elizabeth": { lat: 17.9810, lng: -77.7440 },
+  "Black River|St. Elizabeth": { lat: 18.026, lng: -77.844 },
+  "Santa Cruz|St. Elizabeth": { lat: 18.054, lng: -77.694 },
+  "Junction|St. Elizabeth": { lat: 17.962, lng: -77.706 },
+  "Malvern|St. Elizabeth": { lat: 17.981, lng: -77.744 },
 };
 
 /** Normalise a parish string to the routes-table form. Routes use
@@ -360,7 +368,57 @@ async function geocode(place, parish) {
     const res = await fetch(u.toString());
     const data = await res.json();
     if (data.status === "OK" && data.results?.[0]) {
-      const loc = data.results[0].geometry.location;
+      const result = data.results[0];
+
+      // Reject Google's region-level fallbacks. When Google can't
+      // find a specific Jamaican village it returns the parish (or
+      // similar admin-area) centroid disguised as a normal result.
+      // Two strong signals distinguish a real match from a region
+      // fallback:
+      //
+      //   1. `partial_match: true` — Google explicitly admits it
+      //      couldn't match the full query, only part of it.
+      //   2. `types` lacking any locality-level tag — a real town
+      //      result includes `locality` or `sublocality` (or at
+      //      worst `route`/`establishment`). A pure region result
+      //      only has `administrative_area_level_*` / `political`
+      //      / `country`.
+      //
+      // Without these checks ~300 obscure village queries silently
+      // landed on a handful of parish-centroid coords, which then
+      // clustered into phantom super-nodes that the pathfinder used
+      // to invent corridors that don't exist (e.g. "Lucea → Banbury"
+      // via a Banbury-tagged Bulls Bay coord).
+      if (result.partial_match === true) {
+        console.warn(
+          `  reject "${place}" (${parish}) → partial_match (Google approximated)`,
+        );
+        return null;
+      }
+      const types = Array.isArray(result.types) ? result.types : [];
+      const LOCALITY_LIKE = new Set([
+        "locality",
+        "sublocality",
+        "sublocality_level_1",
+        "neighborhood",
+        "route",
+        "establishment",
+        "premise",
+        "point_of_interest",
+        "natural_feature",
+        "park",
+        "transit_station",
+        "intersection",
+      ]);
+      const hasLocalityType = types.some((t) => LOCALITY_LIKE.has(t));
+      if (types.length > 0 && !hasLocalityType) {
+        console.warn(
+          `  reject "${place}" (${parish}) → region-level result (types=${types.join(",")})`,
+        );
+        return null;
+      }
+
+      const loc = result.geometry.location;
       const coords = { lat: loc.lat, lng: loc.lng };
       // Hard sanity: must be inside Jamaica. A coord outside the
       // bbox means Google found something nonsensical — drop it.
@@ -385,7 +443,9 @@ async function geocode(place, parish) {
           // a different town entirely. Refuse — never write garbage.
           console.warn(
             `  reject "${place}" (${parish}) → ${coords.lat.toFixed(4)},` +
-              `${coords.lng.toFixed(4)} is ${d.toFixed(0)}km from ${p} centroid ` +
+              `${coords.lng.toFixed(4)} is ${d.toFixed(
+                0,
+              )}km from ${p} centroid ` +
               `— Google likely found a different town. Add to OVERRIDES if you ` +
               `know the correct coords.`,
           );
@@ -394,7 +454,9 @@ async function geocode(place, parish) {
         if (d > PARISH_NEAR_KM) {
           // Tier 2: cross-parish but real. Accept + warn.
           console.warn(
-            `  warn   "${place}" tagged ${p} but coords are ${d.toFixed(0)}km ` +
+            `  warn   "${place}" tagged ${p} but coords are ${d.toFixed(
+              0,
+            )}km ` +
               `from ${p} centroid — parish label may be wrong in routes table`,
           );
         }
@@ -488,9 +550,7 @@ console.log("geocode-routes: starting…");
 if (DRY_RUN) {
   const { data: rows, error } = await supabase
     .from("routes")
-    .select(
-      "origin_name, destination_name, origin_parish, destination_parish",
-    )
+    .select("origin_name, destination_name, origin_parish, destination_parish")
     .eq("active", true);
   if (error) {
     console.error(`geocode-routes: dry-run fetch failed: ${error.message}`);
@@ -508,7 +568,9 @@ if (DRY_RUN) {
     });
   }
   console.log(
-    `geocode-routes: dry-run — ${uniq.size} unique endpoints across ${rows?.length ?? 0} active routes\n`,
+    `geocode-routes: dry-run — ${uniq.size} unique endpoints across ${
+      rows?.length ?? 0
+    } active routes\n`,
   );
   for (const { name, parish } of uniq.values()) {
     const res = await resolve_(name, parish);
@@ -533,6 +595,13 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
+// Track row IDs we've already attempted in THIS run so the
+// origin_lat-IS-NULL filter doesn't drag the same failed rows back
+// every loop iteration. Without this, rows that fail geocoding
+// (now common, since we reject Google's region-level fallbacks)
+// stay NULL → reappear in every page query → script spins forever.
+const triedIds = new Set();
+
 for (;;) {
   const { data: routes, error } = await supabase
     .from("routes")
@@ -548,8 +617,20 @@ for (;;) {
   }
   if (!routes || routes.length === 0) break;
 
+  // Drop rows we've already tried in this run. If every remaining
+  // NULL-coord row has been attempted, we're done — exit cleanly.
+  const fresh = routes.filter((r) => !triedIds.has(r.id));
+  if (fresh.length === 0) {
+    console.log(
+      `geocode-routes: ${routes.length} row(s) remain with NULL coords ` +
+        "but all have been attempted this run — stopping.",
+    );
+    break;
+  }
+
   let geocodedThisPage = 0;
-  for (const r of routes) {
+  for (const r of fresh) {
+    triedIds.add(r.id);
     processed++;
     const update = {};
 
