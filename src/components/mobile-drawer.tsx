@@ -511,11 +511,7 @@ export function MobileDrawer({
                        the layout. */}
                     {badgeCount > 0 && (
                       <span
-                        className={`ml-1 inline-grid min-w-[1.25rem] place-items-center rounded-full px-1.5 text-[10px] font-extrabold leading-none ${
-                          active
-                            ? "bg-rajlo-red text-white"
-                            : "bg-rajlo-red text-white"
-                        }`}
+                        className="ml-1 inline-grid h-5 min-w-5 place-items-center rounded-full bg-rajlo-red px-1 text-[10px] font-extrabold leading-none text-white"
                         aria-label={`${badgeCount} pending`}
                       >
                         {badgeCount > 99 ? "99+" : badgeCount}

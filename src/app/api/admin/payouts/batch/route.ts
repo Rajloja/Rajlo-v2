@@ -90,27 +90,48 @@ export async function POST(request: Request) {
   // Hydrate driver display name + TRN. The CSV needs both for the
   // bank's reference + (in some cases) the TRN line item.
   const userIds = Array.from(new Set(list.map((r) => r.user_id)));
-  const [{ data: profileRows }, { data: driverRows }] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .in("id", userIds),
-    supabase
-      .from("drivers")
-      .select("user_id, external_id, trn")
-      .in("user_id", userIds),
-  ]);
+  // Profile name + driver TRN come from public tables; email lives on
+  // auth.users (NOT public.profiles), so we fetch the auth rows
+  // individually for each affected driver. The auth.admin call needs
+  // the service-role key which requireAdmin's `supabase` client has.
+  const [{ data: profileRows }, { data: driverRows }, authUsers] =
+    await Promise.all([
+      supabase.from("profiles").select("id, full_name").in("id", userIds),
+      supabase
+        .from("drivers")
+        .select("user_id, external_id, trn")
+        .in("user_id", userIds),
+      Promise.all(
+        userIds.map((id) =>
+          supabase.auth.admin
+            .getUserById(id)
+            .then(({ data }) => ({ id, email: data?.user?.email ?? null }))
+            .catch(() => ({ id, email: null as string | null })),
+        ),
+      ),
+    ]);
   const profileMap = new Map<
     string,
     { fullName: string; email: string | null }
   >();
+  const emailMap = new Map<string, string | null>();
+  authUsers.forEach((u) => emailMap.set(u.id, u.email));
   ((profileRows ?? []) as Array<{
     id: string;
     full_name: string | null;
-    email: string | null;
   }>).forEach((p) =>
-    profileMap.set(p.id, { fullName: p.full_name ?? "", email: p.email }),
+    profileMap.set(p.id, {
+      fullName: p.full_name ?? "",
+      email: emailMap.get(p.id) ?? null,
+    }),
   );
+  // Ensure every user we have an email for has an entry (in case the
+  // profiles row is missing — defensive).
+  userIds.forEach((id) => {
+    if (!profileMap.has(id)) {
+      profileMap.set(id, { fullName: "", email: emailMap.get(id) ?? null });
+    }
+  });
   const driverMap = new Map<string, { externalId: string; trn: string | null }>();
   ((driverRows ?? []) as Array<{
     user_id: string;

@@ -102,12 +102,17 @@ export async function POST(
   }
 
   if (shouldNotify) {
-    // Fetch driver profile once so we can email + push in parallel.
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", row.user_id)
-      .single();
+    // Display name from public.profiles, email from auth.users (the
+    // profiles table has no email column — that's an auth-only field).
+    const [{ data: profile }, { data: authData }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", row.user_id)
+        .single(),
+      supabase.auth.admin.getUserById(row.user_id).catch(() => ({ data: null })),
+    ]);
+    const email = authData?.user?.email ?? null;
 
     const amountLabel = `JMD ${row.amount_jmd.toLocaleString("en-JM")}`;
     await Promise.all([
@@ -120,13 +125,13 @@ export async function POST(
         pushTag: `payout-excluded-${row.id}`,
         requireInteraction: true,
       }).catch(() => null),
-      profile?.email
-        ? sendWalletPayoutExcludedEmail(profile.email, {
+      email
+        ? sendWalletPayoutExcludedEmail(email, {
             amountJmd: row.amount_jmd,
             bankName: row.bank_name ?? "your bank",
             reason,
             customMessage: customMessage || null,
-            driverName: profile.full_name,
+            driverName: profile?.full_name ?? null,
           })
             .then(async () => {
               await supabase

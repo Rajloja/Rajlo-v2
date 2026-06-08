@@ -97,15 +97,16 @@ export async function GET() {
         .eq("status", "open"),
     ),
 
-    // Safety — alerts not yet acknowledged. Safety_alerts schema
-    // may not have a single canonical "open" flag in every deploy,
-    // so we filter on acknowledged_at being null which is more
-    // portable across schema versions.
+    // Safety — alerts in 'open' status. Mirrors the filter the admin
+    // /admin/safety page uses (status='open' default), so the badge
+    // count matches what the admin sees when they click through.
+    // Earlier impl used .is("acknowledged_at", null) which over-counted
+    // by including alerts that were resolved-without-acknowledgement.
     tally("/admin/safety", () =>
       supabase
         .from("safety_alerts")
         .select("id", { count: "exact", head: true })
-        .is("acknowledged_at", null),
+        .eq("status", "open"),
     ),
   ]);
 

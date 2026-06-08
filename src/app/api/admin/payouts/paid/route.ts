@@ -103,13 +103,23 @@ export async function POST(request: Request) {
     }
   }
 
-  // Fan-out notifications. Hydrate profiles in one shot to keep the
-  // email loop tight.
+  // Fan-out notifications. Name comes from profiles; email comes
+  // from auth.users (NOT a column on the public.profiles table —
+  // bug we hit when emails silently no-op'd).
   const userIds = Array.from(new Set(list.map((r) => r.user_id)));
-  const { data: profileRows } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .in("id", userIds);
+  const [{ data: profileRows }, authUsers] = await Promise.all([
+    supabase.from("profiles").select("id, full_name").in("id", userIds),
+    Promise.all(
+      userIds.map((id) =>
+        supabase.auth.admin
+          .getUserById(id)
+          .then(({ data }) => ({ id, email: data?.user?.email ?? null }))
+          .catch(() => ({ id, email: null as string | null })),
+      ),
+    ),
+  ]);
+  const emailMap = new Map<string, string | null>();
+  authUsers.forEach((u) => emailMap.set(u.id, u.email));
   const profileMap = new Map<
     string,
     { fullName: string | null; email: string | null }
@@ -117,10 +127,17 @@ export async function POST(request: Request) {
   ((profileRows ?? []) as Array<{
     id: string;
     full_name: string | null;
-    email: string | null;
   }>).forEach((p) =>
-    profileMap.set(p.id, { fullName: p.full_name, email: p.email }),
+    profileMap.set(p.id, {
+      fullName: p.full_name,
+      email: emailMap.get(p.id) ?? null,
+    }),
   );
+  userIds.forEach((id) => {
+    if (!profileMap.has(id)) {
+      profileMap.set(id, { fullName: null, email: emailMap.get(id) ?? null });
+    }
+  });
 
   await Promise.all(
     list.map(async (r) => {
