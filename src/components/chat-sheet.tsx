@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 import { CallButton } from "./call-button";
 import { Skeleton } from "./skeleton";
@@ -146,6 +147,45 @@ export function ChatSheet({
     if (!open) return;
     markAllRead?.();
   }, [open, markAllRead]);
+
+  /* ─── History-based back-button handling ───
+   *
+   * When the sheet opens we push a synthetic history entry. Any "back"
+   * gesture — Android hardware back, Capacitor's bridge, browser
+   * back, swipe-back on iOS — pops that entry and fires popstate,
+   * which closes the sheet here. The page route stays intact.
+   *
+   * Without this, Android Back navigated the driver OFF the active
+   * trip page while leaving the chat sheet visually mounted, which
+   * was confusing + unsafe mid-trip.
+   *
+   * If the sheet closes via the X / backdrop / external setState,
+   * the cleanup pops our entry too so the history stack stays clean.
+   */
+  const closingFromBackRef = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    if (typeof window === "undefined") return;
+    window.history.pushState({ rajloChatSheet: true }, "");
+    const onPop = () => {
+      closingFromBackRef.current = true;
+      onClose();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // Cleanup: if the sheet was closed by something OTHER than the
+      // back button (X tap, backdrop click, parent flip), pop the
+      // synthetic entry off the history stack so a later back tap
+      // doesn't no-op on a phantom state.
+      if (!closingFromBackRef.current) {
+        if (window.history.state?.rajloChatSheet) {
+          window.history.back();
+        }
+      }
+      closingFromBackRef.current = false;
+    };
+  }, [open, onClose]);
 
   /* ─── Auto-scroll to bottom on new messages + keyboard resize ───
    *
@@ -403,8 +443,25 @@ export function ChatSheet({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[70] flex">
+  // Render via portal at document.body so the sheet escapes any
+  // ancestor with transform/filter/perspective set (framer-motion,
+  // animated cards, etc) — those create new stacking contexts that
+  // can demote our `fixed inset-0` from "viewport-rooted" to
+  // "parent-rooted" and produce the rider-side weirdness where the
+  // sheet renders inside its driver-card host instead of over the
+  // whole screen. SSR-safe via the typeof check.
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] flex overscroll-contain"
+      // Inline height matches the inner panel — this stops the iOS
+      // safari rubber-band on the backdrop from leaking touch into
+      // the page underneath when the keyboard is open and the layout
+      // viewport > visual viewport.
+      style={
+        viewportHeight !== null ? { height: viewportHeight } : undefined
+      }
+    >
       {/* Backdrop — dim layer behind the panel. Fades in. */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -418,7 +475,7 @@ export function ChatSheet({
          browser). That's what keeps the composer above the keyboard
          instead of getting hidden underneath it. */}
       <div
-        className="relative ml-auto flex h-[100dvh] w-full flex-col bg-surface shadow-2xl md:max-w-md"
+        className="relative ml-auto flex h-[100dvh] w-full flex-col overscroll-contain bg-surface shadow-2xl md:max-w-md"
         style={
           viewportHeight !== null ? { height: viewportHeight } : undefined
         }
@@ -619,7 +676,8 @@ export function ChatSheet({
           </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

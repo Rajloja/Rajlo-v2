@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { haptics } from "@/lib/native";
 import {
@@ -51,6 +51,11 @@ type Props = {
    *  expand chevron (cancel ride, no-show flow, etc.). When omitted,
    *  the chevron is hidden. */
   expandedChildren?: React.ReactNode;
+  /** Reports the card's measured pixel height to the host page on
+   *  every resize (initial mount, expand toggle, viewport reflow).
+   *  Lets the host push other floating controls (locate-me button,
+   *  voice mute, etc.) up so they always sit above the card. */
+  onHeightChange?: (px: number) => void;
 };
 
 export function NavTripCard({
@@ -63,11 +68,33 @@ export function NavTripCard({
   acting,
   onAction,
   expandedChildren,
+  onHeightChange,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Report our outer height (including the safe-area padding) to the
+  // host on every layout change. Drives the locate-me button's
+  // dynamic bottom offset so it stays above the card when expanded.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === "undefined") {
+      onHeightChange?.(el.offsetHeight);
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      onHeightChange?.(el.offsetHeight);
+    });
+    ro.observe(el);
+    // Fire once immediately for the initial mount.
+    onHeightChange?.(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [onHeightChange]);
 
   return (
     <div
+      ref={rootRef}
       className="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-3 pb-3"
       style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}
     >

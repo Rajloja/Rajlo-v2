@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 import { ChatSheet } from "./chat-sheet";
@@ -77,6 +77,23 @@ export function ChatLauncher({
     latestIncoming,
     markAllRead,
   } = useRideChat(rideId, myRole, { enabled: Boolean(rideId) });
+
+  // On the DRIVER side, auto-open the chat the moment the rider sends
+  // a new message — the driver is operating the vehicle and shouldn't
+  // have to fish for the chat icon while moving. Riders DON'T get the
+  // auto-open (their attention isn't safety-critical, and an unwanted
+  // popover during browsing would be intrusive).
+  //
+  // We track the last id we auto-opened on so an externally-driven
+  // sheet close doesn't immediately re-open from a stale latestIncoming.
+  const lastAutoOpenedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (myRole !== "driver") return;
+    if (!latestIncoming) return;
+    if (lastAutoOpenedIdRef.current === latestIncoming.id) return;
+    lastAutoOpenedIdRef.current = latestIncoming.id;
+    setOpen(true);
+  }, [latestIncoming, myRole]);
 
   return (
     <>

@@ -217,6 +217,19 @@ export default function DriverActiveTripPage() {
   // Voice mute state mirrored from localStorage. Updated via the
   // floating button in NavControls.
   const [voiceMuted, setVoiceMuted] = useState(() => navVoice.isMuted());
+  // NavTripCard measured pixel height (changes when "More options"
+  // expands). Pushed down to MapView so the locate-me button always
+  // sits above the card, even when it's expanded to show rider
+  // details + cancel + no-show controls.
+  const [tripCardHeight, setTripCardHeight] = useState(0);
+
+  // Warm up the TTS engine on mount so the first turn-by-turn voice
+  // prompt actually produces audio. Some Android WebViews silently
+  // swallow the first speechSynthesis call before the voice list
+  // has loaded (or before the Capacitor TTS plugin is initialised).
+  useEffect(() => {
+    void navVoice.warmup();
+  }, []);
   const handleToggleVoice = () => {
     const next = !voiceMuted;
     navVoice.setMuted(next);
@@ -794,6 +807,13 @@ export default function DriverActiveTripPage() {
             onDirectionsRoute={setDirectionsRoute}
             onUserDrag={() => setCameraDisengaged(true)}
             recenterToken={recenterToken}
+            // Push the locate-me button up by the trip card's measured
+            // height (plus an 8px gap) so it always sits above the
+            // card. Only applied during nav mode; outside nav, no card
+            // is rendered and the height stays at 0.
+            floatingControlsBottomPx={
+              navHasRoute && tripCardHeight > 0 ? tripCardHeight + 8 : 0
+            }
             className={
               navFullscreen && navHasRoute
                 ? "h-full w-full flex-1"
@@ -832,6 +852,7 @@ export default function DriverActiveTripPage() {
               />
               <NavTripCard
                 snapshot={navSnapshot}
+                onHeightChange={setTripCardHeight}
                 headline={`${
                   navTarget === "pickup" ? "Pick up" : "Drop off"
                 } ${rider?.name ?? "rider"}`}

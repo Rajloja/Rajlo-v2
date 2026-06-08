@@ -1,37 +1,44 @@
 "use client";
 
 /**
- * Web Speech API wrapper for turn-by-turn voice prompts.
+ * Turn-by-turn voice prompts.
  *
- * Behaviour:
- *   - `speak()` cancels any currently-queued utterance before
- *     starting the new one. Nav prompts should never stack — if the
- *     driver is hearing "In 200 meters, turn right" and we're about
- *     to say "Now turn right", the second one wins.
- *   - `setMuted(true)` persists to localStorage and cancels any
- *     in-flight speech. `setMuted(false)` does NOT replay the last
- *     prompt — the next legitimate trigger fires on its own schedule.
- *   - Voice selection picks the first English voice available, falling
- *     back to the platform default. Most Android Capacitor WebViews
- *     surface Google's TTS voices; iOS will surface Siri voices when
- *     we ship to iOS.
+ * Primary path: Web Speech API (`window.speechSynthesis`). Works on
+ * every modern browser AND on the Capacitor Android WebView when the
+ * device has an active TTS engine (Google TTS, Samsung TTS, etc).
  *
- * SSR-safe: every function checks for `window` / `speechSynthesis`.
+ * Reliability path: if the optional Capacitor plugin
+ * `@capacitor-community/text-to-speech` is installed, we use it
+ * INSTEAD of Web Speech on native — that plugin talks directly to
+ * the Android TTS service and works even when the WebView's JS
+ * speechSynthesis is unreliable (which it often is on Samsung One UI).
+ *
+ * Behavior:
+ *   - `speak()` cancels any in-flight utterance before starting the
+ *     new one. Nav prompts never stack — if we're saying "In 200m,
+ *     turn right" and we're about to say "Now turn right", the new
+ *     one wins.
+ *   - `setMuted(true)` persists and cancels any current speech.
+ *   - Voice selection picks a US English voice when available.
+ *
+ * SSR-safe: every function checks for window before touching it.
+ *
+ * Diagnostic: every call logs `[nav-voice]` to console so adb logcat
+ * shows the path actually being used + the text being read.
  */
 
 const STORAGE_KEY = "rajlo_nav_voice_muted";
+const LOG_TAG = "[nav-voice]";
 
 /** True if the browser's speech synthesis is usable. */
-function isAvailable(): boolean {
+function isWebSpeechAvailable(): boolean {
   return (
     typeof window !== "undefined" &&
     typeof window.speechSynthesis !== "undefined"
   );
 }
 
-/** Read persisted mute state. Defaults to FALSE (voice on) — drivers
- *  expect a navigation app to talk by default, like Google Maps and
- *  Uber. They can mute via the floating button if they prefer. */
+/** Read persisted mute state. Defaults to FALSE (voice on). */
 export function isMuted(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -41,9 +48,7 @@ export function isMuted(): boolean {
   }
 }
 
-/** Persist mute state. Side-effect: cancels any in-flight utterance
- *  when muting so the driver doesn't have to listen to the rest of
- *  the prompt that was already mid-sentence. */
+/** Persist mute state; cancel any in-flight utterance when muting. */
 export function setMuted(muted: boolean): void {
   if (typeof window === "undefined") return;
   try {
@@ -54,63 +59,193 @@ export function setMuted(muted: boolean): void {
   if (muted) cancel();
 }
 
-/** Cached preferred voice. Picked lazily because voices load async
- *  on some platforms (Chrome fires "voiceschanged" after the first
- *  getVoices() call returns an empty list). */
+/* ─────────────── Capacitor TTS plugin path (preferred on native) ─────────────── */
+
+/** Optional Capacitor TTS plugin lookup. We detect the plugin via the
+ *  global `window.Capacitor.Plugins.TextToSpeech` rather than a static
+ *  import so:
+ *    1. The web bundle never tries to pull a native-only package
+ *    2. TypeScript doesn't need the package types installed
+ *    3. The driver-app build works whether or not the plugin has
+ *       been added to package.json yet
+ *  When the plugin IS installed + registered, this returns it. */
+type CapTts = {
+  speak: (opts: {
+    text: string;
+    lang?: string;
+    rate?: number;
+    pitch?: number;
+    volume?: number;
+  }) => Promise<void>;
+  stop: () => Promise<void>;
+};
+let capTtsChecked = false;
+let capTtsCached: CapTts | null = null;
+
+function getCapTts(): CapTts | null {
+  if (capTtsChecked) return capTtsCached;
+  capTtsChecked = true;
+  if (typeof window === "undefined") return null;
+  const cap = (
+    window as unknown as {
+      Capacitor?: {
+        isNativePlatform?: () => boolean;
+        Plugins?: { TextToSpeech?: CapTts };
+      };
+    }
+  ).Capacitor;
+  if (!cap?.isNativePlatform?.()) return null;
+  const tts = cap.Plugins?.TextToSpeech ?? null;
+  if (tts) {
+    // eslint-disable-next-line no-console
+    console.log(`${LOG_TAG} using Capacitor TTS plugin`);
+  }
+  capTtsCached = tts;
+  return tts;
+}
+
+/* ─────────────── Web Speech voice picking ─────────────── */
+
 let preferredVoice: SpeechSynthesisVoice | null = null;
-let voiceLookupDone = false;
+let voicesReadyPromise: Promise<void> | null = null;
+
+/** Returns a promise that resolves once the browser has loaded its
+ *  voice list. Some Android WebViews return an empty getVoices() on
+ *  first call and only populate after the `voiceschanged` event. */
+function whenVoicesReady(): Promise<void> {
+  if (voicesReadyPromise) return voicesReadyPromise;
+  voicesReadyPromise = new Promise<void>((resolve) => {
+    if (!isWebSpeechAvailable()) {
+      resolve();
+      return;
+    }
+    const synth = window.speechSynthesis;
+    if (synth.getVoices().length > 0) {
+      resolve();
+      return;
+    }
+    const handler = () => {
+      synth.removeEventListener("voiceschanged", handler);
+      resolve();
+    };
+    synth.addEventListener("voiceschanged", handler);
+    // Safety timeout — some WebViews never fire the event. After 2s
+    // resolve anyway; we'll fall back to the default voice (or no voice).
+    setTimeout(() => {
+      synth.removeEventListener("voiceschanged", handler);
+      resolve();
+    }, 2000);
+  });
+  return voicesReadyPromise;
+}
 
 function pickVoice(): SpeechSynthesisVoice | null {
-  if (!isAvailable()) return null;
-  if (voiceLookupDone) return preferredVoice;
+  if (preferredVoice) return preferredVoice;
+  if (!isWebSpeechAvailable()) return null;
   const voices = window.speechSynthesis.getVoices();
-  if (voices.length === 0) {
-    // Voices aren't ready yet — defer the pick. We'll retry on the
-    // next speak() call.
-    return null;
-  }
-  voiceLookupDone = true;
-  // Prefer en-US, then en-anything, then default.
+  if (voices.length === 0) return null;
   preferredVoice =
     voices.find((v) => v.lang === "en-US") ??
     voices.find((v) => v.lang.startsWith("en")) ??
     voices.find((v) => v.default) ??
     voices[0] ??
     null;
+  if (preferredVoice) {
+    // eslint-disable-next-line no-console
+    console.log(`${LOG_TAG} picked Web Speech voice: ${preferredVoice.name} (${preferredVoice.lang})`);
+  }
   return preferredVoice;
 }
 
-/** Speak a prompt. No-op when muted, when speech synthesis isn't
- *  available, or when called on the server. Cancels any prior
- *  utterance so prompts don't stack. */
-export function speak(text: string): void {
-  if (!isAvailable()) return;
+/* ─────────────── Public API ─────────────── */
+
+/** Speak a prompt. No-op when muted / unsupported / called server-side.
+ *  Cancels any prior utterance so prompts don't stack. */
+export async function speak(text: string): Promise<void> {
+  if (typeof window === "undefined") return;
   if (isMuted()) return;
-  if (!text.trim()) return;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  // Capacitor TTS plugin (preferred on Android if installed).
+  const capTts = getCapTts();
+  if (capTts) {
+    try {
+      // Stop any in-flight utterance first so prompts don't stack.
+      await capTts.stop().catch(() => null);
+      await capTts.speak({
+        text: trimmed,
+        lang: "en-US",
+        rate: 1.05,
+        pitch: 1.0,
+        volume: 1.0,
+      });
+      // eslint-disable-next-line no-console
+      console.log(`${LOG_TAG} spoke via Capacitor TTS: "${trimmed}"`);
+      return;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`${LOG_TAG} Capacitor TTS failed, falling back to Web Speech:`, err);
+    }
+  }
+
+  // Web Speech API fallback.
+  if (!isWebSpeechAvailable()) {
+    // eslint-disable-next-line no-console
+    console.warn(`${LOG_TAG} no TTS available (Web Speech missing + Capacitor plugin not installed)`);
+    return;
+  }
+  await whenVoicesReady();
   try {
     const synth = window.speechSynthesis;
-    // Cancel anything currently speaking or queued. Without this,
-    // rapidly-fired prompts stack up and the driver gets a stale
-    // instruction read out 10 seconds after they passed the turn.
     synth.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
+    const utter = new SpeechSynthesisUtterance(trimmed);
     const voice = pickVoice();
     if (voice) utter.voice = voice;
-    utter.rate = 1.05; // very slightly faster than default — feels more confident
+    utter.rate = 1.05;
     utter.pitch = 1.0;
     utter.volume = 1.0;
+    utter.lang = "en-US";
+    utter.onerror = (e) => {
+      // eslint-disable-next-line no-console
+      console.warn(`${LOG_TAG} Web Speech error:`, e.error);
+    };
     synth.speak(utter);
-  } catch {
-    /* swallow — speech synthesis errors are non-fatal */
+    // eslint-disable-next-line no-console
+    console.log(`${LOG_TAG} spoke via Web Speech: "${trimmed}"`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`${LOG_TAG} Web Speech failed:`, err);
   }
 }
 
 /** Cancel any speaking / queued utterance immediately. */
 export function cancel(): void {
-  if (!isAvailable()) return;
-  try {
-    window.speechSynthesis.cancel();
-  } catch {
-    /* swallow */
+  const capTts = getCapTts();
+  if (capTts) void capTts.stop().catch(() => null);
+  if (isWebSpeechAvailable()) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* swallow */
+    }
   }
+}
+
+/**
+ * Warm up the TTS engine. Some Android WebViews need a "primer" call
+ * (often inside a user gesture) before subsequent speak() calls
+ * actually produce audio. Call this once when the driver page mounts.
+ *
+ * Side-effect free if voice is already working OR if muted.
+ */
+export async function warmup(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (isMuted()) return;
+  // Trigger the voiceschanged-wait path eagerly so the first real
+  // speak() doesn't have to.
+  void whenVoicesReady();
+  // Probe the Capacitor plugin presence so the cached lookup is warm
+  // before the first incoming prompt.
+  getCapTts();
 }

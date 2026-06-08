@@ -306,6 +306,29 @@ function carIconSvg(rotationDeg: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 70 70"><defs><linearGradient id="b" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#a80000"/><stop offset="20%" stop-color="#dc0a0a"/><stop offset="50%" stop-color="#ff2828"/><stop offset="80%" stop-color="#dc0a0a"/><stop offset="100%" stop-color="#a80000"/></linearGradient><linearGradient id="w" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#3a4554"/><stop offset="100%" stop-color="#161b22"/></linearGradient><radialGradient id="s" cx="50%" cy="55%" r="50%"><stop offset="0%" stop-color="#000" stop-opacity="0.18"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient></defs><g transform="rotate(${rotationDeg} 35 35)"><ellipse cx="35" cy="38" rx="16" ry="26" fill="url(#s)"/><rect x="22" y="10" width="26" height="50" rx="13" fill="url(#b)"/><ellipse cx="35" cy="35" rx="9" ry="20" fill="#ff5050" opacity="0.16"/><path d="M24 19 Q35 17 46 19 L44 28 Q35 26 26 28 Z" fill="url(#w)"/><path d="M26 30 L28 30 L27 26 L26.5 26 Z" fill="#ffffff" opacity="0.28"/><path d="M26 42 Q35 40 44 42 L46 51 Q35 49 24 51 Z" fill="url(#w)"/><ellipse cx="20" cy="22" rx="1.6" ry="1.1" fill="#1a1a1a"/><ellipse cx="50" cy="22" rx="1.6" ry="1.1" fill="#1a1a1a"/><rect x="25" y="11" width="6" height="1.6" rx="0.8" fill="#fff5c0"/><rect x="39" y="11" width="6" height="1.6" rx="0.8" fill="#fff5c0"/><rect x="26" y="55" width="18" height="2" rx="1" fill="#ff2828"/><rect x="26" y="55" width="18" height="0.7" rx="0.3" fill="#ffffff" opacity="0.35"/></g></svg>`;
 }
 
+/**
+ * Nav-mode driver marker — same shape every nav app uses on Earth:
+ * a big circular puck in the brand colour with a chevron pointing
+ * the way the driver is heading. Replaces the small car icon during
+ * fullscreen turn-by-turn so the driver can read "which way am I
+ * pointing right now" from a thumb-glance at the screen.
+ *
+ * Visual recipe:
+ *   - 80×80 viewBox, rendered at 56×56 on screen (vs the car's 40×40)
+ *   - Rajlo red gradient circle, white 3px stroke for contrast on
+ *     any map tile colour
+ *   - White chevron (4-point arrow with center notch) pointing up
+ *     in the un-rotated frame
+ *   - Soft drop shadow underneath the puck
+ *
+ * Rotation is baked into the SVG via `<g transform="rotate(...)">`,
+ * same trick as the car icon. We bucket to 10° steps so the cache
+ * tops out at ≤36 entries no matter how often the heading wobbles.
+ */
+function navArrowIconSvg(rotationDeg: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#ff2828"/><stop offset="100%" stop-color="#c70000"/></linearGradient><radialGradient id="navs" cx="50%" cy="60%" r="50%"><stop offset="0%" stop-color="#000" stop-opacity="0.35"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient></defs><ellipse cx="40" cy="50" rx="30" ry="14" fill="url(#navs)"/><g transform="rotate(${rotationDeg} 40 40)"><circle cx="40" cy="40" r="28" fill="url(#navg)" stroke="#ffffff" stroke-width="3"/><path d="M40 18 L57 50 L40 41 L23 50 Z" fill="#ffffff"/></g></svg>`;
+}
+
 export function MapView({
   pickup,
   stops,
@@ -328,6 +351,7 @@ export function MapView({
   onDirectionsRoute,
   onUserDrag,
   recenterToken = 0,
+  floatingControlsBottomPx = 0,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -431,6 +455,12 @@ export function MapView({
    *  panned the map away. Any change (not just increment) re-triggers
    *  the recenter, so callers can use Date.now() or a counter freely. */
   recenterToken?: number;
+  /** Extra bottom inset (px) for floating controls (locate-me etc).
+   *  Lets the host page push the locate-me button above an overlay
+   *  card so it isn't covered. The card's height is measured by the
+   *  host (ResizeObserver) and passed through here — so when the
+   *  card expands, the locate-me follows. Defaults to 0. */
+  floatingControlsBottomPx?: number;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -676,16 +706,33 @@ export function MapView({
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (navMode) {
-      map.setOptions({ tilt: 45 });
-      // Street-level zoom — tight enough to see lane markings, loose
-      // enough to keep the next-turn intersection in view.
+      // Zoom BEFORE tilting — tilt is clamped to 0 at zoom < ~14 on
+      // every vector map. Without the zoom-first ordering, setTilt(45)
+      // silently rounds to 0 and the map stays flat.
       const currentZoom = map.getZoom() ?? 0;
-      if (currentZoom < 17) map.setZoom(17.5);
+      if (currentZoom < 17) map.setZoom(18);
+      // Explicit setTilt / setHeading rather than setOptions — the
+      // dedicated setters are what every Google docs example uses for
+      // vector tilt + rotation; they're also what the API treats as
+      // first-class programmatic camera commands. setOptions occasionally
+      // races with internal style loads.
+      map.setTilt(45);
       followModeRef.current = true;
+      // eslint-disable-next-line no-console
+      console.log(
+        "[MapView] nav mode ON — tilt=45, zoom=18, mapId=",
+        process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ? "set" : "MISSING",
+      );
     } else {
-      map.setOptions({ tilt: 0 });
+      map.setTilt(0);
       map.setHeading(0);
     }
+    // Invalidate the driver-icon bucket cache key on either direction
+    // of the toggle. Otherwise the next position update would skip
+    // setIcon (bucket unchanged) and the marker would stay on the
+    // wrong style — flat-map car shown in nav mode, or big red puck
+    // shown after the user backs out.
+    driverIconBucketRef.current = -1;
   }, [navMode, mapReady]);
 
   // Recenter token — any change re-engages follow mode and snaps the
@@ -749,9 +796,28 @@ export function MapView({
         // mapId is set. The Map ID styling is configurable from the
         // Cloud Console to match the Rajlo brand if desired.
         const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
+        if (!mapId) {
+          // Loud warning — without a Map ID we silently get the raster
+          // renderer, which ignores setTilt + setHeading, so nav-mode
+          // is just a flat top-down view. Surface this in the console
+          // so the issue is obvious from the WebView devtools.
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[MapView] NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID is not set. " +
+              "Map will render in raster mode — tilt + heading rotation " +
+              "won't work during in-app navigation. Set the env var to a " +
+              "vector-enabled Map ID from Google Cloud Console.",
+          );
+        }
         mapRef.current = new g.maps.Map(el, {
           center: JAMAICA_CENTER,
           zoom: 9,
+          // Declare tilt + heading in the constructor so the vector
+          // renderer registers them as settable. Setting via the
+          // constructor (vs. setOptions later) is what some Map ID
+          // versions need before they'll accept programmatic tilt.
+          tilt: 0,
+          heading: 0,
           disableDefaultUI: true,
           gestureHandling: "greedy",
           clickableIcons: false,
@@ -1218,12 +1284,19 @@ export function MapView({
         ? (((Math.round(heading / 10) * 10) % 360) + 360) % 360
         : 0;
 
+    // Pick the marker style: the big red nav puck during in-app
+    // navigation (matches what Google Maps / Apple Maps drivers expect
+    // — readable direction at a glance), the small detailed car
+    // everywhere else. Both rotate with heading.
+    const pickIcon = (h: number) =>
+      navMode ? buildNavArrowIcon(h) : buildCarIcon(h);
+
     if (!driverDotRef.current) {
       driverDotRef.current = new google.maps.Marker({
         map,
         position: pos,
         zIndex: 999,
-        icon: buildCarIcon(heading),
+        icon: pickIcon(heading),
         title: "Driver",
       });
       driverIconBucketRef.current = bucket;
@@ -1232,7 +1305,7 @@ export function MapView({
       // Only re-set the icon when the rotation bucket actually changed —
       // setIcon swaps the data URL and forces an image re-decode.
       if (driverIconBucketRef.current !== bucket) {
-        driverDotRef.current.setIcon(buildCarIcon(heading));
+        driverDotRef.current.setIcon(pickIcon(heading));
         driverIconBucketRef.current = bucket;
       }
     }
@@ -1992,7 +2065,9 @@ export function MapView({
       {/* Locate-me button. Mirrors Google Maps' standard control —
          tap to recenter the map on the current device location and
          zoom in. Hidden during the matcher search overlay (the radar
-         already locks the map) and while loading. */}
+         already locks the map) and while loading. The `bottom` offset
+         is dynamic: a host page can push the button up so it isn't
+         covered by an overlay card (NavTripCard during nav mode). */}
       {!loadError && !searching && (
         <button
           type="button"
@@ -2002,7 +2077,8 @@ export function MapView({
           }}
           disabled={locating}
           aria-label="Center map on my location"
-          className="absolute bottom-3 right-3 z-30 grid h-11 w-11 place-items-center rounded-full bg-rajlo-red text-white shadow-lg shadow-rajlo-red/40 transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-xl hover:shadow-rajlo-red/50 active:translate-y-0 disabled:opacity-70"
+          className="absolute right-3 z-30 grid h-11 w-11 place-items-center rounded-full bg-rajlo-red text-white shadow-lg shadow-rajlo-red/40 transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-xl hover:shadow-rajlo-red/50 active:translate-y-0 disabled:opacity-70"
+          style={{ bottom: `${12 + floatingControlsBottomPx}px` }}
         >
           {locating ? (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -2118,6 +2194,30 @@ function buildRiderIcon(bucket: number): google.maps.Icon {
 }
 
 const carIconCache = new Map<number, google.maps.Icon>();
+const navArrowIconCache = new Map<number, google.maps.Icon>();
+
+function buildNavArrowIcon(
+  heading: number | null | undefined,
+): google.maps.Icon {
+  const bucket =
+    typeof heading === "number"
+      ? ((Math.round(heading / 10) * 10) % 360 + 360) % 360
+      : 0;
+  const cached = navArrowIconCache.get(bucket);
+  if (cached) return cached;
+  const svg = navArrowIconSvg(bucket);
+  const icon: google.maps.Icon = {
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    // 56×56 rendered — meaningfully bigger than the 40×40 car so the
+    // driver can read direction at a thumb-glance during nav. The
+    // viewBox is 80 so every rotation angle stays inside the box and
+    // doesn't get clipped at diagonals.
+    scaledSize: new google.maps.Size(56, 56),
+    anchor: new google.maps.Point(28, 28),
+  };
+  navArrowIconCache.set(bucket, icon);
+  return icon;
+}
 function buildCarIcon(heading: number | null | undefined): google.maps.Icon {
   // Bucket to 10° increments and normalise into [0, 360).
   const bucket =
