@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
@@ -144,6 +145,7 @@ const STAGE_COPY = {
 };
 
 export default function DriverActiveTripPage() {
+  const router = useRouter();
   // Seed from the cross-page cache so a tab-switch back to /driver/active-trip
   // renders content instantly instead of flashing skeletons. The
   // background refresh below still re-fetches to stay accurate.
@@ -174,6 +176,11 @@ export default function DriverActiveTripPage() {
   // the driver taps "Start trip" on a PIN-required ride; cleared when
   // they verify, cancel, or the 3-strike auto-cancel fires.
   const [pinTargetId, setPinTargetId] = useState<string | null>(null);
+  // Complete-trip confirmation. Tapping "Complete trip" arms this so
+  // we get one explicit "yes, end this now" before charging the rider
+  // and closing the ride out — completion is irreversible.
+  const [completeConfirmFor, setCompleteConfirmFor] =
+    useState<string | null>(null);
   // No-show confirmation. Tapping "Rider didn't show up" arms this so
   // the driver gets a clear "the rider will be charged" confirmation
   // before the no-show fee actually fires.
@@ -236,25 +243,15 @@ export default function DriverActiveTripPage() {
   // route fetch — without this, the banner would flash empty for the
   // 1-2 seconds between mount and the first Directions response.
   const navHasRoute = !!navSnapshot.currentStep;
-  // Fullscreen nav surface — auto-engaged the first time the route
-  // resolves on this page mount, and persisted until the driver
-  // explicitly taps Minimize. The minimized state surfaces a
-  // "Resume navigation" pill so the driver can pop back into it.
-  const [navFullscreen, setNavFullscreen] = useState(true);
-  // Re-fullscreen when the trip transitions to a new leg (pickup →
-  // dropoff). The route changes, the snapshot resets, the driver
-  // probably wants the immersive view back. We track the LAST seen
-  // status in a ref so we only re-open on actual transitions, not on
-  // every re-render of the page.
-  const lastNavStatusRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!navHasRoute) return;
-    const status = data?.ride?.status ?? null;
-    if (lastNavStatusRef.current !== status) {
-      lastNavStatusRef.current = status;
-      setNavFullscreen(true);
-    }
-  }, [navHasRoute, data?.ride?.status]);
+  // The fullscreen nav surface is locked-on whenever there's a route
+  // to follow. No user-controlled minimize during a live trip — the
+  // driver's only escape hatch is the top-left Back button, which
+  // hands them back to wherever they came from. This matches the
+  // operational rule "no half-attended in-app nav on a real trip".
+  //
+  // `navFullscreen` is derived (not state) so we can never get into
+  // an inconsistent "I have a route but I'm minimized" state.
+  const navFullscreen = navHasRoute;
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -805,6 +802,21 @@ export default function DriverActiveTripPage() {
           />
           {navHasRoute && (
             <>
+              {/* Top-left Back button. Only escape hatch out of the
+                 fullscreen nav during a live trip — drivers can pop
+                 back to the previous screen (dashboard, requests
+                 inbox, etc.) without disturbing the trip itself. The
+                 trip stays alive server-side; this is purely a
+                 navigation action on the driver's device. */}
+              <button
+                type="button"
+                onClick={() => router.back()}
+                aria-label="Back"
+                className="pointer-events-auto absolute left-3 z-40 grid h-10 w-10 place-items-center rounded-full bg-white text-rajlo-black shadow-lg ring-1 ring-black/5 transition-transform active:scale-95"
+                style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+              >
+                <Icon name="chevron-left" className="h-5 w-5" />
+              </button>
               <NavBanner snapshot={navSnapshot} />
               <NavControls
                 cameraDisengaged={cameraDisengaged}
@@ -814,9 +826,9 @@ export default function DriverActiveTripPage() {
                 }}
                 muted={voiceMuted}
                 onToggleMute={handleToggleVoice}
-                onMinimize={
-                  navFullscreen ? () => setNavFullscreen(false) : undefined
-                }
+                // Deliberately no onMinimize — drivers can't collapse
+                // the nav mid-trip. Back button at top-left lets them
+                // navigate away if they really need to.
               />
               <NavTripCard
                 snapshot={navSnapshot}
@@ -841,6 +853,12 @@ export default function DriverActiveTripPage() {
                     !data?.ride?.pin?.verified
                   ) {
                     setPinTargetId(ride.id);
+                    return;
+                  }
+                  // Complete-trip is one-way (charges the rider, closes
+                  // out the ride). Always confirm before firing.
+                  if (stage.actionAction === "complete") {
+                    setCompleteConfirmFor(ride.id);
                     return;
                   }
                   handleAction(
@@ -1223,6 +1241,10 @@ export default function DriverActiveTripPage() {
                 setPinTargetId(ride.id);
                 return;
               }
+              if (stage.actionAction === "complete") {
+                setCompleteConfirmFor(ride.id);
+                return;
+              }
               handleAction(ride.id, stage.actionAction, ride.estimatedFareJMD);
             }}
             disabled={acting}
@@ -1319,33 +1341,58 @@ export default function DriverActiveTripPage() {
       {/* The chat launcher (icon + sheet + toast) lives inside the
          rider card above. Nothing more to mount here. */}
 
-      {/* Floating "Resume navigation" pill — surfaces when the nav is
-         active but the driver has minimized it to read the rider/trip
-         details. One tap pops back into the fullscreen nav so they
-         don't have to dig through any menu. The next-turn distance is
-         shown right on the pill so they're never blind to what's
-         coming next while reading the page. */}
-      {navHasRoute && !navFullscreen && (
-        <button
-          type="button"
-          onClick={() => setNavFullscreen(true)}
-          className="fixed inset-x-4 z-30 flex items-center gap-3 rounded-2xl bg-[#0E4D4A] px-4 py-3 text-left text-white shadow-2xl ring-1 ring-black/20 transition-transform active:scale-[0.99]"
-          style={{
-            bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
-          }}
-        >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/15">
-            <Icon name="navigation" className="h-5 w-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[10px] font-bold uppercase tracking-wider text-white/70">
-              Navigation active · tap to resume
-            </span>
-            <span className="block truncate text-sm font-bold">
-              {navSnapshot.currentStep?.instruction ?? "Continue on route"}
-            </span>
-          </span>
-        </button>
+      {/* Complete-trip confirmation. Completion is irreversible (the
+         rider is charged, the wallet credit posts to the driver, the
+         ride row is finalised) so we always front it with a one-tap
+         "yes I'm done". Confirm fires handleAction; Cancel just
+         closes the dialog. */}
+      {completeConfirmFor && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-rajlo-black/60 p-4 backdrop-blur-sm md:items-center">
+          <div className="w-full max-w-md space-y-4 rounded-3xl bg-surface p-5 shadow-2xl md:p-6">
+            <div>
+              <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                Complete trip
+              </p>
+              <h2 className="mt-1 text-xl font-extrabold tracking-tight">
+                Are you sure you want to complete this trip?
+              </h2>
+              <p className="mt-2 text-sm text-muted">
+                Tapping Complete charges the rider {formatJMD(ride.estimatedFareJMD)} and ends the trip. You can&apos;t undo it.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setCompleteConfirmFor(null)}
+                disabled={acting}
+                className="inline-flex w-full items-center justify-center rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                Not yet
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const rideId = completeConfirmFor;
+                  setCompleteConfirmFor(null);
+                  void handleAction(
+                    rideId,
+                    "complete",
+                    ride.estimatedFareJMD,
+                  );
+                }}
+                disabled={acting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {acting ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <Icon name="check-circle" className="h-4 w-4" />
+                )}
+                Yes, complete trip
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <CancelReasonDialog

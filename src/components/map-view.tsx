@@ -246,6 +246,48 @@ function fullRoutePath(
   return path.length > 1 ? path : route.overview_path;
 }
 
+/**
+ * Sum of leg durations on a Directions route, preferring the
+ * traffic-adjusted figure when Google returns one. Used to pick the
+ * best route from the alternatives the Directions API returns.
+ *
+ * `duration_in_traffic` is only populated when the request includes
+ * `drivingOptions: { departureTime, trafficModel }` and Google has
+ * live traffic data for the area (Jamaica is well-covered). When it
+ * isn't populated we fall back to the static duration so the picker
+ * still works in low-data scenarios.
+ */
+function totalDurationSeconds(route: google.maps.DirectionsRoute): number {
+  let s = 0;
+  for (const leg of route.legs ?? []) {
+    s += leg.duration_in_traffic?.value ?? leg.duration?.value ?? 0;
+  }
+  return s;
+}
+
+/**
+ * Pick the fastest route from a Directions response. Google sorts
+ * alternatives heuristically but the first entry isn't always the
+ * shortest under live traffic — explicit pick-by-duration gives us
+ * a deterministic "best route" the driver can trust.
+ */
+function pickFastestRoute(
+  routes: google.maps.DirectionsRoute[],
+): google.maps.DirectionsRoute | null {
+  if (!routes || routes.length === 0) return null;
+  let best = routes[0];
+  let bestDur = totalDurationSeconds(best);
+  for (let i = 1; i < routes.length; i++) {
+    const candidate = routes[i];
+    const dur = totalDurationSeconds(candidate);
+    if (dur > 0 && dur < bestDur) {
+      best = candidate;
+      bestDur = dur;
+    }
+  }
+  return best;
+}
+
 // Sleek top-down car icon — Bolt-style minimalist. A smooth rounded-pill
 // body in Rajlo red with subtle horizontal gradient (left/right edges
 // shaded slightly darker than the centre for a "polished metal"
@@ -907,10 +949,22 @@ export function MapView({
         // Don't reorder — the rider's stop sequence is intentional (e.g.
         // pickup BBQ before dropping the friend at home).
         optimizeWaypoints: false,
+        // Traffic-aware routing. Google returns the fastest route given
+        // the live traffic model for the requested departure time
+        // (now). Without this the API may return a shorter-distance
+        // route that's actually slower in rush-hour conditions.
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: google.maps.TrafficModel.BEST_GUESS,
+        },
+        // NB: alternatives aren't returned when waypoints are present
+        // (Google API restriction), so we don't request them here.
+        // The live route fetch below DOES request alternatives + picks
+        // the fastest, which is the path drivers actually navigate by.
       })
       .then((response) => {
         if (cancelled) return;
-        const route = response.routes[0];
+        const route = pickFastestRoute(response.routes ?? []);
         if (!route) {
           drawStraightLineFallback();
           return;
@@ -1074,10 +1128,20 @@ export function MapView({
         origin: driverLatLng,
         destination: { lat: target.lat, lng: target.lng },
         travelMode: google.maps.TravelMode.DRIVING,
+        // Pull multiple candidate routes and pick the fastest below.
+        // Google's first entry IS usually optimal but explicit
+        // selection by traffic-adjusted duration guarantees we surface
+        // the genuinely-shortest path to the driver, even when the
+        // API's heuristic ranking favours something slightly slower.
+        provideRouteAlternatives: true,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: google.maps.TrafficModel.BEST_GUESS,
+        },
       })
       .then((response) => {
         if (cancelled) return;
-        const route = response.routes[0];
+        const route = pickFastestRoute(response.routes ?? []);
         if (!route) return;
         // Replace previous live polyline segments with the new gradient
         // strip. driver→target reads brand red at the car, deepening
@@ -1506,6 +1570,13 @@ export function MapView({
             waypoints,
             travelMode: google.maps.TravelMode.DRIVING,
             optimizeWaypoints: false, // preserve leg order
+            // Traffic-aware so the corridor preview matches the
+            // actual road path drivers would take right now, not a
+            // theoretical free-flow route.
+            drivingOptions: {
+              departureTime: new Date(),
+              trafficModel: google.maps.TrafficModel.BEST_GUESS,
+            },
           },
           (result, status) => {
             if (
@@ -1520,7 +1591,8 @@ export function MapView({
             // private-ride polyline via fullRoutePath()) instead of
             // overview_path, which drops vertices and "cuts corners"
             // on long corridors.
-            const route = result.routes[0];
+            const route = pickFastestRoute(result.routes ?? []);
+            if (!route) return;
             const points: { lat: number; lng: number }[] = [];
             for (const leg of route.legs ?? []) {
               for (const step of leg.steps ?? []) {

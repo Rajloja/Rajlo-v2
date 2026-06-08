@@ -1561,3 +1561,263 @@ export async function sendDriverHailCompletedEmail(
   const t = driverHailCompletedTemplate(args);
   return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PAYOUTS — driver bank-account withdrawals (Friday-batch workflow).
+
+   Four emails:
+     P1. OTP — sent immediately on payout request, driver enters code
+         to verify.
+     P2. Requested — sent after OTP verification + wallet debit, tells
+         the driver their request is in the queue for the next Friday
+         batch.
+     P3. Paid — sent after the admin marks the batch (or row) paid,
+         once the bank has confirmed the credit.
+     P4. Excluded — sent when the admin opts the driver out of a batch
+         (manual review, name mismatch, etc.). Supports a custom
+         message so the admin can explain the specific issue.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── P1. Driver — payout OTP ── */
+
+export function walletPayoutOtpTemplate(args: {
+  code: string;
+  amountJmd: number;
+  bankLabel: string;
+  expiresInMinutes: number;
+  driverName?: string | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Your Rajlo payout code: ${args.code}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, you've requested a payout of ${JMD(args.amountJmd)} to ${args.bankLabel}. Use the code below to confirm.`,
+    },
+    {
+      type: "code",
+      value: args.code,
+      description: `Expires in ${args.expiresInMinutes} minutes.`,
+    },
+    {
+      type: "highlight",
+      tone: "warning",
+      eyebrow: "Didn't request a payout?",
+      text: "Don't share this code with anyone. The request is not yet processed — close this email and the request will expire on its own.",
+    },
+    {
+      type: "footnote",
+      text: "Rajlo will never ask you to read out a code over the phone. If anyone — including someone claiming to be Rajlo support — does, end the call.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `Confirm your ${JMD(args.amountJmd)} payout to ${args.bankLabel}.`,
+    eyebrow: "Payout verification",
+    title: "Confirm your payout",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, your Rajlo payout code is: ${args.code}`,
+    `Withdrawing ${JMD(args.amountJmd)} to ${args.bankLabel}.`,
+    `This code expires in ${args.expiresInMinutes} minutes.`,
+    "If you didn't request this, do not share the code. The request will expire on its own.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendWalletPayoutOtpEmail(
+  to: string,
+  args: Parameters<typeof walletPayoutOtpTemplate>[0],
+) {
+  const t = walletPayoutOtpTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── P2. Driver — payout requested (queued for next batch) ── */
+
+export function walletPayoutRequestedTemplate(args: {
+  amountJmd: number;
+  bankName: string;
+  accountLast4: string;
+  driverName?: string | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Payout requested · ${JMD(args.amountJmd)}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, your ${JMD(args.amountJmd)} payout request is in. We process payouts in batches each Friday, so funds typically land in your bank account the following week.`,
+    },
+    {
+      type: "card",
+      title: "Payout details",
+      rows: [
+        { label: "Amount", value: JMD(args.amountJmd), emphasize: true },
+        { label: "Bank", value: args.bankName },
+        { label: "Account", value: `••••${args.accountLast4}` },
+        { label: "Status", value: "Queued for next batch" },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "Need to cancel?",
+      text: "You can cancel from your Rajlo wallet any time before the Friday batch is processed. The funds go straight back into your wallet balance.",
+    },
+    { type: "cta", href: `${APP_URL}/driver/earnings`, label: "Open earnings" },
+  ];
+
+  const html = renderEmail({
+    preheader: `${JMD(args.amountJmd)} queued for the next bank batch.`,
+    eyebrow: "Payout requested",
+    title: "Your payout is in the queue",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, your ${JMD(args.amountJmd)} Rajlo payout request is in.`,
+    `Bank: ${args.bankName} · ••••${args.accountLast4}.`,
+    "Processed Fridays in batch — funds usually land the following week.",
+    `Open earnings: ${APP_URL}/driver/earnings`,
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendWalletPayoutRequestedEmail(
+  to: string,
+  args: Parameters<typeof walletPayoutRequestedTemplate>[0],
+) {
+  const t = walletPayoutRequestedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── P3. Driver — payout paid (bank confirmed) ── */
+
+export function walletPayoutPaidTemplate(args: {
+  amountJmd: number;
+  bankName: string;
+  accountLast4: string;
+  bankReference?: string | null;
+  driverName?: string | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Payout sent · ${JMD(args.amountJmd)}`;
+
+  const rows = [
+    { label: "Amount", value: JMD(args.amountJmd), emphasize: true },
+    { label: "Bank", value: args.bankName },
+    { label: "Account", value: `••••${args.accountLast4}` },
+  ];
+  if (args.bankReference) {
+    rows.push({ label: "Bank reference", value: args.bankReference });
+  }
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, your payout of ${JMD(args.amountJmd)} has been sent to your bank. Funds should appear within the next 1–2 business days depending on your bank.`,
+    },
+    { type: "card", title: "Payout receipt", rows },
+    { type: "cta", href: `${APP_URL}/driver/earnings`, label: "Open earnings" },
+    {
+      type: "footnote",
+      text: "If the funds don't appear within 3 business days, reply to this email with the bank reference above and we'll trace it with the bank.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `${JMD(args.amountJmd)} sent to ${args.bankName}.`,
+    eyebrow: "Payout sent",
+    title: "Payout on its way",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, your ${JMD(args.amountJmd)} Rajlo payout has been sent.`,
+    `Bank: ${args.bankName} · ••••${args.accountLast4}.`,
+    args.bankReference ? `Reference: ${args.bankReference}` : "",
+    "Funds typically land within 1–2 business days.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendWalletPayoutPaidEmail(
+  to: string,
+  args: Parameters<typeof walletPayoutPaidTemplate>[0],
+) {
+  const t = walletPayoutPaidTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ── P4. Driver — payout excluded (admin opt-out) ── */
+
+export function walletPayoutExcludedTemplate(args: {
+  amountJmd: number;
+  bankName: string;
+  reason: string;
+  /** Optional admin-authored message replacing the default body copy.
+   *  Used when the admin wants to explain the specific issue (e.g.
+   *  "Account number mismatch — please update your bank details"). */
+  customMessage?: string | null;
+  driverName?: string | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Payout held · ${JMD(args.amountJmd)} returned to your wallet`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text:
+        args.customMessage && args.customMessage.trim().length > 0
+          ? `Hi ${first}, ${args.customMessage.trim()}`
+          : `Hi ${first}, your ${JMD(args.amountJmd)} payout request to ${args.bankName} couldn't be processed in this batch. The funds have been returned to your Rajlo wallet so you can request again.`,
+    },
+    {
+      type: "card",
+      title: "What we held",
+      rows: [
+        { label: "Amount returned", value: JMD(args.amountJmd), emphasize: true },
+        { label: "Bank", value: args.bankName },
+        { label: "Reason", value: args.reason },
+      ],
+    },
+    {
+      type: "highlight",
+      tone: "warning",
+      eyebrow: "What to do next",
+      text: "Check your bank details on file in the Rajlo app, fix anything that's incorrect, and request the payout again. If you're not sure what to fix, reply to this email and our team will help.",
+    },
+    { type: "cta", href: `${APP_URL}/driver/earnings`, label: "Open earnings" },
+  ];
+
+  const html = renderEmail({
+    preheader: `${JMD(args.amountJmd)} returned to your wallet — payout held.`,
+    eyebrow: "Payout held",
+    title: "Your payout couldn't be sent",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, your ${JMD(args.amountJmd)} payout to ${args.bankName} was held.`,
+    `Reason: ${args.reason}`,
+    args.customMessage ? `\n${args.customMessage}\n` : "",
+    "The funds are back in your Rajlo wallet. Update your bank details and try again.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendWalletPayoutExcludedEmail(
+  to: string,
+  args: Parameters<typeof walletPayoutExcludedTemplate>[0],
+) {
+  const t = walletPayoutExcludedTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}

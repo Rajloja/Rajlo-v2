@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
@@ -355,11 +355,11 @@ function WithdrawalRow({
 }) {
   const [busy, setBusy] = useState(false);
   const cancel = async () => {
-    if (!confirm(`Cancel this withdrawal? The amount returns to your wallet.`))
+    if (!confirm(`Cancel this payout? The amount returns to your wallet.`))
       return;
     setBusy(true);
     try {
-      await fetch(`/api/wallet/withdraw/${w.id}`, { method: "DELETE" });
+      await fetch(`/api/wallet/withdraw/${w.id}/cancel`, { method: "POST" });
       onCancelled();
     } finally {
       setBusy(false);
@@ -409,6 +409,23 @@ function WithdrawalRow({
 
 /* ─────────── Withdraw composer ─────────── */
 
+/**
+ * Two-step payout composer:
+ *   1. Amount entry → POST /api/wallet/withdraw → server issues an
+ *      email OTP and we switch into step 2.
+ *   2. OTP entry → POST /api/wallet/withdraw/[id]/verify → server
+ *      debits the wallet, flips the row to 'pending', confirms.
+ *
+ * Bank fields aren't asked for here — they come from the driver's
+ * saved payout_method (via /driver/wallet/bank). On mount we fetch
+ * the method; if there's none, we show a CTA to set it up first.
+ */
+type SavedMethod = {
+  bank_name: string;
+  account_number: string;
+  account_holder_name: string;
+};
+
 function WithdrawComposer({
   balance,
   onClose,
@@ -418,25 +435,41 @@ function WithdrawComposer({
   onClose: () => void;
   onSubmitted: () => void;
 }) {
+  const [method, setMethod] = useState<SavedMethod | null>(null);
+  const [methodLoading, setMethodLoading] = useState(true);
   const [amount, setAmount] = useState("");
-  const [bankName, setBankName] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [holder, setHolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Step 2 state — populated once the OTP is issued.
+  const [withdrawalId, setWithdrawalId] = useState<string | null>(null);
+  const [otp, setOtp] = useState("");
 
-  const submit = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/driver/payout-method");
+        const json = (await res.json().catch(() => ({}))) as {
+          method?: SavedMethod | null;
+        };
+        if (!cancelled) setMethod(json.method ?? null);
+      } finally {
+        if (!cancelled) setMethodLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const requestOtp = async () => {
     const amountJmd = parseInt(amount, 10);
     if (!Number.isInteger(amountJmd) || amountJmd < 500) {
-      setError("Minimum withdrawal is JMD 500.");
+      setError("Minimum payout is JMD 500.");
       return;
     }
     if (amountJmd > balance) {
       setError(`You only have ${formatJMD(balance)} available.`);
-      return;
-    }
-    if (!bankName || !accountNumber || !holder) {
-      setError("Fill in every bank field.");
       return;
     }
     setBusy(true);
@@ -445,18 +478,43 @@ function WithdrawComposer({
       const res = await fetch("/api/wallet/withdraw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amountJmd,
-          bankName,
-          bankAccountNumber: accountNumber,
-          accountHolderName: holder,
-        }),
+        body: JSON.stringify({ amountJmd }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        withdrawalId?: string;
+      };
+      if (!res.ok) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`);
+      if (!json.withdrawalId) throw new Error("Server didn't return a request id.");
+      setWithdrawalId(json.withdrawalId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't start payout.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!withdrawalId) return;
+    const code = otp.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/wallet/withdraw/${withdrawalId}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       onSubmitted();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Withdrawal failed.");
+      setError(e instanceof Error ? e.message : "Verification failed.");
     } finally {
       setBusy(false);
     }
@@ -467,9 +525,11 @@ function WithdrawComposer({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-            Withdraw
+            Payout
           </p>
-          <p className="mt-1 text-sm font-extrabold">Send to your bank</p>
+          <p className="mt-1 text-sm font-extrabold">
+            {withdrawalId ? "Enter your verification code" : "Send to your bank"}
+          </p>
         </div>
         <button
           type="button"
@@ -479,58 +539,114 @@ function WithdrawComposer({
           <Icon name="x" className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Field label="Amount (JMD)">
-          <input
-            type="number"
-            min={500}
-            max={balance}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base font-extrabold focus:border-rajlo-red focus:outline-none"
-          />
-        </Field>
-        <Field label="Bank">
-          <input
-            value={bankName}
-            onChange={(e) => setBankName(e.target.value)}
-            placeholder="e.g. NCB, Scotiabank"
-            className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm focus:border-rajlo-red focus:outline-none"
-          />
-        </Field>
-        <Field label="Account number">
-          <input
-            value={accountNumber}
-            onChange={(e) =>
-              setAccountNumber(e.target.value.replace(/[^0-9-]/g, ""))
-            }
-            className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm focus:border-rajlo-red focus:outline-none"
-          />
-        </Field>
-        <Field label="Account holder name">
-          <input
-            value={holder}
-            onChange={(e) => setHolder(e.target.value)}
-            className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm focus:border-rajlo-red focus:outline-none"
-          />
-        </Field>
-      </div>
-      <p className="mt-2 text-[11px] text-muted">
-        Funds leave your wallet immediately; the bank transfer is sent manually
-        by Rajlo within 1 business day. Cancel to refund anytime before
-        processing starts.
-      </p>
-      {error && (
-        <p className="mt-2 text-xs font-semibold text-rajlo-red">{error}</p>
+
+      {/* ── No bank on file → CTA to add one ── */}
+      {!methodLoading && !method && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+          <p className="text-sm font-bold text-amber-900">
+            Save your bank account first
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            We need to know where to send the money. It takes a minute and you
+            only have to do it once.
+          </p>
+          <Link
+            href="/driver/wallet/bank"
+            className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700"
+          >
+            <Icon name="arrow-right" className="h-3.5 w-3.5" />
+            Add bank account
+          </Link>
+        </div>
       )}
-      <button
-        type="button"
-        onClick={submit}
-        disabled={busy}
-        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-rajlo-red px-5 py-2.5 text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:bg-primary-hover disabled:opacity-60"
-      >
-        {busy ? "Submitting…" : "Request withdrawal"}
-      </button>
+
+      {/* ── Step 1: amount entry ── */}
+      {!methodLoading && method && !withdrawalId && (
+        <>
+          <div className="mt-3 rounded-xl border border-line bg-surface px-3 py-2.5 text-xs">
+            <span className="font-bold uppercase tracking-wider text-muted">
+              Destination
+            </span>
+            <p className="mt-1 text-sm font-bold text-foreground">
+              {method.bank_name} · ••••{method.account_number.slice(-4)}
+            </p>
+            <Link
+              href="/driver/wallet/bank"
+              className="text-[11px] font-bold text-rajlo-red hover:underline"
+            >
+              Change bank account
+            </Link>
+          </div>
+          <Field label="Amount (JMD)">
+            <input
+              type="number"
+              min={500}
+              max={balance}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base font-extrabold focus:border-rajlo-red focus:outline-none"
+            />
+          </Field>
+          <p className="mt-2 text-[11px] text-muted">
+            We'll email you a 6-digit code to confirm. Once verified, the funds
+            leave your wallet and are sent to your bank in the next Friday
+            batch (typically arrives the following week).
+          </p>
+          {error && (
+            <p className="mt-2 text-xs font-semibold text-rajlo-red">{error}</p>
+          )}
+          <button
+            type="button"
+            onClick={requestOtp}
+            disabled={busy}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-rajlo-red px-5 py-2.5 text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:bg-primary-hover disabled:opacity-60"
+          >
+            {busy ? "Sending code…" : "Send verification code"}
+          </button>
+        </>
+      )}
+
+      {/* ── Step 2: OTP entry ── */}
+      {withdrawalId && (
+        <>
+          <p className="mt-3 text-xs text-muted">
+            We sent a 6-digit code to your email. Enter it here to confirm the
+            payout of <strong>{formatJMD(parseInt(amount, 10) || 0)}</strong>.
+          </p>
+          <Field label="6-digit code">
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ""))}
+              className="w-full rounded-xl border border-line bg-surface px-3 py-3 text-center text-2xl font-extrabold tracking-[0.4em] focus:border-rajlo-red focus:outline-none"
+            />
+          </Field>
+          {error && (
+            <p className="mt-2 text-xs font-semibold text-rajlo-red">{error}</p>
+          )}
+          <button
+            type="button"
+            onClick={verifyOtp}
+            disabled={busy || otp.length !== 6}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-rajlo-red px-5 py-2.5 text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:bg-primary-hover disabled:opacity-60"
+          >
+            {busy ? "Verifying…" : "Confirm payout"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setWithdrawalId(null);
+              setOtp("");
+              setError(null);
+            }}
+            className="mt-2 w-full text-[11px] font-bold uppercase tracking-wider text-muted hover:text-rajlo-red"
+          >
+            Back · change amount
+          </button>
+        </>
+      )}
     </div>
   );
 }
