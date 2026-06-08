@@ -10,10 +10,16 @@ import { ChatLauncher } from "@/components/chat-launcher";
 import { CallButton } from "@/components/call-button";
 import { CancelReasonDialog } from "@/components/cancel-reason-dialog";
 import { PinEntryDialog } from "@/components/pin-entry-dialog";
+import { NavBanner } from "@/components/nav/nav-banner";
+import { NavControls } from "@/components/nav/nav-controls";
+import { NavTripCard } from "@/components/nav/nav-trip-card";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useRidePosition } from "@/lib/use-ride-position";
 import { useLocationViolationMonitor } from "@/lib/use-location-violation-monitor";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
+import { useTurnByTurn } from "@/lib/use-turn-by-turn";
+import * as navVoice from "@/lib/nav-voice";
+import type { DirectionsRoute } from "@/lib/turn-by-turn";
 import { formatJMD, type Place } from "@/lib/jamaica";
 import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
 import { describeEndedTrip } from "@/lib/ride-ended";
@@ -186,6 +192,50 @@ export default function DriverActiveTripPage() {
     "driver",
     /* streamSelf */ true,
   );
+
+  // ─── In-app turn-by-turn navigation state ───
+  // The driver's primary surface during an active trip is the
+  // top-of-screen instruction banner + voice prompts + map camera
+  // that follows their heading — same shape as the Uber driver app.
+  // Enabled for solo trips (carpool has a multi-stop tour that
+  // doesn't reduce to a single driver→target nav session).
+  const [directionsRoute, setDirectionsRoute] =
+    useState<DirectionsRoute | null>(null);
+  // True after the driver manually drags the map. Surfaces the
+  // Recenter button in NavControls. Reset when the user taps it.
+  const [cameraDisengaged, setCameraDisengaged] = useState(false);
+  // Bumped to re-engage camera-follow inside MapView — any change to
+  // this value triggers MapView's recenter effect.
+  const [recenterToken, setRecenterToken] = useState(0);
+  // Voice mute state mirrored from localStorage. Updated via the
+  // floating button in NavControls.
+  const [voiceMuted, setVoiceMuted] = useState(() => navVoice.isMuted());
+  const handleToggleVoice = () => {
+    const next = !voiceMuted;
+    navVoice.setMuted(next);
+    setVoiceMuted(next);
+  };
+  // Target for the in-app nav — flips from pickup to dropoff as soon
+  // as the trip starts. Read off whichever copy of `ride` is loaded
+  // (or default to "pickup" before data arrives so the hook stays
+  // stable across mount → first fetch).
+  const navTarget: "pickup" | "dropoff" =
+    data?.ride?.status === "in_progress" ? "dropoff" : "pickup";
+  // Carpool trips have a multi-stop tour rather than a single
+  // driver→target nav session. The hook stays mounted (rules-of-hooks)
+  // but disabled until carpool resolves false.
+  const navEnabled =
+    !!data?.ride && !!driverPosition && !data?.carpool;
+  const navSnapshot = useTurnByTurn({
+    route: directionsRoute,
+    position: driverPosition,
+    enabled: navEnabled,
+    target: navTarget,
+  });
+  // Nav UI is only painted once we have a real first step from the
+  // route fetch — without this, the banner would flash empty for the
+  // 1-2 seconds between mount and the first Directions response.
+  const navHasRoute = !!navSnapshot.currentStep;
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -686,14 +736,19 @@ export default function DriverActiveTripPage() {
       )}
 
       <FadeUp delay={0.05}>
-        <div className="overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/[0.04]">
+        <div className="relative overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/[0.04]">
           {/* The map is the driver's primary navigation surface — give
              it real viewport real-estate. Live-route mode draws the
              on-the-road line from the driver's current position to
              pickup (accepted/arrived) or dropoff (in_progress).
              Disabled for carpool: the route is a 4-point tour (two
              pickups + two dropoffs) rather than a single driver→target
-             line, so we fall back to the static-route polyline. */}
+             line, so we fall back to the static-route polyline.
+
+             When the solo-trip nav engages (navEnabled + a fetched
+             route), MapView switches into navMode — tilt + heading
+             follow + camera pinned to the lower third — and we paint
+             the NavBanner / NavControls / NavTripCard over the top. */}
           <MapView
             viewer="driver"
             pickup={mapPickup}
@@ -708,8 +763,120 @@ export default function DriverActiveTripPage() {
                 ? { target: "dropoff" }
                 : { target: "pickup" }
             }
+            navMode={navEnabled}
+            onDirectionsRoute={setDirectionsRoute}
+            onUserDrag={() => setCameraDisengaged(true)}
+            recenterToken={recenterToken}
             className="h-[55vh] min-h-[20rem] w-full md:h-[60vh] md:max-h-[640px]"
           />
+          {navHasRoute && (
+            <>
+              <NavBanner snapshot={navSnapshot} />
+              <NavControls
+                cameraDisengaged={cameraDisengaged}
+                onRecenter={() => {
+                  setCameraDisengaged(false);
+                  setRecenterToken((t) => t + 1);
+                }}
+                muted={voiceMuted}
+                onToggleMute={handleToggleVoice}
+              />
+              <NavTripCard
+                snapshot={navSnapshot}
+                headline={`${
+                  navTarget === "pickup" ? "Pick up" : "Drop off"
+                } ${rider?.name ?? "rider"}`}
+                addressLine={
+                  navTarget === "pickup"
+                    ? ride.pickup.address
+                    : ride.dropoff.address
+                }
+                actionLabel={stage.actionLabel}
+                actionVariant={
+                  ride.status === "in_progress" ? "success" : "primary"
+                }
+                actionDisabled={acting}
+                acting={acting}
+                onAction={() => {
+                  if (
+                    stage.actionAction === "start" &&
+                    data?.ride?.pin?.required &&
+                    !data?.ride?.pin?.verified
+                  ) {
+                    setPinTargetId(ride.id);
+                    return;
+                  }
+                  handleAction(
+                    ride.id,
+                    stage.actionAction,
+                    ride.estimatedFareJMD,
+                  );
+                }}
+                expandedChildren={
+                  <>
+                    {ride.status !== "in_progress" && (
+                      <button
+                        type="button"
+                        onClick={() => handleCancel(ride.id)}
+                        disabled={acting}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted transition-colors hover:bg-surface-soft hover:text-rajlo-red disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Icon name="x" className="h-4 w-4" />
+                        Cancel ride
+                      </button>
+                    )}
+                    {ride.status === "arrived" && !noShowReady && (
+                      <div className="flex items-center justify-center gap-2 rounded-full border border-line bg-surface-soft px-5 py-2.5 text-xs font-bold text-muted">
+                        <Icon name="history" className="h-4 w-4" />
+                        Report no-show in{" "}
+                        {Math.floor(noShowRemainingSec / 60)}:
+                        {String(noShowRemainingSec % 60).padStart(2, "0")}
+                      </div>
+                    )}
+                    {ride.status === "arrived" &&
+                      noShowReady &&
+                      (noShowArmed ? (
+                        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3">
+                          <p className="text-xs font-semibold leading-relaxed text-amber-900">
+                            Only report a no-show if you waited the full
+                            5 minutes and the rider never came. The rider
+                            is charged a J$300 no-show fee — you keep J$240.
+                          </p>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setNoShowArmed(false)}
+                              disabled={acting}
+                              className="inline-flex flex-1 items-center justify-center rounded-full border border-line bg-surface px-4 py-2 text-xs font-bold text-muted transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Back
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleNoShow(ride.id)}
+                              disabled={acting}
+                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {acting ? "Working…" : "Confirm no-show"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setNoShowArmed(true)}
+                          disabled={acting}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted transition-colors hover:bg-surface-soft hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Icon name="history" className="h-4 w-4" />
+                          Rider didn&apos;t show up
+                        </button>
+                      ))}
+                  </>
+                }
+              />
+            </>
+          )}
         </div>
       </FadeUp>
 
@@ -886,7 +1053,12 @@ export default function DriverActiveTripPage() {
         </div>
       </FadeUp>
 
-      {/* ── Action bar ── */}
+      {/* ── Action bar ──
+         Hidden when the in-app nav is active — the NavTripCard
+         overlay on the map provides the same primary action plus
+         cancel / no-show controls behind its "More options" toggle.
+         Two action surfaces stacked vertically would just confuse. */}
+      {!navHasRoute && (
       <FadeUp delay={0.2}>
         <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex flex-col gap-2 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur md:relative md:mx-0 md:rounded-2xl md:border md:bg-surface md:px-5 md:py-4">
           {/* Google Maps deep-link — stage-aware. Before pickup, route to
@@ -1018,6 +1190,7 @@ export default function DriverActiveTripPage() {
             ))}
         </div>
       </FadeUp>
+      )}
 
       {/* The chat launcher (icon + sheet + toast) lives inside the
          rider card above. Nothing more to mount here. */}

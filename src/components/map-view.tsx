@@ -282,6 +282,10 @@ export function MapView({
   alighting = null,
   corridorLines = null,
   suppressStaticRoute = false,
+  navMode = false,
+  onDirectionsRoute,
+  onUserDrag,
+  recenterToken = 0,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -365,6 +369,26 @@ export function MapView({
    *  Without it, the red road-following polyline overlays the amber
    *  corridor line and makes the map a confusing soup. */
   suppressStaticRoute?: boolean;
+  /** When true the map switches into navigation mode: tighter zoom,
+   *  45° tilt, the camera rotates to follow the driver's heading, and
+   *  the driver marker is pinned to the lower third of the viewport.
+   *  This is the in-app Uber-style turn-by-turn experience. The driver
+   *  marker, polyline, and other content otherwise behave as normal. */
+  navMode?: boolean;
+  /** Called once each time the live driver→target route is fetched
+   *  from Google Directions. The consumer can pass this into the
+   *  `useTurnByTurn` hook to drive the on-screen instruction banner
+   *  and voice prompts. */
+  onDirectionsRoute?: (route: google.maps.DirectionsRoute) => void;
+  /** Fired when the user manually drags the map (touch / mouse). The
+   *  consumer typically uses this to surface a "Recenter" button — the
+   *  map's internal follow-mode auto-disengages on user drag and won't
+   *  re-engage until `recenterToken` is bumped. */
+  onUserDrag?: () => void;
+  /** Bump this number to re-engage camera-follow after the user has
+   *  panned the map away. Any change (not just increment) re-triggers
+   *  the recenter, so callers can use Date.now() or a counter freely. */
+  recenterToken?: number;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -434,6 +458,14 @@ export function MapView({
   // every tick, which is wasteful and makes the polyline flicker.
   const liveRouteOriginRef = useRef<{ lat: number; lng: number } | null>(null);
   const liveRouteTargetRef = useRef<"pickup" | "dropoff" | null>(null);
+  // Stable refs for the consumer-supplied nav callbacks. We can't read
+  // the callback props directly from inside the map-init effect (it
+  // runs once and would close over the stale value), so we mirror them
+  // into refs that we keep up to date via the small effect below.
+  const onUserDragRef = useRef<(() => void) | undefined>(undefined);
+  const onDirectionsRouteRef = useRef<
+    ((route: google.maps.DirectionsRoute) => void) | undefined
+  >(undefined);
   // Fleet markers — keyed by driverId so we move/dispose them in place
   // instead of recreating every render. Smoother and avoids the
   // marker-creation flash when positions update. We also remember each
@@ -584,6 +616,63 @@ export function MapView({
     };
   }, []);
 
+  // Mirror the nav callback props into refs so the map-init effect
+  // (which runs once and would otherwise close over stale callback
+  // values) can invoke the latest version on every fire. Cheap effect
+  // that just keeps the refs in sync on every render.
+  useEffect(() => {
+    onUserDragRef.current = onUserDrag;
+    onDirectionsRouteRef.current = onDirectionsRoute;
+  }, [onUserDrag, onDirectionsRoute]);
+
+  // Nav-mode camera setup. Entering nav mode tilts the map to 45°,
+  // zooms in to street level, and re-arms follow so the next driver
+  // position update repositions us. Exiting restores the flat
+  // overhead view. The driver-follow effect handles the
+  // per-position heading + panBy offsets.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (navMode) {
+      map.setOptions({ tilt: 45 });
+      // Street-level zoom — tight enough to see lane markings, loose
+      // enough to keep the next-turn intersection in view.
+      const currentZoom = map.getZoom() ?? 0;
+      if (currentZoom < 17) map.setZoom(17.5);
+      followModeRef.current = true;
+    } else {
+      map.setOptions({ tilt: 0 });
+      map.setHeading(0);
+    }
+  }, [navMode, mapReady]);
+
+  // Recenter token — any change re-engages follow mode and snaps the
+  // camera back to the driver. Consumers bump this when the user taps
+  // a "Recenter" button after panning the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!recenterToken) return;
+    followModeRef.current = true;
+    if (driverPosition) {
+      const pos = { lat: driverPosition.lat, lng: driverPosition.lng };
+      // Driver heading is derived from successive position deltas,
+      // not carried on the LiveDot itself — see driverHeadingRef.
+      if (navMode) {
+        map.setHeading(driverHeadingRef.current);
+      }
+      map.panTo(pos);
+      if (navMode) {
+        const el = containerRef.current;
+        if (el) map.panBy(0, -Math.round(el.clientHeight * 0.25));
+      }
+    }
+    // We don't depend on driverPosition here — recenter is a one-shot
+    // user-triggered action, not a continuous follow. The driver-follow
+    // effect takes over afterwards now that followMode is re-armed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recenterToken, mapReady]);
+
   // Init map + DirectionsService once. We retry once on a small delay if
   // the container isn't sized yet — that happens on iOS Safari when the
   // map is rendered inside a sliding/transitioning ancestor.
@@ -622,7 +711,13 @@ export function MapView({
         // We check ev.domEvent so programmatic panTo() calls don't
         // count as user drags (those have no DOM event).
         mapRef.current.addListener("dragstart", (ev: { domEvent?: Event }) => {
-          if (ev?.domEvent) followModeRef.current = false;
+          if (ev?.domEvent) {
+            followModeRef.current = false;
+            // Surface the user-drag to consumers so e.g. the nav screen
+            // can show a Recenter button. Guarded on domEvent so our own
+            // programmatic panTo() calls don't fire this.
+            onUserDragRef.current?.();
+          }
         });
         // Wake up any effects waiting for the map to exist (markers,
         // polyline, fleet dots, live-route).
@@ -981,11 +1076,17 @@ export function MapView({
           fullRoutePath(route),
           5,
         );
+        // Hand the freshly-fetched DirectionsRoute to the consumer so
+        // turn-by-turn step tracking + voice prompts can update. The
+        // consumer typically pipes this straight into useTurnByTurn.
+        onDirectionsRouteRef.current?.(route);
         // Fit the camera to driver+target the first time we draw the
         // route OR when the target changes. Subsequent refetches keep
         // the user's existing pan/zoom — they may have zoomed in
-        // intentionally.
-        if (targetChanged) {
+        // intentionally. Suppress in navMode — the nav-mode camera
+        // effect owns positioning during turn-by-turn, and fitBounds
+        // would yank the driver away from the bottom-of-screen pin.
+        if (targetChanged && !navMode) {
           const bounds = new google.maps.LatLngBounds();
           bounds.extend(driverLatLng);
           bounds.extend({ lat: target.lat, lng: target.lng });
@@ -1000,7 +1101,7 @@ export function MapView({
     return () => {
       cancelled = true;
     };
-  }, [liveRoute, driverPosition, pickup, dropoff, mapReady]);
+  }, [liveRoute, driverPosition, pickup, dropoff, mapReady, navMode]);
 
   // Live driver position — rendered as the same car icon used for the
   // fleet view. Marker is reused across updates so the move feels smooth.
@@ -1072,9 +1173,29 @@ export function MapView({
     // was supposed to leave alone. Earlier code gated on it and froze
     // the map under the "Tap to interact" pill.
     if (followModeRef.current && !searching) {
-      map.panTo(pos);
+      if (navMode) {
+        // Nav mode: rotate the camera so the driver's heading points
+        // "up" on screen, and place the driver marker in the lower
+        // third of the viewport so the road ahead fills the rest. The
+        // map.panBy after panTo is the standard Google Maps trick for
+        // offsetting the center without going through projection math.
+        if (typeof heading === "number") {
+          map.setHeading(heading);
+        }
+        map.panTo(pos);
+        // Shift the camera up so the driver sits ~25% from the bottom.
+        // The exact pixel value scales with the rendered map height —
+        // 0.25 * height works on phones (where the map fills the screen)
+        // and stays roughly correct on smaller embedded sizes too.
+        const el = containerRef.current;
+        if (el) {
+          map.panBy(0, -Math.round(el.clientHeight * 0.25));
+        }
+      } else {
+        map.panTo(pos);
+      }
     }
-  }, [driverPosition, searching]);
+  }, [driverPosition, searching, navMode]);
 
   // Fleet markers (Phase 2A.4 — nearby online drivers on booking screen).
   // We diff against the previous set: existing driverIds get setPosition,

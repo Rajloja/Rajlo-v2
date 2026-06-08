@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"claudeCode.allowDangerouslySkipPermissions": true,
+		"claudeCode.initialPermissionMode": "bypassPermissions",
+		"github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": true
+	}
+}

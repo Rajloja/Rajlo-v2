@@ -17,6 +17,9 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Bridge between the Rajlo web UI and Android's Telecom framework.
@@ -56,9 +59,33 @@ public class RajloCallKit extends Plugin {
      *  plugin instance to call notifyListeners. */
     private static WeakReference<RajloCallKit> instanceRef;
 
+    /** Events emitted before the plugin instance exists. The cold-start
+     *  scenario: app is killed, FCM arrives, IncomingCallActivity shows
+     *  on the lockscreen, user taps Accept BEFORE MainActivity has even
+     *  started. At that moment instanceRef is null because Capacitor
+     *  hasn't built the bridge yet, so notifyListeners can't be called.
+     *
+     *  We queue the events here. `load()` drains the queue once the
+     *  plugin actually instantiates, replaying them through
+     *  notifyListeners with retain-mode so JS picks them up when its
+     *  listener finally registers. Without this, accept-from-cold-start
+     *  silently drops on the floor and the WebView opens without ever
+     *  knowing the user said yes. */
+    private static final List<JSObject> pendingEvents =
+        Collections.synchronizedList(new ArrayList<>());
+
     @Override
     public void load() {
         instanceRef = new WeakReference<>(this);
+        // Replay anything that fired before we existed. Done after
+        // setting instanceRef so any callbacks triggered during the
+        // replay still find us.
+        synchronized (pendingEvents) {
+            for (JSObject event : pendingEvents) {
+                notifyListeners("callEvent", event, true);
+            }
+            pendingEvents.clear();
+        }
     }
 
     /* ─────────────────── JS → Native methods ─────────────────── */
@@ -163,21 +190,29 @@ public class RajloCallKit extends Plugin {
      *  Connection (created by the OS) can reach it without holding
      *  a live plugin reference. */
     static void emitCallEvent(String action, String callId) {
-        RajloCallKit plugin = instanceRef != null ? instanceRef.get() : null;
-        if (plugin == null) return;
-        // Clean up our registry on terminal states.
+        // Clean up our registry on terminal states. This runs even
+        // when the plugin isn't loaded yet — the active map is on
+        // RajloConnectionService and exists for the whole process.
         if ("declined".equals(action) || "ended".equals(action)) {
             RajloConnectionService.unregister(callId);
         }
         JSObject data = new JSObject();
         data.put("action", action);
         data.put("callId", callId);
-        // retainUntilConsumed=true keeps the event queued until the JS
-        // listener attaches. Required because the user might accept
-        // the call on the lockscreen BEFORE the WebView has even
-        // resumed — without retention, the "accepted" event would
-        // fire into a void and the in-call sheet would never mount.
-        plugin.notifyListeners("callEvent", data, true);
+
+        RajloCallKit plugin = instanceRef != null ? instanceRef.get() : null;
+        if (plugin != null) {
+            // Normal path: plugin is live, retain-mode notify. JS gets
+            // the event whenever its listener registers (could be now
+            // or seconds from now if the WebView is still resuming).
+            plugin.notifyListeners("callEvent", data, true);
+        } else {
+            // Cold-start path: app was killed when the call arrived,
+            // user accepted on the lockscreen BEFORE MainActivity has
+            // started. Queue the event — load() will replay it once
+            // the plugin instantiates.
+            pendingEvents.add(data);
+        }
     }
 
     /* ─────────────────── Helpers ─────────────────── */
