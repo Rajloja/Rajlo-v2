@@ -77,6 +77,12 @@ export default async function AdminLayout({
             : "Safety queue, live trips, and rider chat — scoped to safety scope."
         }
         nav={nav}
+        // Admin-only enhancements — long nav list + multiple queues
+        // that need at-a-glance "X waiting" badges. Safety officers
+        // get the lean default surface (no search, no badges) since
+        // their nav is only two items.
+        searchable={isAdmin}
+        badgesFetchUrl={isAdmin ? "/api/admin/sidebar-counts" : undefined}
       >
         {/* Records an admin_access_logs entry once per session for the
            security dashboard's access history. */}

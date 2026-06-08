@@ -1697,6 +1697,63 @@ export async function sendWalletPayoutRequestedEmail(
   return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
 }
 
+/* ── P2b. Driver — payout processing (submitted to the bank) ── */
+
+export function walletPayoutProcessingTemplate(args: {
+  amountJmd: number;
+  bankName: string;
+  accountLast4: string;
+  driverName?: string | null;
+}) {
+  const first = firstNameOf(args.driverName);
+  const subject = `Payout processing · ${JMD(args.amountJmd)}`;
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, your ${JMD(args.amountJmd)} payout has been submitted to the bank as part of today's batch. Funds usually settle in 1–3 business days depending on your bank.`,
+    },
+    {
+      type: "card",
+      title: "Payout details",
+      rows: [
+        { label: "Amount", value: JMD(args.amountJmd), emphasize: true },
+        { label: "Bank", value: args.bankName },
+        { label: "Account", value: `••••${args.accountLast4}` },
+        { label: "Status", value: "Processing — sent to bank" },
+      ],
+    },
+    {
+      type: "footnote",
+      text: "We'll email you again as soon as the bank confirms the credit. If anything goes wrong (account mismatch, etc.) we'll let you know and put the funds back in your wallet.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: `${JMD(args.amountJmd)} submitted to ${args.bankName}, processing now.`,
+    eyebrow: "Payout processing",
+    title: "Sent to your bank",
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, your ${JMD(args.amountJmd)} Rajlo payout is now processing at ${args.bankName}.`,
+    `Account ••••${args.accountLast4}.`,
+    "Funds usually settle within 1–3 business days.",
+    "We'll email you when the bank confirms the credit.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendWalletPayoutProcessingEmail(
+  to: string,
+  args: Parameters<typeof walletPayoutProcessingTemplate>[0],
+) {
+  const t = walletPayoutProcessingTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
 /* ── P3. Driver — payout paid (bank confirmed) ── */
 
 export function walletPayoutPaidTemplate(args: {

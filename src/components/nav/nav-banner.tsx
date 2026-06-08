@@ -38,10 +38,12 @@ export function NavBanner({ snapshot }: { snapshot: NavSnapshot }) {
     <div
       className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3"
       style={{
-        // Sit BELOW the top-left Back button rather than beside it.
-        // Back button: safe-area + 12px top + 40px height ≈ +52px.
-        // Add a small visual gap before the banner starts.
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 64px)",
+        // Sit BELOW the top-left Back button, with a comfortable gap so
+        // the two elements clearly stack vertically (back button on
+        // top, instruction banner below). Back button geometry:
+        // safe-area + 12px top + 40px height = +52px, so we clear it
+        // with 20px breathing room → +72px.
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 72px)",
       }}
     >
       <div className="pointer-events-auto rounded-2xl bg-[#0E4D4A] text-white shadow-xl ring-1 ring-black/20">

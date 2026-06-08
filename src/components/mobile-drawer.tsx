@@ -26,7 +26,22 @@ type MobileDrawerProps = {
   subtitle: string;
   nav: NavLink[];
   children: React.ReactNode;
+  /** When set, the drawer renders a search input above the nav and
+   *  filters items by label as the admin types. Off for rider/driver
+   *  surfaces — their nav is short enough to scan visually. */
+  searchable?: boolean;
+  /** When set, the drawer polls this URL for `{counts: {href: number}}`
+   *  every BADGE_POLL_MS and renders the count as a small badge on the
+   *  matching nav item. Used by the admin sidebar so the admin sees
+   *  "you have 3 payouts to action" at a glance from anywhere in the
+   *  console. */
+  badgesFetchUrl?: string;
 };
+
+/** How often to re-fetch the sidebar badge counts (admin only). 30s
+ *  is responsive enough for "you have a new pending thing" without
+ *  hammering the DB. Refresh also fires on tab focus. */
+const BADGE_POLL_MS = 30_000;
 
 /**
  * Dark sidebar with brand-red accents on the active item + user profile
@@ -46,8 +61,16 @@ export function MobileDrawer({
   subtitle: _subtitle,
   nav,
   children,
+  searchable = false,
+  badgesFetchUrl,
 }: MobileDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Sidebar search query — only used when `searchable` is true.
+  // Filters the rendered nav list by case-insensitive label substring.
+  const [navQuery, setNavQuery] = useState("");
+  // Per-href badge counts fetched from `badgesFetchUrl`. Stays empty
+  // for surfaces that don't enable badges (rider/driver).
+  const [badges, setBadges] = useState<Record<string, number>>({});
   const [profile, setProfile] = useState<{
     full_name: string | null;
     email: string | null;
@@ -73,10 +96,54 @@ export function MobileDrawer({
     () => false,
   );
   const onDriverRoute = (pathname ?? "").startsWith("/driver");
-  const visibleNav =
+  const baseVisibleNav =
     native && onDriverRoute
       ? nav.filter((item) => !NATIVE_DRIVER_TAB_HREFS.has(item.href))
       : nav;
+
+  // Search filter — case-insensitive substring on the rendered label.
+  // Falls through unchanged when search isn't enabled or the query is
+  // empty. Matching on the resolved (possibly Patois) label so the
+  // search behaviour matches what the admin sees on screen.
+  const trimmedQuery = navQuery.trim().toLowerCase();
+  const visibleNav =
+    searchable && trimmedQuery
+      ? baseVisibleNav.filter((item) => {
+          const display = (
+            item.labelKey ? t(item.labelKey, item.label) : item.label
+          ).toLowerCase();
+          return display.includes(trimmedQuery);
+        })
+      : baseVisibleNav;
+
+  // Badge polling. Fetches `{counts: {href: number}}` from the
+  // optional `badgesFetchUrl`, re-fires on tab focus and every
+  // BADGE_POLL_MS so the admin's at-a-glance numbers stay fresh.
+  useEffect(() => {
+    if (!badgesFetchUrl) return;
+    let cancelled = false;
+    const fetchCounts = async () => {
+      try {
+        const res = await fetch(badgesFetchUrl, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json().catch(() => ({}))) as {
+          counts?: Record<string, number>;
+        };
+        if (!cancelled) setBadges(json.counts ?? {});
+      } catch {
+        /* swallow — sidebar shouldn't error-out if counts are flaky */
+      }
+    };
+    void fetchCounts();
+    const interval = window.setInterval(fetchCounts, BADGE_POLL_MS);
+    const onFocus = () => void fetchCounts();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [badgesFetchUrl]);
 
   // In the native driver app, pages that are NOT one of the bottom-nav
   // tabs (wallet, route taxi, notifications, deep details, etc.) lose
@@ -232,7 +299,11 @@ export function MobileDrawer({
   // Pick the active nav item by longest matching href. Stops the root
   // "/rider" Dashboard link from showing as active on every nested page —
   // on /rider/request only "Request a ride" lights up, etc.
-  const activeHref = visibleNav.reduce<string | null>((longest, item) => {
+  //
+  // We compute against `baseVisibleNav` (NOT the search-filtered
+  // `visibleNav`) so the active state is consistent regardless of
+  // what the admin has typed into the sidebar search box.
+  const activeHref = baseVisibleNav.reduce<string | null>((longest, item) => {
     const matches =
       pathname === item.href || pathname?.startsWith(`${item.href}/`);
     if (!matches) return longest;
@@ -383,9 +454,28 @@ export function MobileDrawer({
           style={{ scrollbarWidth: "none" }}
           aria-label="Portal navigation"
         >
+          {/* Search input — only when the host portal opted in
+             (admin surface). Filters the rendered nav list by
+             case-insensitive label substring. */}
+          {searchable && (
+            <div className="relative mb-3">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/50">
+                <Icon name="search" className="h-3.5 w-3.5" />
+              </span>
+              <input
+                type="search"
+                value={navQuery}
+                onChange={(e) => setNavQuery(e.target.value)}
+                placeholder="Search menu…"
+                aria-label="Search the sidebar"
+                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white placeholder:text-white/40 focus:border-white/30 focus:bg-white/10 focus:outline-none"
+              />
+            </div>
+          )}
           <ul className="grid gap-1">
             {visibleNav.map((item) => {
               const active = item.href === activeHref;
+              const badgeCount = badges[item.href] ?? 0;
               return (
                 <li key={item.href}>
                   <Link
@@ -412,6 +502,25 @@ export function MobileDrawer({
                         ? t(item.labelKey, item.label)
                         : item.label}
                     </span>
+                    {/* Pending count badge — surfaces "X waiting"
+                       at-a-glance so the admin can prioritise without
+                       opening every queue. Brand red on a white-text
+                       chip when the row isn't active; flipped to
+                       white-on-red when it is. Cap displayed value at
+                       99+ so a long-running queue doesn't blow out
+                       the layout. */}
+                    {badgeCount > 0 && (
+                      <span
+                        className={`ml-1 inline-grid min-w-[1.25rem] place-items-center rounded-full px-1.5 text-[10px] font-extrabold leading-none ${
+                          active
+                            ? "bg-rajlo-red text-white"
+                            : "bg-rajlo-red text-white"
+                        }`}
+                        aria-label={`${badgeCount} pending`}
+                      >
+                        {badgeCount > 99 ? "99+" : badgeCount}
+                      </span>
+                    )}
                     {active && (
                       <Icon
                         name="chevron-right"

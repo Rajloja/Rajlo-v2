@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
+import { notifyDriver } from "@/lib/notify";
+import { sendWalletPayoutProcessingEmail } from "@/lib/email-templates";
 
 /**
  * POST /api/admin/payouts/batch
@@ -89,15 +91,25 @@ export async function POST(request: Request) {
   // bank's reference + (in some cases) the TRN line item.
   const userIds = Array.from(new Set(list.map((r) => r.user_id)));
   const [{ data: profileRows }, { data: driverRows }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name").in("id", userIds),
+    supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", userIds),
     supabase
       .from("drivers")
       .select("user_id, external_id, trn")
       .in("user_id", userIds),
   ]);
-  const profileMap = new Map<string, string>();
-  ((profileRows ?? []) as Array<{ id: string; full_name: string | null }>).forEach(
-    (p) => profileMap.set(p.id, p.full_name ?? ""),
+  const profileMap = new Map<
+    string,
+    { fullName: string; email: string | null }
+  >();
+  ((profileRows ?? []) as Array<{
+    id: string;
+    full_name: string | null;
+    email: string | null;
+  }>).forEach((p) =>
+    profileMap.set(p.id, { fullName: p.full_name ?? "", email: p.email }),
   );
   const driverMap = new Map<string, { externalId: string; trn: string | null }>();
   ((driverRows ?? []) as Array<{
@@ -147,6 +159,32 @@ export async function POST(request: Request) {
       list.map((r) => r.id),
     );
 
+  // Tell each driver their payout is processing — push + inbox + email.
+  // Fire-and-forget so the CSV download doesn't wait on email delivery.
+  void Promise.all(
+    list.map(async (r) => {
+      const profile = profileMap.get(r.user_id);
+      const last4 = (r.bank_account_number ?? "").slice(-4);
+      const amountLabel = `JMD ${r.amount_jmd.toLocaleString("en-JM")}`;
+      await notifyDriver(supabase, {
+        driverUserId: r.user_id,
+        kind: "system",
+        title: `Payout processing · ${amountLabel}`,
+        body: `${amountLabel} has been sent to your bank. Expect it within 1–3 business days.`,
+        href: "/driver/wallet",
+        pushTag: `payout-processing-${r.id}`,
+      }).catch(() => null);
+      if (profile?.email) {
+        await sendWalletPayoutProcessingEmail(profile.email, {
+          amountJmd: r.amount_jmd,
+          bankName: r.bank_name ?? "your bank",
+          accountLast4: last4,
+          driverName: profile.fullName || null,
+        }).catch(() => null);
+      }
+    }),
+  ).catch(() => null);
+
   // Build the CSV.
   const header = [
     "driver_name",
@@ -166,7 +204,7 @@ export async function POST(request: Request) {
     const driver = driverMap.get(r.user_id);
     csvLines.push(
       [
-        profileMap.get(r.user_id) ?? "",
+        profileMap.get(r.user_id)?.fullName ?? "",
         r.account_holder_name ?? "",
         r.bank_name ?? "",
         snap.branch ?? "",

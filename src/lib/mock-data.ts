@@ -96,7 +96,7 @@ export const adminNav: NavItem[] = [
   { label: "Vehicle changes", labelKey: "nav.admin.vehicle", href: "/admin/vehicle-changes", icon: "car" },
   { label: "Wallets", labelKey: "nav.admin.wallets", href: "/admin/wallets", icon: "wallet" },
   { label: "Transactions", labelKey: "nav.admin.transactions", href: "/admin/transactions", icon: "trending-up" },
-  { label: "Payouts", labelKey: "nav.admin.payouts", href: "/admin/wallet-withdrawals", icon: "trending-up" },
+  { label: "Payouts", labelKey: "nav.admin.payouts", href: "/admin/payouts", icon: "trending-up" },
   { label: "Audit logs", labelKey: "nav.admin.audit", href: "/admin/audit-logs", icon: "history" },
   { label: "Incidents", labelKey: "nav.admin.incidents", href: "/admin/incidents", icon: "shield-alert" },
   { label: "Legal policies", labelKey: "nav.admin.legal", href: "/admin/legal", icon: "file-text" },
