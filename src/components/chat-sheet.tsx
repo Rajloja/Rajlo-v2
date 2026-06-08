@@ -161,7 +161,16 @@ export function ChatSheet({
    *
    * If the sheet closes via the X / backdrop / external setState,
    * the cleanup pops our entry too so the history stack stays clean.
+   *
+   * `onClose` is read through a ref so the effect deps only contain
+   * `open`. Parents typically pass a fresh inline `() => setOpen(false)`
+   * each render — including that in deps would re-run the effect on
+   * every parent re-render, and the cleanup would call history.back()
+   * which fires popstate, which closes the sheet immediately after
+   * it opened.
    */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const closingFromBackRef = useRef(false);
   useEffect(() => {
     if (!open) return;
@@ -169,7 +178,7 @@ export function ChatSheet({
     window.history.pushState({ rajloChatSheet: true }, "");
     const onPop = () => {
       closingFromBackRef.current = true;
-      onClose();
+      onCloseRef.current?.();
     };
     window.addEventListener("popstate", onPop);
     return () => {
@@ -185,7 +194,7 @@ export function ChatSheet({
       }
       closingFromBackRef.current = false;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   /* ─── Auto-scroll to bottom on new messages + keyboard resize ───
    *

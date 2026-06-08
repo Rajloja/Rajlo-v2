@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp, Stagger, StaggerItem } from "@/components/anim";
+import { EmptyState } from "@/components/empty-state";
 import {
   ListRowSkeleton,
   Skeleton,
@@ -579,25 +580,12 @@ export default function RiderDashboardPage() {
       {/* ============== EMPTY STATE (no history) ============== */}
       {!loading && history.length === 0 && (
         <FadeUp delay={0.1}>
-          <div className="rounded-3xl border border-dashed border-line bg-surface-soft p-8 text-center md:p-10">
-            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-white text-rajlo-red shadow-sm">
-              <Icon name="navigation" className="h-6 w-6" />
-            </span>
-            <h2 className="mt-5 text-xl font-extrabold tracking-tight md:text-2xl">
-              Take your first ride
-            </h2>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
-              Once you ride with Rajlo, your favourite destinations and recent
-              trips show up right here for one-tap rebooking.
-            </p>
-            <Link
-              href="/rider/request"
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white shadow-lg shadow-rajlo-red/30 hover:-translate-y-0.5"
-            >
-              Book a ride
-              <Icon name="arrow-right" className="h-4 w-4" />
-            </Link>
-          </div>
+          <EmptyState
+            variant="hero"
+            title="Take your first ride"
+            body="Once you ride with Rajlo, your favourite destinations and recent trips show up right here for one-tap rebooking."
+            cta={{ label: "Book a ride", href: "/rider/request" }}
+          />
         </FadeUp>
       )}
 

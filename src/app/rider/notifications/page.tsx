@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
+import { EmptyState } from "@/components/empty-state";
 import { NotificationSkeleton, Skeleton } from "@/components/skeleton";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useT } from "@/lib/i18n";
@@ -327,19 +328,17 @@ export default function RiderNotificationsPage() {
       {/* Empty state */}
       {!loading && filtered.length === 0 && (
         <FadeUp delay={0.08}>
-          <div className="rounded-3xl border border-line bg-surface p-10 text-center">
-            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-surface-soft text-muted">
-              <Icon name="bell" className="h-6 w-6" />
-            </span>
-            <h2 className="mt-5 text-xl font-extrabold tracking-tight">
-              {items.length === 0 ? "Nothing here yet" : "You're all caught up"}
-            </h2>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
-              {items.length === 0
+          <EmptyState
+            variant={items.length === 0 ? "hero" : "soft"}
+            title={
+              items.length === 0 ? "Nothing here yet" : "You're all caught up"
+            }
+            body={
+              items.length === 0
                 ? "Once you book or take rides, updates land here."
-                : "No notifications in this filter. Switch tabs above."}
-            </p>
-          </div>
+                : "No notifications in this filter. Switch tabs above."
+            }
+          />
         </FadeUp>
       )}
 

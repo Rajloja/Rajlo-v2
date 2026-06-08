@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Icon, type IconName } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
+import { EmptyState } from "@/components/empty-state";
 import { DriverReadinessGate } from "@/components/driver-readiness-gate";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { formatJMD } from "@/lib/jamaica";
@@ -1184,7 +1185,11 @@ function ComplianceCard({ summary }: { summary: Compliance }) {
 }
 
 function EmptyInbox({
-  icon,
+  // `icon` kept for API back-compat with existing call sites — the
+  // branded `EmptyState` always uses the Rajlo LogoIcon so this is
+  // now decorative-only and ignored. We leave the prop in the
+  // signature so we don't have to touch every call site.
+  icon: _icon,
   title,
   body,
   ctaLabel,
@@ -1197,22 +1202,11 @@ function EmptyInbox({
   ctaHref?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-line bg-surface-soft p-8 text-center">
-      <span className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-surface text-muted">
-        <Icon name={icon} className="h-4 w-4" />
-      </span>
-      <p className="mt-3 text-sm font-extrabold tracking-tight">{title}</p>
-      <p className="mx-auto mt-1 max-w-sm text-xs text-muted">{body}</p>
-      {ctaLabel && ctaHref && (
-        <Link
-          href={ctaHref}
-          className="mt-4 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white"
-        >
-          {ctaLabel}
-          <Icon name="arrow-right" className="h-3 w-3" />
-        </Link>
-      )}
-    </div>
+    <EmptyState
+      title={title}
+      body={body}
+      cta={ctaLabel && ctaHref ? { label: ctaLabel, href: ctaHref } : undefined}
+    />
   );
 }
 
