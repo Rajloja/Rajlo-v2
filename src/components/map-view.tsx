@@ -247,6 +247,56 @@ function fullRoutePath(
 }
 
 /**
+ * Project a point onto a line segment in lat/lng space, returning
+ * the projection (clamped to the segment's endpoints). Linear math —
+ * fine for snap distances under ~100m where the lat/lng plane is
+ * effectively Euclidean.
+ */
+function projectOnSegment(
+  p: { lat: number; lng: number },
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): { lat: number; lng: number } {
+  const dx = b.lng - a.lng;
+  const dy = b.lat - a.lat;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq < 1e-12) return a;
+  let t = ((p.lng - a.lng) * dx + (p.lat - a.lat) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return { lat: a.lat + t * dy, lng: a.lng + t * dx };
+}
+
+/**
+ * Snap a GPS point to the closest point on a polyline path. Used to
+ * pin the nav-mode driver marker to the middle of the road regardless
+ * of GPS jitter.
+ *
+ * Returns the original point if:
+ *   - The path is empty
+ *   - The closest projection is further than `maxSnapMeters` (we'd
+ *     rather show the real position than lie about the location when
+ *     the driver has genuinely gone off-route)
+ */
+function snapToPath(
+  p: { lat: number; lng: number },
+  path: Array<{ lat: number; lng: number }>,
+  maxSnapMeters: number,
+): { lat: number; lng: number } {
+  if (path.length < 2) return p;
+  let closest = p;
+  let closestDist = maxSnapMeters;
+  for (let i = 0; i < path.length - 1; i++) {
+    const proj = projectOnSegment(p, path[i], path[i + 1]);
+    const d = approxDistanceMeters(p, proj);
+    if (d < closestDist) {
+      closestDist = d;
+      closest = proj;
+    }
+  }
+  return closest;
+}
+
+/**
  * Sum of leg durations on a Directions route, preferring the
  * traffic-adjusted figure when Google returns one. Used to pick the
  * best route from the alternatives the Directions API returns.
@@ -530,6 +580,12 @@ export function MapView({
   // every tick, which is wasteful and makes the polyline flicker.
   const liveRouteOriginRef = useRef<{ lat: number; lng: number } | null>(null);
   const liveRouteTargetRef = useRef<"pickup" | "dropoff" | null>(null);
+  /** Decoded polyline of the current driver→target route. Refreshed
+   *  every time the live route is re-fetched. Used in nav mode to
+   *  snap the driver marker to the route line so the puck sits in
+   *  the middle of the road instead of drifting off into the kerb
+   *  on bad GPS fixes. Empty array when no live route active. */
+  const liveRoutePathRef = useRef<{ lat: number; lng: number }[]>([]);
   // Stable refs for the consumer-supplied nav callbacks. We can't read
   // the callback props directly from inside the map-init effect (it
   // runs once and would close over the stale value), so we mirror them
@@ -1160,6 +1216,7 @@ export function MapView({
       livePolylineRef.current = [];
       liveRouteOriginRef.current = null;
       liveRouteTargetRef.current = null;
+      liveRoutePathRef.current = [];
       return;
     }
 
@@ -1213,10 +1270,18 @@ export function MapView({
         // strip. driver→target reads brand red at the car, deepening
         // to the pickup/dropoff pin's colour at the far end.
         livePolylineRef.current.forEach((p) => p.setMap(null));
-        livePolylineRef.current = drawGradientPolyline(
-          map,
-          fullRoutePath(route),
-          5,
+        const rawPath = fullRoutePath(route);
+        livePolylineRef.current = drawGradientPolyline(map, rawPath, 5);
+        // Cache the polyline path as plain lat/lng so the nav-mode
+        // snap-to-route can read it without the google.maps.LatLng
+        // overhead on every position update.
+        liveRoutePathRef.current = rawPath.map((p) =>
+          typeof (p as google.maps.LatLng).lat === "function"
+            ? {
+                lat: (p as google.maps.LatLng).lat(),
+                lng: (p as google.maps.LatLng).lng(),
+              }
+            : (p as { lat: number; lng: number }),
         );
         // Hand the freshly-fetched DirectionsRoute to the consumer so
         // turn-by-turn step tracking + voice prompts can update. The
@@ -1262,41 +1327,60 @@ export function MapView({
       driverIconBucketRef.current = -1;
       return;
     }
-    const pos = { lat: driverPosition.lat, lng: driverPosition.lng };
+    const rawPos = { lat: driverPosition.lat, lng: driverPosition.lng };
 
-    // Compute / refresh the heading.
+    // Compute / refresh the heading from the RAW GPS — we want the
+    // bearing of the actual motion, not the snapped-to-route motion
+    // (which would always read as exactly tangent to the polyline and
+    // make U-turns / off-road movement look strange).
     const prev = prevDriverPosRef.current;
     if (prev) {
-      const moved = approxDistanceMeters(prev, pos);
+      const moved = approxDistanceMeters(prev, rawPos);
       if (moved >= 10) {
-        driverHeadingRef.current = computeBearing(prev, pos);
-        prevDriverPosRef.current = pos;
+        driverHeadingRef.current = computeBearing(prev, rawPos);
+        prevDriverPosRef.current = rawPos;
       }
       // If we moved less than 10m, leave both prev pos and heading alone
       // — small GPS drift shouldn't repoint the car.
     } else {
-      prevDriverPosRef.current = pos;
+      prevDriverPosRef.current = rawPos;
     }
 
     const heading = driverHeadingRef.current;
-    const bucket =
-      typeof heading === "number"
-        ? (((Math.round(heading / 10) * 10) % 360) + 360) % 360
-        : 0;
 
-    // Pick the marker style: the big red nav puck during in-app
-    // navigation (matches what Google Maps / Apple Maps drivers expect
-    // — readable direction at a glance), the small detailed car
-    // everywhere else. Both rotate with heading.
-    const pickIcon = (h: number) =>
-      navMode ? buildNavArrowIcon(h) : buildCarIcon(h);
+    // Snap-to-route: when nav is on AND a live route is loaded, pin
+    // the marker to the closest point on the polyline. Gives the
+    // Google-Maps-style "puck always rides the centre of the road"
+    // look and hides the small lat/lng wobble GPS introduces. Skipped
+    // when off-route (>50m off the line) so we don't lie about
+    // location — better to show "you're off course" honestly.
+    const pos =
+      navMode && liveRoutePathRef.current.length > 1
+        ? snapToPath(rawPos, liveRoutePathRef.current, 50)
+        : rawPos;
+
+    // Icon rotation: in nav mode the MAP rotates so the driving
+    // direction is "up" on screen. The icon should NOT also rotate by
+    // heading or we'd double-rotate (icon ends up pointing 2× heading
+    // off from screen-up). Pinning rotation to 0 means the arrow
+    // always points up on screen, which is the direction of travel —
+    // exactly how Google Maps / Apple Maps draw their nav arrow.
+    //
+    // Outside nav mode the map is north-up so the icon rotates by
+    // heading as before.
+    const iconRotation = navMode ? 0 : heading;
+    const bucket =
+      (((Math.round(iconRotation / 10) * 10) % 360) + 360) % 360;
+
+    const buildIcon = () =>
+      navMode ? buildNavArrowIcon(0) : buildCarIcon(iconRotation);
 
     if (!driverDotRef.current) {
       driverDotRef.current = new google.maps.Marker({
         map,
         position: pos,
         zIndex: 999,
-        icon: pickIcon(heading),
+        icon: buildIcon(),
         title: "Driver",
       });
       driverIconBucketRef.current = bucket;
@@ -1305,7 +1389,7 @@ export function MapView({
       // Only re-set the icon when the rotation bucket actually changed —
       // setIcon swaps the data URL and forces an image re-decode.
       if (driverIconBucketRef.current !== bucket) {
-        driverDotRef.current.setIcon(pickIcon(heading));
+        driverDotRef.current.setIcon(buildIcon());
         driverIconBucketRef.current = bucket;
       }
     }
@@ -2208,12 +2292,13 @@ function buildNavArrowIcon(
   const svg = navArrowIconSvg(bucket);
   const icon: google.maps.Icon = {
     url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
-    // 56×56 rendered — meaningfully bigger than the 40×40 car so the
-    // driver can read direction at a thumb-glance during nav. The
-    // viewBox is 80 so every rotation angle stays inside the box and
-    // doesn't get clipped at diagonals.
-    scaledSize: new google.maps.Size(56, 56),
-    anchor: new google.maps.Point(28, 28),
+    // 112×112 rendered — 2× the prior 56 so the puck reads as the
+    // dominant on-screen element during nav. The 80-unit viewBox
+    // scales up cleanly without losing crispness because everything
+    // inside is vector. Anchor centered so the puck sits exactly on
+    // the GPS coord (or the snapped-to-route coord, see below).
+    scaledSize: new google.maps.Size(112, 112),
+    anchor: new google.maps.Point(56, 56),
   };
   navArrowIconCache.set(bucket, icon);
   return icon;
