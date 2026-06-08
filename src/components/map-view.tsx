@@ -695,13 +695,25 @@ export function MapView({
           return;
         }
 
+        // Vector renderer is gated on the presence of a Map ID — without
+        // one Google ships the raster tiles, which ignore `tilt` and
+        // `heading` calls and look flat-top in nav mode. With a Map ID
+        // configured in Google Cloud Console (any free tier works) we
+        // get the WebGL vector renderer that supports the full
+        // 3D-tilted, heading-rotated nav camera.
+        //
+        // Custom `styles` are mutually exclusive with `mapId` (the Map
+        // ID owns the style server-side), so we omit `styles` when
+        // mapId is set. The Map ID styling is configurable from the
+        // Cloud Console to match the Rajlo brand if desired.
+        const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
         mapRef.current = new g.maps.Map(el, {
           center: JAMAICA_CENTER,
           zoom: 9,
           disableDefaultUI: true,
           gestureHandling: "greedy",
           clickableIcons: false,
-          styles: MAP_STYLE,
+          ...(mapId ? { mapId } : { styles: MAP_STYLE }),
         });
         directionsServiceRef.current = new g.maps.DirectionsService();
         // Any user-driven drag disables follow-the-car mode — the

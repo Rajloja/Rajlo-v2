@@ -20,11 +20,15 @@ export function NavControls({
   onRecenter,
   muted,
   onToggleMute,
+  onMinimize,
 }: {
   cameraDisengaged: boolean;
   onRecenter: () => void;
   muted: boolean;
   onToggleMute: () => void;
+  /** Tapped to collapse the fullscreen nav surface back into the
+   *  regular trip page layout. Omitted when nav is already embedded. */
+  onMinimize?: () => void;
 }) {
   return (
     <div
@@ -36,6 +40,35 @@ export function NavControls({
         paddingTop: "calc(env(safe-area-inset-top, 0px) + 56px)",
       }}
     >
+      {onMinimize && (
+        <button
+          type="button"
+          aria-label="Minimize navigation"
+          onClick={() => {
+            void haptics.tap();
+            onMinimize();
+          }}
+          className="pointer-events-auto grid h-11 w-11 place-items-center rounded-full bg-white text-rajlo-black shadow-lg ring-1 ring-black/5 transition-transform active:scale-95"
+        >
+          {/* Minimize / collapse icon — two arrows pointing inward. */}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-5 w-5"
+            aria-hidden
+          >
+            <path d="M4 14h6v6" />
+            <path d="M20 10h-6V4" />
+            <path d="M14 10l7-7" />
+            <path d="M3 21l7-7" />
+          </svg>
+        </button>
+      )}
+
       {cameraDisengaged && (
         <button
           type="button"

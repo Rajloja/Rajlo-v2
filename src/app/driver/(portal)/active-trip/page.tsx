@@ -236,6 +236,25 @@ export default function DriverActiveTripPage() {
   // route fetch — without this, the banner would flash empty for the
   // 1-2 seconds between mount and the first Directions response.
   const navHasRoute = !!navSnapshot.currentStep;
+  // Fullscreen nav surface — auto-engaged the first time the route
+  // resolves on this page mount, and persisted until the driver
+  // explicitly taps Minimize. The minimized state surfaces a
+  // "Resume navigation" pill so the driver can pop back into it.
+  const [navFullscreen, setNavFullscreen] = useState(true);
+  // Re-fullscreen when the trip transitions to a new leg (pickup →
+  // dropoff). The route changes, the snapshot resets, the driver
+  // probably wants the immersive view back. We track the LAST seen
+  // status in a ref so we only re-open on actual transitions, not on
+  // every re-render of the page.
+  const lastNavStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!navHasRoute) return;
+    const status = data?.ride?.status ?? null;
+    if (lastNavStatusRef.current !== status) {
+      lastNavStatusRef.current = status;
+      setNavFullscreen(true);
+    }
+  }, [navHasRoute, data?.ride?.status]);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -702,53 +721,64 @@ export default function DriverActiveTripPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 py-2 md:px-3 md:py-8">
-      <FadeUp>
-        <div className="relative overflow-hidden rounded-3xl bg-rajlo-black p-6 text-white shadow-xl shadow-rajlo-black/30 md:p-8">
-          <ArcWatermark
-            size={360}
-            variant="red"
-            className="absolute -right-20 -bottom-24 opacity-[0.18]"
-          />
-          <div className="relative">
-            <p className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
-              {stage.eyebrow}
-            </p>
-            <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
-              {stage.headline}
-            </h1>
-            <p className="mt-2 max-w-md text-sm text-white/75">
-              {stage.description}
-            </p>
+      {/* Hero + non-critical banners are hidden while the nav is in
+         fullscreen — the driver's attention belongs to the road. They
+         reappear instantly when the nav is minimized. */}
+      {!navFullscreen && (
+        <FadeUp>
+          <div className="relative overflow-hidden rounded-3xl bg-rajlo-black p-6 text-white shadow-xl shadow-rajlo-black/30 md:p-8">
+            <ArcWatermark
+              size={360}
+              variant="red"
+              className="absolute -right-20 -bottom-24 opacity-[0.18]"
+            />
+            <div className="relative">
+              <p className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
+                {stage.eyebrow}
+              </p>
+              <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
+                {stage.headline}
+              </h1>
+              <p className="mt-2 max-w-md text-sm text-white/75">
+                {stage.description}
+              </p>
+            </div>
           </div>
-        </div>
-      </FadeUp>
+        </FadeUp>
+      )}
 
-      {error && (
+      {!navFullscreen && error && (
         <div className="rounded-xl border border-rajlo-red/30 bg-primary-soft px-4 py-3 text-sm font-semibold text-rajlo-red">
           {error}
         </div>
       )}
-      {geoError && (
+      {!navFullscreen && geoError && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
           {geoError} The rider can&apos;t track your position until this is
           fixed.
         </div>
       )}
 
-      <FadeUp delay={0.05}>
-        <div className="relative overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/[0.04]">
-          {/* The map is the driver's primary navigation surface — give
-             it real viewport real-estate. Live-route mode draws the
-             on-the-road line from the driver's current position to
-             pickup (accepted/arrived) or dropoff (in_progress).
-             Disabled for carpool: the route is a 4-point tour (two
-             pickups + two dropoffs) rather than a single driver→target
-             line, so we fall back to the static-route polyline.
+      {/* Map surface — always rendered as the same React element so
+         the MapView component (and the Google Maps instance inside)
+         stays mounted across fullscreen ↔ minimize toggles. The
+         wrapper's classes switch between the embedded inline card and
+         a fixed-inset overlay; MapView's own className follows so the
+         map fills whichever container it's in. Modern Google Maps JS
+         auto-resizes on container size change, so no explicit
+         resize trigger is needed.
 
-             When the solo-trip nav engages (navEnabled + a fetched
-             route), MapView switches into navMode — tilt + heading
-             follow + camera pinned to the lower third — and we paint
-             the NavBanner / NavControls / NavTripCard over the top. */}
+         Disabled for carpool: the route is a 4-point tour (two
+         pickups + two dropoffs) rather than a single driver→target
+         line, so we fall back to the static-route polyline. */}
+      <FadeUp delay={0.05}>
+        <div
+          className={
+            navFullscreen && navHasRoute
+              ? "fixed inset-0 z-40 flex flex-col bg-rajlo-black"
+              : "relative overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/[0.04]"
+          }
+        >
           <MapView
             viewer="driver"
             pickup={mapPickup}
@@ -767,7 +797,11 @@ export default function DriverActiveTripPage() {
             onDirectionsRoute={setDirectionsRoute}
             onUserDrag={() => setCameraDisengaged(true)}
             recenterToken={recenterToken}
-            className="h-[55vh] min-h-[20rem] w-full md:h-[60vh] md:max-h-[640px]"
+            className={
+              navFullscreen && navHasRoute
+                ? "h-full w-full flex-1"
+                : "h-[55vh] min-h-[20rem] w-full md:h-[60vh] md:max-h-[640px]"
+            }
           />
           {navHasRoute && (
             <>
@@ -780,6 +814,9 @@ export default function DriverActiveTripPage() {
                 }}
                 muted={voiceMuted}
                 onToggleMute={handleToggleVoice}
+                onMinimize={
+                  navFullscreen ? () => setNavFullscreen(false) : undefined
+                }
               />
               <NavTripCard
                 snapshot={navSnapshot}
@@ -814,6 +851,83 @@ export default function DriverActiveTripPage() {
                 }}
                 expandedChildren={
                   <>
+                    {/* Rider info — name, avatar, quick-contact buttons.
+                       The driver needs to confirm who they're meeting
+                       without leaving the nav. */}
+                    {rider && (
+                      <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface-soft p-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rajlo-red text-sm font-bold text-white">
+                          {initials}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-foreground">
+                            {rider.name}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                            {ride.seats === 1
+                              ? "1 seat"
+                              : `${ride.seats} seats`}{" "}
+                            · {formatJMD(ride.estimatedFareJMD)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <CallButton
+                            rideId={ride.id}
+                            variant="subtle"
+                            label=""
+                          />
+                          <ChatLauncher
+                            rideId={ride.id}
+                            myRole="driver"
+                            peerName={rider.name}
+                            peerAvatarUrl={rider.avatarUrl ?? null}
+                            peerPhone={rider.phone ?? null}
+                            rideActive
+                            variant="soft"
+                            iconSize={36}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pickup + dropoff details — always visible inside
+                       the expanded section so the driver can double-check
+                       the addresses without minimizing the nav. */}
+                    <div className="rounded-2xl border border-line bg-surface p-3">
+                      <div className="flex items-start gap-3">
+                        <span className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-red text-[10px] font-bold text-white">
+                          A
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                            Pickup
+                          </p>
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {ride.pickup.name}
+                          </p>
+                          <p className="truncate text-xs text-muted">
+                            {ride.pickup.address}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-start gap-3 border-t border-line pt-3">
+                        <span className="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-black text-[10px] font-bold text-white">
+                          B
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                            Dropoff
+                          </p>
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {ride.dropoff.name}
+                          </p>
+                          <p className="truncate text-xs text-muted">
+                            {ride.dropoff.address}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     {ride.status !== "in_progress" && (
                       <button
                         type="button"
@@ -880,10 +994,18 @@ export default function DriverActiveTripPage() {
         </div>
       </FadeUp>
 
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         Everything below is page-flow content (carpool banner, rider
+         card, ride details, sticky action bar). Hidden while the nav
+         is fullscreen — the driver's surface is the immersive map
+         + bottom card overlay. They reappear when the driver
+         minimizes the nav.
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+
       {/* Carpool banner — distinct red ribbon making it crystal-clear
          the driver has two riders. Only shown when partner data is
          present in the response. */}
-      {carpool && (
+      {!navFullscreen && carpool && (
         <FadeUp delay={0.08}>
           <div className="flex items-center gap-3 rounded-2xl border-2 border-rajlo-red/40 bg-primary-soft p-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rajlo-red text-white">
@@ -906,7 +1028,7 @@ export default function DriverActiveTripPage() {
         </FadeUp>
       )}
 
-      {rider && (
+      {!navFullscreen && rider && (
         <FadeUp delay={0.1}>
           <div className="space-y-3">
             <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5">
@@ -963,7 +1085,7 @@ export default function DriverActiveTripPage() {
       {/* Carpool partner card — same shape as the primary rider card
          but visually demoted with "Rider 2 (pickup second)" so the
          driver knows the order. */}
-      {carpool && (
+      {!navFullscreen && carpool && (
         <FadeUp delay={0.12}>
           <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5">
             <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rajlo-red/10 text-base font-extrabold text-rajlo-red ring-1 ring-rajlo-red/20">
@@ -991,6 +1113,7 @@ export default function DriverActiveTripPage() {
         </FadeUp>
       )}
 
+      {!navFullscreen && (
       <FadeUp delay={0.15}>
         <div className="rounded-2xl border border-line bg-surface p-5">
           <div className="flex items-start gap-3">
@@ -1052,6 +1175,7 @@ export default function DriverActiveTripPage() {
           )}
         </div>
       </FadeUp>
+      )}
 
       {/* ── Action bar ──
          Hidden when the in-app nav is active — the NavTripCard
@@ -1194,6 +1318,35 @@ export default function DriverActiveTripPage() {
 
       {/* The chat launcher (icon + sheet + toast) lives inside the
          rider card above. Nothing more to mount here. */}
+
+      {/* Floating "Resume navigation" pill — surfaces when the nav is
+         active but the driver has minimized it to read the rider/trip
+         details. One tap pops back into the fullscreen nav so they
+         don't have to dig through any menu. The next-turn distance is
+         shown right on the pill so they're never blind to what's
+         coming next while reading the page. */}
+      {navHasRoute && !navFullscreen && (
+        <button
+          type="button"
+          onClick={() => setNavFullscreen(true)}
+          className="fixed inset-x-4 z-30 flex items-center gap-3 rounded-2xl bg-[#0E4D4A] px-4 py-3 text-left text-white shadow-2xl ring-1 ring-black/20 transition-transform active:scale-[0.99]"
+          style={{
+            bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+          }}
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/15">
+            <Icon name="navigation" className="h-5 w-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-white/70">
+              Navigation active · tap to resume
+            </span>
+            <span className="block truncate text-sm font-bold">
+              {navSnapshot.currentStep?.instruction ?? "Continue on route"}
+            </span>
+          </span>
+        </button>
+      )}
 
       <CancelReasonDialog
         open={cancelTargetId !== null}
