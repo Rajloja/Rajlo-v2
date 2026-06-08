@@ -376,7 +376,16 @@ function carIconSvg(rotationDeg: number): string {
  * tops out at ≤36 entries no matter how often the heading wobbles.
  */
 function navArrowIconSvg(rotationDeg: number): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#ff2828"/><stop offset="100%" stop-color="#c70000"/></linearGradient><radialGradient id="navs" cx="50%" cy="60%" r="50%"><stop offset="0%" stop-color="#000" stop-opacity="0.35"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient></defs><ellipse cx="40" cy="50" rx="30" ry="14" fill="url(#navs)"/><g transform="rotate(${rotationDeg} 40 40)"><circle cx="40" cy="40" r="28" fill="url(#navg)" stroke="#ffffff" stroke-width="3"/><path d="M40 18 L57 50 L40 41 L23 50 Z" fill="#ffffff"/></g></svg>`;
+  // Layers, painter's order:
+  //   1. Red glow halo — radial gradient from brand-red 50% opacity in
+  //      the center to fully transparent at the edge. Sits OUTSIDE the
+  //      rotation group so it stays a symmetric circle regardless of
+  //      heading. Gives the puck the "feint but visible" red shadow.
+  //   2. Black ground shadow — small elliptical drop underneath.
+  //   3. Rotation group (rotates with heading):
+  //        - Red gradient circle with white stroke
+  //        - White directional chevron
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#ff2828"/><stop offset="100%" stop-color="#c70000"/></linearGradient><radialGradient id="navs" cx="50%" cy="60%" r="50%"><stop offset="0%" stop-color="#000" stop-opacity="0.35"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></radialGradient><radialGradient id="navhalo" cx="50%" cy="50%" r="50%"><stop offset="35%" stop-color="#f10100" stop-opacity="0.55"/><stop offset="100%" stop-color="#f10100" stop-opacity="0"/></radialGradient></defs><circle cx="40" cy="40" r="38" fill="url(#navhalo)"/><ellipse cx="40" cy="50" rx="30" ry="14" fill="url(#navs)"/><g transform="rotate(${rotationDeg} 40 40)"><circle cx="40" cy="40" r="28" fill="url(#navg)" stroke="#ffffff" stroke-width="3"/><path d="M40 18 L57 50 L40 41 L23 50 Z" fill="#ffffff"/></g></svg>`;
 }
 
 export function MapView({
@@ -774,11 +783,30 @@ export function MapView({
       // races with internal style loads.
       map.setTilt(45);
       followModeRef.current = true;
-      // eslint-disable-next-line no-console
-      console.log(
-        "[MapView] nav mode ON — tilt=45, zoom=18, mapId=",
-        process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ? "set" : "MISSING",
-      );
+      // Diagnostic: setTilt is silently no-op on RASTER maps. If the
+      // Map ID's renderer is raster (the default when "Quick create"
+      // is used in Cloud Console without flipping the toggle to
+      // Vector), getTilt() returns 0 right after we set it. Surface
+      // that as a loud warning so the cause is obvious from logcat.
+      window.setTimeout(() => {
+        const actualTilt = map.getTilt() ?? 0;
+        // eslint-disable-next-line no-console
+        console.log(
+          `[MapView] nav mode ON — requested tilt=45, actual tilt=${actualTilt}, zoom=${map.getZoom()}, mapId=${
+            process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ? "set" : "MISSING"
+          }`,
+        );
+        if (actualTilt < 5) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[MapView] Map did NOT tilt despite setTilt(45). Almost " +
+              "certainly your Map ID's renderer is RASTER, not Vector. " +
+              "Fix: Google Cloud Console → Map Management → click your " +
+              "Map ID → Settings → set Renderer to Vector, enable Tilt " +
+              "and Heading toggles, save, redeploy.",
+          );
+        }
+      }, 300);
     } else {
       map.setTilt(0);
       map.setHeading(0);
@@ -789,6 +817,27 @@ export function MapView({
     // wrong style — flat-map car shown in nav mode, or big red puck
     // shown after the user backs out.
     driverIconBucketRef.current = -1;
+  }, [navMode, mapReady]);
+
+  // Zoom-driven nav-puck resize. While nav is active, listen for the
+  // map's zoom_changed event and refresh the driver icon at the new
+  // size. Without this the puck stays at its initial-zoom size and
+  // either swallows the map (zoomed out) or shrinks awkwardly
+  // (zoomed in past the constructor zoom).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !navMode) return;
+    const listener = map.addListener("zoom_changed", () => {
+      const dot = driverDotRef.current;
+      if (!dot) return;
+      const newSize = computeNavIconSizePx(map.getZoom());
+      // Always reset the bucket so the next driver-position effect
+      // re-runs setIcon (driverIconBucketRef compares against the
+      // composite "rotation × size" key).
+      driverIconBucketRef.current = -1;
+      dot.setIcon(buildNavArrowIcon(0, newSize));
+    });
+    return () => listener.remove();
   }, [navMode, mapReady]);
 
   // Recenter token — any change re-engages follow mode and snaps the
@@ -1369,11 +1418,18 @@ export function MapView({
     // Outside nav mode the map is north-up so the icon rotates by
     // heading as before.
     const iconRotation = navMode ? 0 : heading;
-    const bucket =
+    const navSize = navMode ? computeNavIconSizePx(map.getZoom()) : 0;
+    // Bucket includes the size so a zoom-driven resize triggers a
+    // setIcon refresh on the next position update even when heading
+    // hasn't moved.
+    const rotationBucket =
       (((Math.round(iconRotation / 10) * 10) % 360) + 360) % 360;
+    const bucket = navMode ? rotationBucket * 1000 + navSize : rotationBucket;
 
     const buildIcon = () =>
-      navMode ? buildNavArrowIcon(0) : buildCarIcon(iconRotation);
+      navMode
+        ? buildNavArrowIcon(0, navSize)
+        : buildCarIcon(iconRotation);
 
     if (!driverDotRef.current) {
       driverDotRef.current = new google.maps.Marker({
@@ -2278,29 +2334,69 @@ function buildRiderIcon(bucket: number): google.maps.Icon {
 }
 
 const carIconCache = new Map<number, google.maps.Icon>();
-const navArrowIconCache = new Map<number, google.maps.Icon>();
+/** Two-level cache: outer key is the size bucket (px), inner key is
+ *  the heading bucket (10° increments). Keeps the cache small even
+ *  though we now vary by both rotation AND zoom-driven size. */
+const navArrowIconCache = new Map<
+  number,
+  Map<number, google.maps.Icon>
+>();
+/** SVG-string cache by heading bucket. The SVG itself doesn't depend
+ *  on the displayed size — that's a render-time Icon prop — so we
+ *  build the data URL once per heading and reuse across sizes. */
+const navArrowSvgCache = new Map<number, string>();
+
+/** Bucket the icon's rendered pixel size to a coarse step (8px) so
+ *  the cache doesn't balloon with every fractional zoom change. */
+function bucketNavSize(px: number): number {
+  return Math.max(40, Math.min(112, Math.round(px / 8) * 8));
+}
+
+/**
+ * Pick the nav-puck render size based on the current map zoom. The
+ * puck is dominant at street-zoom (the typical nav view) and scales
+ * down as the driver zooms out so it doesn't swallow the map. Linear
+ * interpolation between zoom 11 (small) and zoom 18 (full size).
+ */
+function computeNavIconSizePx(zoom: number | undefined): number {
+  if (typeof zoom !== "number") return 112;
+  const t = Math.max(0, Math.min(1, (zoom - 11) / 7));
+  // 0.40 floor keeps the puck readable even when zoomed all the way out.
+  const scale = 0.4 + t * 0.6;
+  return bucketNavSize(112 * scale);
+}
 
 function buildNavArrowIcon(
   heading: number | null | undefined,
+  sizePx: number = 112,
 ): google.maps.Icon {
-  const bucket =
+  const headingBucket =
     typeof heading === "number"
       ? ((Math.round(heading / 10) * 10) % 360 + 360) % 360
       : 0;
-  const cached = navArrowIconCache.get(bucket);
-  if (cached) return cached;
-  const svg = navArrowIconSvg(bucket);
+  const sizeBucket = bucketNavSize(sizePx);
+  let sizeCache = navArrowIconCache.get(sizeBucket);
+  if (sizeCache) {
+    const cached = sizeCache.get(headingBucket);
+    if (cached) return cached;
+  } else {
+    sizeCache = new Map<number, google.maps.Icon>();
+    navArrowIconCache.set(sizeBucket, sizeCache);
+  }
+  let svg = navArrowSvgCache.get(headingBucket);
+  if (!svg) {
+    svg = navArrowIconSvg(headingBucket);
+    navArrowSvgCache.set(headingBucket, svg);
+  }
   const icon: google.maps.Icon = {
     url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
-    // 112×112 rendered — 2× the prior 56 so the puck reads as the
-    // dominant on-screen element during nav. The 80-unit viewBox
-    // scales up cleanly without losing crispness because everything
-    // inside is vector. Anchor centered so the puck sits exactly on
-    // the GPS coord (or the snapped-to-route coord, see below).
-    scaledSize: new google.maps.Size(112, 112),
-    anchor: new google.maps.Point(56, 56),
+    // 80-unit viewBox scales cleanly to whatever sizeBucket we pass.
+    // Anchor centered so the puck sits exactly on the GPS coord (or
+    // the snapped-to-route coord).
+    scaledSize: new google.maps.Size(sizeBucket, sizeBucket),
+    anchor: new google.maps.Point(sizeBucket / 2, sizeBucket / 2),
   };
-  navArrowIconCache.set(bucket, icon);
+  sizeCache.set(headingBucket, icon);
   return icon;
 }
 function buildCarIcon(heading: number | null | undefined): google.maps.Icon {
