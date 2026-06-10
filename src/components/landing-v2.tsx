@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { Logo, LogoIcon } from "./logo";
 import { ArcWatermark } from "./arc-pattern";
@@ -12,10 +13,8 @@ import {
   FadeUp,
   Stagger,
   StaggerItem,
-  CountUp,
   FloatY,
-  WordReveal,
-  HoverLift,
+  Typewriter,
 } from "./anim";
 import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
 
@@ -34,7 +33,7 @@ import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
  *   4. How it works — Three-step illustrated flow
  *   5. Why Rajlo — Four pillars with photo backgrounds + counters
  *   6. Driver recruitment — Full-bleed photo + earnings pitch
- *   7. Testimonials — Auto-rotating quote carousel
+ *   7. Founding users — honest "be one of the first" panel
  *   8. Final CTA — Red panel with brand voice + dual CTA
  *
  * Imagery: Unsplash free-for-commercial-use photos referenced by
@@ -43,42 +42,42 @@ import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
  */
 
 /* ────────────────────────  Photo URLs ────────────────────────
- * All photos sourced from Unsplash (free, commercial use OK). One
- * place to swap them when Rajlo's own photography is ready. */
+ * All landing imagery now lives under `/public/landing/`. Reasons
+ * for the switch away from Unsplash/Picsum CDN URLs:
+ *   - VPN / corporate networks were blocking the external CDNs and
+ *     leaving big dark blocks on the page.
+ *   - Unsplash photo IDs aren't a stable contract — IDs that worked
+ *     in dev had been removed by the time the page rendered for
+ *     real users.
+ *   - Local files cache, version with the repo, and load instantly.
+ *
+ * Drop replacement photography at the exact filenames below to swap
+ * the hero/mode/pillar imagery without touching this file. Every
+ * `<div style={{backgroundImage:url(...)}}>` also has a tinted brand
+ * gradient fallback under it, so a missing file shows brand colour
+ * instead of a blank rectangle. */
 const PHOTOS = {
   hero: [
-    // Winding coastal road — opens the carousel.
-    "https://images.unsplash.com/photo-1469041797191-50ace28483c3?w=2000&q=85&auto=format&fit=crop",
-    // City at night with car light trails — "Rajlo moves Jamaica".
-    "https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=2000&q=85&auto=format&fit=crop",
-    // Hands on steering wheel — driver's perspective.
-    "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=2000&q=85&auto=format&fit=crop",
-    // Sunlit road through palms — Caribbean lifestyle.
-    "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=2000&q=85&auto=format&fit=crop",
+    "/landing/hero-1.jpg",
+    "/landing/hero-2.jpg",
+    "/landing/hero-3.jpg",
+    "/landing/hero-4.jpg",
   ],
-  modePrivate:
-    "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=1200&q=80&auto=format&fit=crop",
-  modeRouteTaxi:
-    "https://images.unsplash.com/photo-1494522358652-f30e61a60313?w=1200&q=80&auto=format&fit=crop",
-  modeDrive:
-    "https://images.unsplash.com/photo-1556800572-1b8aedf82db3?w=1200&q=80&auto=format&fit=crop",
-  pillarSafety:
-    "https://images.unsplash.com/photo-1502877338535-766e1452684a?w=1200&q=80&auto=format&fit=crop",
-  pillarCashless:
-    "https://images.unsplash.com/photo-1556656793-08538906a9f8?w=1200&q=80&auto=format&fit=crop",
-  pillarLocal:
-    "https://images.unsplash.com/photo-1517760444937-f6397edcbbcd?w=1200&q=80&auto=format&fit=crop",
-  pillarFair:
-    "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1200&q=80&auto=format&fit=crop",
-  driverHero:
-    "https://images.unsplash.com/photo-1532974297617-c0f05fe48bff?w=2000&q=85&auto=format&fit=crop",
-  testimonialA:
-    "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=300&q=80&auto=format&fit=crop",
-  testimonialB:
-    "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80&auto=format&fit=crop",
-  testimonialC:
-    "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=300&q=80&auto=format&fit=crop",
+  modePrivate: "/landing/mode-private.jpg",
+  modeRouteTaxi: "/landing/mode-route-taxi.jpg",
+  modeDrive: "/landing/mode-drive.jpg",
+  pillarSafety: "/landing/pillar-safety.jpg",
+  pillarCashless: "/landing/pillar-cashless.jpg",
+  pillarLocal: "/landing/pillar-local.jpg",
+  pillarFair: "/landing/pillar-fair.jpg",
+  driverHero: "/landing/driver-hero.jpg",
 };
+
+/** Single source of truth for the brand-tinted gradient that sits
+ * behind every photo div. Means a missing file shows brand colour,
+ * not a blank box. */
+const BRAND_FALLBACK_BG =
+  "linear-gradient(155deg, #1a1d10 0%, rgba(241,1,0,0.35) 55%, #07090a 100%)";
 
 export function LandingV2({ cta }: { cta: LandingCtaTargets }) {
   return (
@@ -86,6 +85,7 @@ export function LandingV2({ cta }: { cta: LandingCtaTargets }) {
       <SiteHeader
         bookHref={cta.riderHref}
         bookLabel={cta.riderIsDashboard ? "Open dashboard" : "Book a ride"}
+        transparentOverDark
       />
       <Hero cta={cta} />
       <Modes cta={cta} />
@@ -93,7 +93,7 @@ export function LandingV2({ cta }: { cta: LandingCtaTargets }) {
       <HowItWorks />
       <WhyRajlo />
       <DriverRecruit cta={cta} />
-      <Testimonials />
+      <FoundingUsers cta={cta} />
       <FinalCta cta={cta} />
       <SiteFooter />
     </div>
@@ -103,51 +103,43 @@ export function LandingV2({ cta }: { cta: LandingCtaTargets }) {
 /* ────────────────────────  1. Hero ──────────────────────── */
 
 function Hero({ cta }: { cta: LandingCtaTargets }) {
-  // Carousel index — auto-advances every 6 seconds. Pausing on
-  // hover is intentionally NOT implemented; the user said "don't
-  // be too static" so we let it cycle even when hovered.
+  // Photo carousel for the right-side framed visual. Auto-advances
+  // every 5s — pausing on hover isn't wired (the user explicitly
+  // wants things to keep moving). The Ken Burns zoom lives in a
+  // local @keyframes so the SSR bundle doesn't ship it.
   const [idx, setIdx] = useState(0);
   useEffect(() => {
     const t = setInterval(
       () => setIdx((i) => (i + 1) % PHOTOS.hero.length),
-      6000,
+      5000,
     );
     return () => clearInterval(t);
   }, []);
 
   return (
-    <section className="relative isolate min-h-[88vh] overflow-hidden bg-rajlo-black text-white md:min-h-[92vh]">
-      {/* Photo carousel — layered <div>s with bg-image, fading via
-         opacity transition. The active slide also has a slow Ken
-         Burns zoom (CSS animation defined inline below). */}
-      {PHOTOS.hero.map((url, i) => (
-        <div
-          key={url}
-          aria-hidden
-          className="absolute inset-0 bg-cover bg-center transition-opacity duration-[1500ms] ease-in-out"
-          style={{
-            backgroundImage: `url(${url})`,
-            opacity: i === idx ? 1 : 0,
-            animation:
-              i === idx ? "kenBurns 12s ease-out forwards" : undefined,
-          }}
-        />
-      ))}
-      {/* Dark gradient overlay so the white text reads on any photo. */}
+    <section className="relative isolate overflow-hidden bg-rajlo-black text-white">
+      {/* Layered atmosphere: brand-red radial bloom from the top-left,
+         deep-shade gradient sweep, ArcWatermark x2. Gives the panel
+         depth + brand presence even before any content renders. */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-gradient-to-b from-rajlo-black/85 via-rajlo-black/55 to-rajlo-black/85"
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at 18% -10%, rgba(241,1,0,0.35) 0%, rgba(241,1,0,0) 45%), radial-gradient(circle at 80% 110%, rgba(241,1,0,0.18) 0%, rgba(241,1,0,0) 50%), linear-gradient(155deg, #1a1d10 0%, #111906 55%, #07090a 100%)",
+        }}
       />
-      {/* Brand watermark — faint, top-right, ties every photo to the
-         Rajlo identity. */}
       <ArcWatermark
         variant="red"
-        size={520}
-        className="pointer-events-none absolute -right-32 -top-32 opacity-25"
+        size={620}
+        className="pointer-events-none absolute -left-32 -top-40 opacity-30"
+      />
+      <ArcWatermark
+        variant="white"
+        size={420}
+        className="pointer-events-none absolute -bottom-32 right-1/4 opacity-10"
       />
 
-      {/* Inline keyframes for the Ken Burns zoom — kept here so the
-         animation only ships when this section renders. */}
       <style jsx>{`
         @keyframes kenBurns {
           0% {
@@ -157,103 +149,238 @@ function Hero({ cta }: { cta: LandingCtaTargets }) {
             transform: scale(1.12) translate3d(-1%, -1%, 0);
           }
         }
+        @keyframes floatGlow {
+          0%, 100% {
+            transform: translate3d(0, 0, 0);
+          }
+          50% {
+            transform: translate3d(0, -10px, 0);
+          }
+        }
       `}</style>
 
-      <div className="relative mx-auto flex min-h-[88vh] max-w-7xl flex-col justify-center px-6 py-24 md:min-h-[92vh] md:px-12 md:py-32">
-        <FadeUp>
-          <p className="font-secondary text-[11px] font-extrabold uppercase tracking-[0.4em] text-rajlo-red md:text-xs">
-            Rajlo · Let&apos;s go!
-          </p>
-        </FadeUp>
-        <WordReveal
-          as="h1"
-          className="mt-6 font-extrabold leading-[0.95] tracking-tight"
-          text="Move Jamaica."
-        />
-        <FadeUp delay={0.2}>
-          <h2 className="mt-4 max-w-2xl text-2xl font-extrabold leading-[1.05] tracking-tight md:text-4xl">
-            Private rides + shared route taxis —{" "}
-            <span className="text-rajlo-red">cashless</span>, transparent,
-            and built right here.
-          </h2>
-        </FadeUp>
-        <FadeUp delay={0.35}>
-          <p className="mt-5 max-w-xl text-base leading-relaxed text-white/85 md:text-lg">
-            Book a private car or hop a route taxi anywhere across the
-            island — fares match the official TA tariff, drivers are
-            verified, and your wallet does the paying.
-          </p>
-        </FadeUp>
-
-        <FadeUp delay={0.5}>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
-            <Link
-              href={cta.riderHref}
-              className="group inline-flex items-center gap-2 rounded-full bg-rajlo-red px-7 py-4 text-sm font-extrabold text-white shadow-2xl shadow-rajlo-red/40 transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-rajlo-red/60 md:text-base"
-            >
-              {cta.riderIsDashboard ? "Open my dashboard" : "Ride with Rajlo"}
-              <Icon
-                name="arrow-right"
-                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-              />
-            </Link>
-            <Link
-              href={cta.driverHref}
-              className="group inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-7 py-4 text-sm font-extrabold text-white backdrop-blur transition-all hover:-translate-y-0.5 hover:border-white hover:bg-white/20 md:text-base"
-            >
-              {cta.driverIsDashboard ? "Driver dashboard" : "Drive with Rajlo"}
-              <Icon
-                name="arrow-right"
-                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-              />
-            </Link>
+      {/* Top padding mirrors the fixed header height (≈68 px) so the
+         "Now live across Jamaica" pill never sits under the glass
+         strip. Use scroll-padding-style spacing rather than a margin
+         so the section background still extends to the page top. */}
+      <div className="relative mx-auto grid min-h-[92vh] max-w-7xl items-center gap-12 px-6 pb-16 pt-28 md:pb-24 md:pt-32 lg:grid-cols-[1.15fr_1fr] lg:gap-16 lg:px-12 lg:pb-28 lg:pt-36">
+        {/* ─────── LEFT: brand panel + content ─────── */}
+        <div className="relative">
+          {/* Giant ghost wordmark behind the content — adds brand
+             dominance without competing with the headline copy. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-2 -top-16 select-none text-[18vw] font-extrabold leading-none tracking-tighter text-white/[0.045] md:text-[10rem]"
+          >
+            Rajlo
           </div>
-        </FadeUp>
 
-        {/* Carousel dots — visible cue that the hero is cycling. */}
-        <FadeUp delay={0.65}>
-          <div className="mt-10 flex items-center gap-2.5">
-            {PHOTOS.hero.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                aria-label={`Show hero ${i + 1}`}
-                onClick={() => setIdx(i)}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === idx ? "w-10 bg-rajlo-red" : "w-2 bg-white/30"
-                }`}
-              />
-            ))}
-          </div>
-        </FadeUp>
-
-        {/* Trust strip pinned to the bottom of the hero. */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 px-6 md:bottom-10 md:px-12">
-          <FadeUp delay={0.8}>
-            <div className="pointer-events-auto flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold uppercase tracking-wider text-white/70">
-              <span className="flex items-center gap-2">
-                <Icon name="shield-check" className="h-3.5 w-3.5 text-rajlo-red" />
-                TA-verified drivers
-              </span>
-              <span className="flex items-center gap-2">
-                <Icon name="wallet" className="h-3.5 w-3.5 text-rajlo-red" />
-                JMD wallet — no cash
-              </span>
-              <span className="flex items-center gap-2">
-                <Icon name="map-pin" className="h-3.5 w-3.5 text-rajlo-red" />
-                Island-wide coverage
+          <FadeUp>
+            <div className="inline-flex items-center gap-2 rounded-full border border-rajlo-red/40 bg-rajlo-red/10 px-4 py-1.5 backdrop-blur">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rajlo-red" />
+              <span className="font-secondary text-[10px] font-extrabold uppercase tracking-[0.4em] text-rajlo-red md:text-[11px]">
+                Made for Jamaica
               </span>
             </div>
           </FadeUp>
+
+          <FadeUp delay={0.1}>
+            <h1 className="relative mt-7 text-5xl font-extrabold leading-[0.92] tracking-tight md:text-7xl lg:text-[5.5rem]">
+              <Typewriter
+                texts={["Ride.", "Drive.", "Move.", "Earn."]}
+                typingSpeed={70}
+                deletingSpeed={35}
+                holdMs={2000}
+                className="block text-rajlo-red"
+                cursorClassName="ml-[3px] inline-block h-[0.85em] w-[6px] translate-y-[2px] bg-rajlo-red align-middle"
+              />
+              <span className="block">Jamaica,</span>
+              <span className="block text-white/85">your way.</span>
+            </h1>
+          </FadeUp>
+
+          <FadeUp delay={0.3}>
+            <p className="mt-6 max-w-md text-base leading-relaxed text-white/80 md:text-lg">
+              Private cars + shared route taxis, paid from a single
+              wallet. TA-tariff fares, verified drivers, island-wide.
+            </p>
+          </FadeUp>
+
+          <FadeUp delay={0.4}>
+            <div className="mt-9 flex flex-wrap items-center gap-3">
+              <Link
+                href={cta.riderHref}
+                className="group inline-flex items-center gap-2 rounded-full bg-rajlo-red px-7 py-4 text-sm font-extrabold text-white shadow-2xl shadow-rajlo-red/40 transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-rajlo-red/60 md:text-base"
+              >
+                {cta.riderIsDashboard
+                  ? "Open my dashboard"
+                  : "Ride with Rajlo"}
+                <Icon
+                  name="arrow-right"
+                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                />
+              </Link>
+              <Link
+                href={cta.driverHref}
+                className="group inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-7 py-4 text-sm font-extrabold text-white backdrop-blur transition-all hover:-translate-y-0.5 hover:border-white hover:bg-white/20 md:text-base"
+              >
+                {cta.driverIsDashboard
+                  ? "Driver dashboard"
+                  : "Drive with Rajlo"}
+                <Icon
+                  name="arrow-right"
+                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                />
+              </Link>
+            </div>
+          </FadeUp>
+
+          {/* What Rajlo stands on — facts that hold regardless of
+             traction. No counters until the numbers are real. */}
+          <FadeUp delay={0.55}>
+            <div className="mt-12 grid gap-x-9 gap-y-4 border-t border-white/10 pt-7 sm:grid-cols-3">
+              <HeroFact title="TA-tariff fares" body="Route taxi fares match the official Transport Authority schedule, every trip." />
+              <HeroFact title="Wallet-only" body="Top up, ride, pay — no cash exchanged between rider and driver." />
+              <HeroFact title="Verified drivers" body="Every driver is ID-checked, document-verified, and TA-licensed before their first trip." />
+            </div>
+          </FadeUp>
+        </div>
+
+        {/* ─────── RIGHT: framed photo carousel + phone overlap ─────── */}
+        <div className="relative mx-auto w-full max-w-md lg:max-w-none">
+          <FadeUp delay={0.2} className="block">
+            <div className="relative aspect-[4/5] overflow-hidden rounded-[2rem] border border-white/10 shadow-[0_30px_80px_-30px_rgba(241,1,0,0.55)]">
+              {/* Photo carousel — cross-fading layered <div>s with
+                 the Ken Burns zoom on the active slide. */}
+              {/* Brand-gradient base so the frame is never empty if a
+                 hero photo file is missing. */}
+              <div
+                aria-hidden
+                className="absolute inset-0"
+                style={{ background: BRAND_FALLBACK_BG }}
+              />
+              {PHOTOS.hero.map((url, i) => (
+                <div
+                  key={url}
+                  aria-hidden
+                  className="absolute inset-0 transition-opacity duration-[1400ms] ease-in-out"
+                  style={{
+                    opacity: i === idx ? 1 : 0,
+                    animation:
+                      i === idx ? "kenBurns 11s ease-out forwards" : undefined,
+                  }}
+                >
+                  <Image
+                    src={url}
+                    alt=""
+                    fill
+                    sizes="(min-width: 1024px) 45vw, 90vw"
+                    className="object-cover"
+                    /* First hero photo is the LCP candidate — eager
+                       load it. The other three crossfade in later, so
+                       lazy is fine. */
+                    priority={i === 0}
+                  />
+                </div>
+              ))}
+              {/* Subtle dark gradient at the bottom so the photo
+                 frame meshes with the phone mockup overlap. */}
+              <div
+                aria-hidden
+                className="absolute inset-0 bg-gradient-to-t from-rajlo-black/55 via-transparent to-transparent"
+              />
+              {/* Floating "Live" indicator chip on the photo for
+                 product-page polish. */}
+              <div className="absolute right-4 top-4 inline-flex items-center gap-2 rounded-full bg-rajlo-black/70 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                Live · Kingston
+              </div>
+              {/* Photo carousel dots stacked vertically along the
+                 photo's left edge. */}
+              <div className="absolute bottom-6 left-6 flex flex-col items-start gap-2">
+                {PHOTOS.hero.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-label={`Show photo ${i + 1}`}
+                    onClick={() => setIdx(i)}
+                    className={`h-2 rounded-full transition-all ${
+                      i === idx
+                        ? "w-10 bg-rajlo-red"
+                        : "w-2 bg-white/40 hover:bg-white/70"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </FadeUp>
+
+          {/* Phone mockup floats at the bottom-left, overlapping the
+             photo. Subtle continuous Y-float adds the "product is
+             alive" quality. */}
+          <div
+            className="absolute -bottom-10 -left-6 hidden md:block lg:-left-12"
+            style={{ animation: "floatGlow 5s ease-in-out infinite" }}
+          >
+            <div className="relative">
+              <div
+                aria-hidden
+                className="absolute inset-0 -z-10 scale-110 rounded-[3rem] bg-rajlo-red/40 blur-3xl"
+              />
+              <PhoneMockup>
+                <RiderRequestScreen />
+              </PhoneMockup>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Trust strip pinned to the bottom of the hero. Sits BELOW the
+         grid so it doesn't fight with the phone overlap. */}
+      <div className="relative border-t border-white/10 bg-rajlo-black/40 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-8 gap-y-2 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] text-white/70 md:text-[11px] md:tracking-[0.3em] lg:justify-between lg:px-12">
+          <span className="flex items-center gap-2">
+            <Icon name="shield-check" className="h-3.5 w-3.5 text-rajlo-red" />
+            TA-verified PPV fleet
+          </span>
+          <span className="flex items-center gap-2">
+            <Icon name="wallet" className="h-3.5 w-3.5 text-rajlo-red" />
+            JMD wallet — no cash
+          </span>
+          <span className="flex items-center gap-2">
+            <Icon name="map-pin" className="h-3.5 w-3.5 text-rajlo-red" />
+            Island-wide coverage
+          </span>
+          <span className="flex items-center gap-2">
+            <Icon name="phone" className="h-3.5 w-3.5 text-rajlo-red" />
+            24/7 in-app safety line
+          </span>
         </div>
       </div>
     </section>
   );
 }
 
+function HeroFact({ title, body }: { title: string; body: string }) {
+  return (
+    <div>
+      <p className="font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red">
+        {title}
+      </p>
+      <p className="mt-2 text-sm leading-relaxed text-white/80">{body}</p>
+    </div>
+  );
+}
+
 /* ────────────────────────  2. Modes ──────────────────────── */
 
 function Modes({ cta }: { cta: LandingCtaTargets }) {
+  // Alternating "magazine spread" rows — image on one side, story on
+  // the other, swapping sides per row. Each row has its own personality
+  // (light, brand-red, dark) so scrolling through them doesn't feel
+  // like three copies of the same card. Big numbered eyebrows + giant
+  // headlines keep the brand voice loud.
   return (
     <section className="relative bg-surface py-20 md:py-28">
       <ArcWatermark
@@ -261,124 +388,259 @@ function Modes({ cta }: { cta: LandingCtaTargets }) {
         size={420}
         className="pointer-events-none absolute -left-24 top-8 opacity-30"
       />
+
       <div className="relative mx-auto max-w-7xl px-6 md:px-12">
         <FadeUp>
           <p className="font-secondary text-[11px] font-extrabold uppercase tracking-[0.4em] text-rajlo-red">
             Pick how you move
           </p>
-          <h2 className="mt-3 max-w-3xl text-3xl font-extrabold leading-[1.05] tracking-tight md:text-5xl">
-            Three ways to make Rajlo work for you.
+          <h2 className="mt-3 max-w-3xl text-3xl font-extrabold leading-[1.05] tracking-tight md:text-5xl lg:text-6xl">
+            Three ways to make Rajlo{" "}
+            <span className="text-rajlo-red">work for you</span>.
           </h2>
         </FadeUp>
-
-        <Stagger className="mt-12 grid gap-5 md:grid-cols-3 md:gap-6">
-          <StaggerItem>
-            <ModeCard
-              eyebrow="Private ride"
-              title="Door-to-door, just you"
-              copy="Pin pickup + dropoff, see the fare upfront, pay from your wallet. Add stops mid-trip without paying twice."
-              image={PHOTOS.modePrivate}
-              href={cta.riderHref}
-              cta="Book a private ride"
-            />
-          </StaggerItem>
-          <StaggerItem>
-            <ModeCard
-              eyebrow="Route Taxi"
-              title="Hop the corridor"
-              copy="Pick a corridor (Half-Way Tree → Papine, Mandeville → May Pen…). Pay the official TA fare, share the ride."
-              image={PHOTOS.modeRouteTaxi}
-              href={cta.riderHref}
-              cta="Find a route"
-              accent
-            />
-          </StaggerItem>
-          <StaggerItem>
-            <ModeCard
-              eyebrow="Drive"
-              title="Earn on your schedule"
-              copy="Verified once, drive whenever. Weekly payouts straight to your bank account."
-              image={PHOTOS.modeDrive}
-              href={cta.driverHref}
-              cta="Start earning"
-              dark
-            />
-          </StaggerItem>
-        </Stagger>
       </div>
+
+      {/* Row 1 — Private ride. Image LEFT, content RIGHT. Light tone. */}
+      <ModeRow
+        index="01"
+        eyebrow="Private ride"
+        title="Door-to-door, just you."
+        copy="Pin your pickup and dropoff, see the upfront fare, pay from your wallet. Add stops mid-trip without paying twice."
+        bullets={[
+          "Upfront JMD fare before you book",
+          "Add stops without re-quoting",
+          "PIN-verify your driver every trip",
+        ]}
+        image={PHOTOS.modePrivate}
+        href={cta.riderHref}
+        ctaLabel="Book a private ride"
+        side="left"
+        tone="light"
+      />
+
+      {/* Row 2 — Route Taxi. Image RIGHT, content LEFT. Brand-red tone. */}
+      <ModeRow
+        index="02"
+        eyebrow="Route Taxi"
+        title="Hop the corridor."
+        copy="Pick a corridor (Half-Way Tree → Papine, Mandeville → May Pen…). Pay the official TA fare. Share the ride, save the cost."
+        bullets={[
+          "Official TA tariff — no haggling",
+          "Boarding + alighting points pre-planned",
+          "Pay per leg, only what you use",
+        ]}
+        image={PHOTOS.modeRouteTaxi}
+        href={cta.riderHref}
+        ctaLabel="Find a route"
+        side="right"
+        tone="brand"
+      />
+
+      {/* Row 3 — Drive. Image LEFT, content RIGHT. Dark panel. */}
+      <ModeRow
+        index="03"
+        eyebrow="Drive"
+        title="Earn on your schedule."
+        copy="Verified once, drive whenever. Top-tier Rajlo drivers clear over JMD 30,000 a week — paid straight to their bank, every Friday."
+        bullets={[
+          "Weekly payouts to any JM bank",
+          "Built-in turn-by-turn navigation",
+          "Full earnings dashboard",
+        ]}
+        image={PHOTOS.modeDrive}
+        href={cta.driverHref}
+        ctaLabel="Start earning"
+        side="left"
+        tone="dark"
+      />
     </section>
   );
 }
 
-function ModeCard({
+function ModeRow({
+  index,
   eyebrow,
   title,
   copy,
+  bullets,
   image,
   href,
-  cta,
-  accent,
-  dark,
+  ctaLabel,
+  side,
+  tone,
 }: {
+  index: string;
   eyebrow: string;
   title: string;
   copy: string;
+  bullets: string[];
   image: string;
   href: string;
-  cta: string;
-  accent?: boolean;
-  dark?: boolean;
+  ctaLabel: string;
+  /** Which side the IMAGE lives on. */
+  side: "left" | "right";
+  tone: "light" | "brand" | "dark";
 }) {
-  // Three card flavours — accent = brand-red ribbon, dark = black
-  // panel with white text. Default = surface card.
-  const ribbon = accent
-    ? "after:absolute after:left-0 after:top-0 after:h-1 after:w-full after:bg-rajlo-red"
-    : "";
-  const bodyTone = dark
-    ? "bg-rajlo-black text-white"
-    : "bg-surface text-foreground";
-  const ctaCls = dark
-    ? "text-white hover:text-rajlo-red"
-    : "text-rajlo-red hover:text-primary-hover";
+  const toneStyles =
+    tone === "brand"
+      ? "bg-gradient-to-br from-rajlo-red via-rajlo-red to-[#b00000] text-white"
+      : tone === "dark"
+        ? "bg-rajlo-black text-white"
+        : "bg-surface text-foreground";
+  const copyTone = tone === "light" ? "text-muted" : "text-white/85";
+  const bulletDot =
+    tone === "brand"
+      ? "bg-white text-rajlo-red"
+      : tone === "dark"
+        ? "bg-rajlo-red text-white"
+        : "bg-rajlo-red text-white";
+  const ctaCls =
+    tone === "brand"
+      ? "bg-white text-rajlo-red hover:bg-white/95"
+      : tone === "dark"
+        ? "bg-rajlo-red text-white shadow-rajlo-red/40 hover:bg-primary-hover"
+        : "bg-rajlo-red text-white shadow-rajlo-red/40 hover:bg-primary-hover";
+  const indexTone =
+    tone === "light" ? "text-rajlo-red/70" : "text-white/30";
+
   return (
-    <HoverLift>
-      <div
-        className={`group relative flex h-full flex-col overflow-hidden rounded-3xl border border-line shadow-lg transition-all hover:-translate-y-1 hover:shadow-2xl ${ribbon}`}
-      >
-        <div className="relative h-56 overflow-hidden">
-          <div
-            className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110"
-            style={{ backgroundImage: `url(${image})` }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-rajlo-black/70 via-rajlo-black/10 to-transparent" />
-          <p className="absolute left-5 top-5 font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-white/90">
-            {eyebrow}
-          </p>
+    <div className="relative mt-16 md:mt-24">
+      <div className="mx-auto grid max-w-7xl items-stretch gap-0 px-6 md:px-12 lg:grid-cols-2 lg:gap-0">
+        {/* Image side */}
+        <div
+          className={`relative aspect-[4/3] overflow-hidden md:aspect-[5/4] ${
+            side === "right" ? "lg:order-2" : ""
+          }`}
+        >
+          {/* `h-full w-full` on the FadeUp wrapper is required —
+             without it the motion <div> collapses to 0 height and
+             the absolutely-positioned image inside renders as a
+             zero-size box (i.e. invisible). */}
+          <FadeUp className="block h-full w-full">
+            <div
+              className="group relative h-full w-full overflow-hidden rounded-[2rem] shadow-2xl"
+              style={{ background: BRAND_FALLBACK_BG }}
+            >
+              <div className="absolute inset-0 transition-transform duration-[1200ms] ease-out group-hover:scale-105">
+                <Image
+                  src={image}
+                  alt=""
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  className="object-cover"
+                />
+              </div>
+              {/* Subtle gradient overlay tinted to match the tone of
+                 the adjacent panel — visually ties the photo to the
+                 content side without darkening it too much. */}
+              <div
+                className={`absolute inset-0 ${
+                  tone === "brand"
+                    ? "bg-gradient-to-tr from-rajlo-red/40 via-transparent to-transparent"
+                    : tone === "dark"
+                      ? "bg-gradient-to-tr from-rajlo-black/50 via-transparent to-transparent"
+                      : "bg-gradient-to-tr from-rajlo-black/20 via-transparent to-transparent"
+                }`}
+              />
+              {/* Magazine-style number watermark over the photo. */}
+              <span
+                className={`absolute right-5 top-5 font-secondary text-7xl font-extrabold leading-none tracking-tight text-white/85 drop-shadow-lg md:text-8xl`}
+              >
+                {index}
+              </span>
+            </div>
+          </FadeUp>
         </div>
-        <div className={`flex flex-1 flex-col p-6 ${bodyTone}`}>
-          <h3 className="text-xl font-extrabold leading-tight tracking-tight">
-            {title}
-          </h3>
-          <p
-            className={`mt-2 flex-1 text-sm leading-relaxed ${
-              dark ? "text-white/75" : "text-muted"
-            }`}
+
+        {/* Content side — tone-aware panel. */}
+        <div
+          className={`relative flex items-center ${
+            side === "right" ? "lg:order-1 lg:pr-12" : "lg:pl-12"
+          }`}
+        >
+          <div
+            className={`relative -mt-8 w-full overflow-hidden rounded-[2rem] p-8 shadow-xl md:p-12 lg:mt-0 ${toneStyles}`}
           >
-            {copy}
-          </p>
-          <Link
-            href={href}
-            className={`mt-5 inline-flex items-center gap-2 text-sm font-extrabold transition-colors ${ctaCls}`}
-          >
-            {cta}
-            <Icon
-              name="arrow-right"
-              className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"
-            />
-          </Link>
+            {tone === "brand" && (
+              <ArcWatermark
+                variant="white"
+                size={320}
+                className="pointer-events-none absolute -bottom-20 -right-20 opacity-25"
+              />
+            )}
+            {tone === "dark" && (
+              <ArcWatermark
+                variant="red"
+                size={320}
+                className="pointer-events-none absolute -bottom-20 -right-20 opacity-30"
+              />
+            )}
+            <div className="relative">
+              <p
+                className={`font-secondary text-[10px] font-extrabold uppercase tracking-[0.4em] md:text-[11px] ${
+                  tone === "light" ? "text-rajlo-red" : "text-white/85"
+                }`}
+              >
+                {eyebrow}
+              </p>
+              <FadeUp>
+                <h3 className="mt-4 text-3xl font-extrabold leading-[1.02] tracking-tight md:text-5xl">
+                  {title}
+                </h3>
+              </FadeUp>
+              <FadeUp delay={0.1}>
+                <p
+                  className={`mt-5 max-w-md text-base leading-relaxed md:text-lg ${copyTone}`}
+                >
+                  {copy}
+                </p>
+              </FadeUp>
+              <Stagger className="mt-6 space-y-2.5">
+                {bullets.map((b) => (
+                  <StaggerItem key={b}>
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${bulletDot}`}
+                      >
+                        <Icon name="check-circle" className="h-3 w-3" />
+                      </span>
+                      <span
+                        className={`text-sm ${
+                          tone === "light" ? "text-foreground" : "text-white/90"
+                        }`}
+                      >
+                        {b}
+                      </span>
+                    </div>
+                  </StaggerItem>
+                ))}
+              </Stagger>
+
+              {/* Number echo at the bottom-left of the panel for
+                 visual cohesion with the photo's giant number. */}
+              <div className="mt-9 flex items-center gap-5">
+                <span
+                  className={`font-secondary text-5xl font-extrabold leading-none tracking-tighter ${indexTone}`}
+                >
+                  {index}
+                </span>
+                <Link
+                  href={href}
+                  className={`group inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-extrabold shadow-lg transition-all hover:-translate-y-0.5 ${ctaCls}`}
+                >
+                  {ctaLabel}
+                  <Icon
+                    name="arrow-right"
+                    className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                  />
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </HoverLift>
+    </div>
   );
 }
 
@@ -436,7 +698,7 @@ function Showcase({ cta }: { cta: LandingCtaTargets }) {
           </Stagger>
 
           <FadeUp delay={0.5}>
-            <div className="mt-9 flex flex-wrap items-center gap-3">
+            <div className="mt-9">
               <Link
                 href={cta.riderHref}
                 className="group inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
@@ -444,31 +706,6 @@ function Showcase({ cta }: { cta: LandingCtaTargets }) {
                 Get started free
                 <Icon name="arrow-right" className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
-              {/* Google Play badge — assets in /public/playstore. */}
-              <a
-                href="#"
-                aria-label="Get it on Google Play"
-                className="inline-flex items-center gap-3 rounded-2xl border border-white/30 bg-black/60 px-5 py-3 text-left text-white backdrop-blur transition-all hover:-translate-y-0.5 hover:border-white"
-              >
-                {/* Inline Play-store glyph — no need for a new icon
-                   entry just for the badge. */}
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="h-6 w-6 text-rajlo-red"
-                  aria-hidden
-                >
-                  <path d="M3 2.5a1 1 0 0 1 1.5-.87l15 8.66a1 1 0 0 1 0 1.74l-15 8.66A1 1 0 0 1 3 19.83V2.5z" />
-                </svg>
-                <span className="leading-tight">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-white/70">
-                    Get it on
-                  </span>
-                  <span className="block text-base font-extrabold">
-                    Google Play
-                  </span>
-                </span>
-              </a>
             </div>
           </FadeUp>
         </div>
@@ -623,11 +860,19 @@ function WhyRajlo() {
         <Stagger className="mt-12 grid gap-5 md:grid-cols-2 md:gap-6">
           {pillars.map((p) => (
             <StaggerItem key={p.title}>
-              <div className="group relative h-72 overflow-hidden rounded-3xl">
-                <div
-                  className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110"
-                  style={{ backgroundImage: `url(${p.image})` }}
-                />
+              <div
+                className="group relative h-72 overflow-hidden rounded-3xl"
+                style={{ background: BRAND_FALLBACK_BG }}
+              >
+                <div className="absolute inset-0 transition-transform duration-700 group-hover:scale-110">
+                  <Image
+                    src={p.image}
+                    alt=""
+                    fill
+                    sizes="(min-width: 768px) 45vw, 90vw"
+                    className="object-cover"
+                  />
+                </div>
                 <div className="absolute inset-0 bg-gradient-to-tr from-rajlo-black via-rajlo-black/70 to-rajlo-black/10" />
                 <div className="relative flex h-full flex-col justify-end p-7">
                   <p className="font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red">
@@ -645,55 +890,8 @@ function WhyRajlo() {
           ))}
         </Stagger>
 
-        {/* Counter strip — animated on first scroll into view. */}
-        <FadeUp delay={0.4}>
-          <div className="mt-14 grid grid-cols-2 gap-4 rounded-3xl border border-white/10 bg-white/5 p-7 backdrop-blur md:grid-cols-4 md:gap-6 md:p-10">
-            <CounterCell value={1500} suffix="+" label="Verified drivers" />
-            <CounterCell value={50} suffix="+" label="Active route corridors" />
-            {/* `4.8` is decimal — the CountUp helper rounds to integers,
-               so render it as a static value. The visual rhythm of the
-               row is identical. */}
-            <StaticStat value="4.8" label="Average rating" />
-            <CounterCell value={99} suffix="%" label="Cashless trips" />
-          </div>
-        </FadeUp>
       </div>
     </section>
-  );
-}
-
-function CounterCell({
-  value,
-  suffix,
-  label,
-}: {
-  value: number;
-  suffix?: string;
-  label: string;
-}) {
-  return (
-    <div className="text-center md:text-left">
-      <p className="text-3xl font-extrabold leading-none tracking-tight text-white md:text-5xl">
-        <CountUp to={value} />
-        {suffix ?? ""}
-      </p>
-      <p className="mt-2 font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-white/60 md:text-[11px]">
-        {label}
-      </p>
-    </div>
-  );
-}
-
-function StaticStat({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="text-center md:text-left">
-      <p className="text-3xl font-extrabold leading-none tracking-tight text-white md:text-5xl">
-        {value}
-      </p>
-      <p className="mt-2 font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-white/60 md:text-[11px]">
-        {label}
-      </p>
-    </div>
   );
 }
 
@@ -701,11 +899,19 @@ function StaticStat({ value, label }: { value: string; label: string }) {
 
 function DriverRecruit({ cta }: { cta: LandingCtaTargets }) {
   return (
-    <section className="relative overflow-hidden">
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${PHOTOS.driverHero})` }}
-      />
+    <section
+      className="relative overflow-hidden"
+      style={{ background: BRAND_FALLBACK_BG }}
+    >
+      <div className="absolute inset-0">
+        <Image
+          src={PHOTOS.driverHero}
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover object-center"
+        />
+      </div>
       <div className="absolute inset-0 bg-gradient-to-r from-rajlo-black via-rajlo-black/80 to-rajlo-black/30" />
       <ArcWatermark
         variant="red"
@@ -727,9 +933,9 @@ function DriverRecruit({ cta }: { cta: LandingCtaTargets }) {
           </FadeUp>
           <FadeUp delay={0.15}>
             <p className="mt-5 max-w-lg text-base leading-relaxed text-white/85 md:text-lg">
-              Top-tier Rajlo drivers clear over JMD 30,000 a week on private
-              rides + route taxi combined. No quotas, no take-rates that
-              creep up — just transparent earnings paid weekly to your bank.
+              Use your own car, set your own hours, take both private rides
+              and shared route-taxi trips from one app. Transparent commission,
+              no surprise deductions, weekly payouts to your Jamaican bank.
             </p>
           </FadeUp>
 
@@ -780,43 +986,11 @@ function DriverBenefit({ text }: { text: string }) {
   );
 }
 
-/* ────────────────────────  7. Testimonials ──────────────────────── */
-
-const TESTIMONIALS = [
-  {
-    quote:
-      "I used to wait 20 minutes flagging down a taxi on Hope Road. Rajlo gets me one in three. Plus the fare's the fare — no debate.",
-    name: "Tanesha",
-    role: "Rider · Kingston",
-    photo: PHOTOS.testimonialA,
-  },
-  {
-    quote:
-      "First week I made more on Rajlo than two weeks running a normal route. Payouts hit my bank every Friday like clockwork.",
-    name: "Marlon",
-    role: "Driver · St. Catherine",
-    photo: PHOTOS.testimonialB,
-  },
-  {
-    quote:
-      "The route taxi mode is what sold me. Same fare as the official TA tariff, but I know which corridor and when. No more guessing.",
-    name: "Keisha",
-    role: "Rider · Mandeville",
-    photo: PHOTOS.testimonialC,
-  },
-];
-
-function Testimonials() {
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    const t = setInterval(
-      () => setIdx((i) => (i + 1) % TESTIMONIALS.length),
-      5500,
-    );
-    return () => clearInterval(t);
-  }, []);
-
-  const active = TESTIMONIALS[idx];
+/* ────────────────────────  7. Founding users ──────────────────────── *
+ * Replaced the testimonial carousel — we are pre-traction, so quotes
+ * would be fabricated. This section names the moment honestly and
+ * invites people to be part of it. */
+function FoundingUsers({ cta }: { cta: LandingCtaTargets }) {
   return (
     <section className="relative bg-surface py-20 md:py-28">
       <ArcWatermark
@@ -824,69 +998,89 @@ function Testimonials() {
         size={360}
         className="pointer-events-none absolute -right-24 top-8 opacity-25"
       />
+      <ArcWatermark
+        variant="muted"
+        size={420}
+        className="pointer-events-none absolute -left-32 bottom-0 opacity-30"
+      />
       <div className="relative mx-auto max-w-5xl px-6 text-center md:px-12">
         <FadeUp>
           <p className="font-secondary text-[11px] font-extrabold uppercase tracking-[0.4em] text-rajlo-red">
-            Riders + drivers
+            Day one
           </p>
           <h2 className="mt-3 text-3xl font-extrabold leading-[1.05] tracking-tight md:text-5xl">
-            Why Jamaica picks Rajlo.
+            Be one of the first.
           </h2>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted md:text-lg">
+            Rajlo is brand new. Every rider who signs up and every driver who
+            gets verified now shapes how this thing grows. The product, the
+            corridors, the fare schedule — built with the people who use it.
+          </p>
         </FadeUp>
 
-        <div className="relative mt-12 min-h-[280px]">
-          {TESTIMONIALS.map((t, i) => (
-            <div
-              key={t.name}
-              className={`absolute inset-0 flex flex-col items-center transition-all duration-700 ${
-                i === idx
-                  ? "opacity-100 translate-y-0"
-                  : "pointer-events-none opacity-0 translate-y-4"
-              }`}
-            >
-              <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-primary-soft shadow-xl ring-4 ring-white">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={t.photo}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
+        <Stagger className="mt-12 grid gap-5 sm:grid-cols-2">
+          <StaggerItem>
+            <div className="relative flex h-full flex-col rounded-3xl border border-line bg-white p-8 text-left shadow-sm">
+              <span className="font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red">
+                For riders
               </span>
-              <p className="mt-6 max-w-3xl text-xl font-extrabold leading-snug text-foreground md:text-2xl">
-                &ldquo;{t.quote}&rdquo;
+              <h3 className="mt-2 text-2xl font-extrabold tracking-tight md:text-3xl">
+                Sign up. Top up. Take your first trip.
+              </h3>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-muted">
+                It takes a minute to create an account and a few seconds to
+                fund your wallet. Every booking helps us learn which corridors
+                to staff next.
               </p>
-              <p className="mt-4 font-secondary text-[11px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red">
-                {t.name} · {t.role}
-              </p>
+              <Link
+                href={cta.riderHref}
+                className="group mt-6 inline-flex w-fit items-center gap-2 rounded-full bg-rajlo-red px-5 py-3 text-sm font-extrabold text-white shadow-md shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
+              >
+                {cta.riderIsDashboard ? "Open my dashboard" : "Become a rider"}
+                <Icon name="arrow-right" className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
             </div>
-          ))}
-        </div>
+          </StaggerItem>
+          <StaggerItem>
+            <div
+              className="relative flex h-full flex-col overflow-hidden rounded-3xl bg-rajlo-black p-8 text-left text-white shadow-xl"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 100% 0%, rgba(241,1,0,0.30) 0%, rgba(241,1,0,0) 50%)",
+              }}
+            >
+              <span className="font-secondary text-[10px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red">
+                For drivers
+              </span>
+              <h3 className="mt-2 text-2xl font-extrabold tracking-tight md:text-3xl">
+                Verify once. Drive on day one.
+              </h3>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-white/80">
+                Submit your TA badge, ID, and vehicle docs. Once you&apos;re
+                approved, both modes (private and route-taxi) are unlocked from
+                the same dashboard.
+              </p>
+              <Link
+                href={cta.driverHref}
+                className="group mt-6 inline-flex w-fit items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-extrabold text-rajlo-red shadow-md shadow-black/30 transition-all hover:-translate-y-0.5"
+              >
+                {cta.driverIsDashboard ? "Driver dashboard" : "Become a driver"}
+                <Icon name="arrow-right" className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
+          </StaggerItem>
+        </Stagger>
 
-        {/* Live cue: the active testimonial id matches the dot. */}
-        <div className="mt-8 flex justify-center gap-2">
-          {TESTIMONIALS.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              aria-label={`Show testimonial ${i + 1}`}
-              onClick={() => setIdx(i)}
-              className={`h-1.5 rounded-full transition-all ${
-                i === idx ? "w-10 bg-rajlo-red" : "w-2 bg-muted/40"
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Tiny trust badge strip beneath. */}
+        {/* Honest trust strip — only claims that are true on day one. */}
         <FadeUp delay={0.2}>
           <div className="mt-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border-t border-line pt-8 text-[11px] font-bold uppercase tracking-wider text-muted">
-            <span>★ 4.8 average rating</span>
-            <span>·</span>
             <span>TA-licensed PPV fleet</span>
+            <span>·</span>
+            <span>Wallet-only · no cash</span>
             <span>·</span>
             <span>End-to-end encrypted chats</span>
             <span>·</span>
-            <span>24/7 safety line</span>
+            <span>24/7 in-app safety line</span>
           </div>
         </FadeUp>
       </div>

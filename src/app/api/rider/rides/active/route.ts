@@ -121,25 +121,22 @@ export async function GET() {
   // first name so the live-trip UI can render a "sharing with X"
   // badge. We deliberately DON'T expose the partner's pickup/dropoff —
   // that's privileged info the driver needs but other riders don't.
+  //
+  // Folded into a single query via the inline-embed syntax (rider_id
+  // → profiles FK). One round trip instead of the previous "find
+  // partner row" → "look up profile" sequence.
   let carpoolPartnerFirstName: string | null = null;
   if (ride.carpool_group_id) {
     const { data: partner } = await supabase
       .from("rides")
-      .select("rider_id")
+      .select("rider_id, profiles(full_name)")
       .eq("carpool_group_id", ride.carpool_group_id)
       .neq("id", ride.id)
       .maybeSingle();
-    if (partner?.rider_id) {
-      const { data: partnerProfile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", partner.rider_id)
-        .maybeSingle();
-      // First name only — last names aren't useful for the rider and
-      // err on the side of less PII exposure.
-      carpoolPartnerFirstName =
-        partnerProfile?.full_name?.split(" ")[0] ?? null;
-    }
+    const profile = partner?.profiles as { full_name: string | null } | null;
+    // First name only — last names aren't useful for the rider and
+    // err on the side of less PII exposure.
+    carpoolPartnerFirstName = profile?.full_name?.split(" ")[0] ?? null;
   }
 
   const { data: stops } = await supabase

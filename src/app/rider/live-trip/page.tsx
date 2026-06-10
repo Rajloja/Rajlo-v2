@@ -557,14 +557,18 @@ export default function RiderLiveTripPage() {
     };
   }, []);
 
-  // Belt-and-braces backup poll. Realtime is the fast path, but a
-  // websocket can drop silently — phone backgrounds the tab, mobile
-  // OS sleeps the radio, network blips, browser disconnects after a
-  // long idle. Without this, the rider could come back to a stale
-  // "looking for a driver" screen even after the driver accepted.
-  // Hook pauses while the tab is hidden and re-fetches the moment
-  // it comes back into focus, so the cost is bounded.
-  useBackgroundRefresh(() => refresh(), 5_000);
+  // Belt-and-braces backup poll. Realtime is the fast path; this is
+  // the resilience layer for the rare cases the websocket drops
+  // silently (phone backgrounds the tab, mobile OS sleeps the radio,
+  // network blips, browser disconnects after a long idle). 60s is
+  // safety-net territory, not polling territory — Realtime catches
+  // anything faster, this just guarantees we're never wedged forever.
+  // The hook also refetches immediately on every visibility-change,
+  // so a tab the user is actively looking at always stays fresh.
+  //
+  // Previously this was 5s, which paid for itself ~12× more often
+  // than the real-world Realtime outage rate justified.
+  useBackgroundRefresh(() => refresh(), 60_000);
 
   // Expiry trigger — when a `requested` ride's countdown hits zero, no
   // postgres_changes row event fires (the row hasn't actually changed

@@ -42,12 +42,23 @@ type Role = "driver" | "rider";
  * @param role            which side this client is on (driver or rider)
  * @param streamSelf      whether to broadcast our own GPS into the channel
  */
-/** Heartbeat cadence — the latest known position is re-broadcast on
- *  this interval even if the device is stationary. Without this, a
- *  driver who parks at the pickup spot would never re-send a fix and
- *  the rider's marker would look "stuck" / go stale. Mirrors the
- *  cadence used by the fleet broadcaster (`use-fleet.ts`). */
+/** Heartbeat tick — the timer fires this often. Whether it actually
+ *  broadcasts depends on motion (see STATIONARY_REBROADCAST_MS). */
 const HEARTBEAT_MS = 5_000;
+
+/** When the driver is parked / barely moving, we still re-broadcast
+ *  the latest fix at this slower cadence so the rider's marker never
+ *  goes "stale" in the UI. 15s is well within "is the driver still
+ *  there?" tolerance and cuts broadcast volume ~3× for any device
+ *  that's not actively moving. Movement-driven broadcasts (handled
+ *  inside `handleFix`) fire as fast as GPS updates, so this only
+ *  affects the idle case. */
+const STATIONARY_REBROADCAST_MS = 15_000;
+
+/** A GPS fix below this ground-speed is treated as "not moving" for
+ *  heartbeat-gating purposes. ~2 m/s is a brisk walk; anything below
+ *  that is effectively a parked vehicle and doesn't need 5s pings. */
+const STATIONARY_SPEED_MPS = 2;
 
 /** Server-cache cadence — driver posts their position to the rides
  *  row at this interval so admin / officer / refreshed-rider tabs
@@ -73,10 +84,16 @@ export function useRidePosition(
   // actually moved.
   const lastSentRef = useRef<{ lat: number; lng: number } | null>(null);
   // Most recent fix from the browser, regardless of whether it was
-  // sent. The 5-second heartbeat reads this so it can keep refreshing
-  // the rider's marker even when the driver is stationary (no
+  // sent. The heartbeat reads this so it can keep refreshing the
+  // rider's marker even when the driver is stationary (no
   // watchPosition callbacks fire).
   const latestFixRef = useRef<LivePosition | null>(null);
+  // Wall-clock of the last actual broadcast — drives the stationary
+  // re-broadcast gate so we don't ping every 5s for a parked car.
+  const lastBroadcastTsRef = useRef(0);
+  // Wall-clock of the last server-cache POST — same idea, gates the
+  // /api/.../position writes when the car isn't moving.
+  const lastServerCacheTsRef = useRef(0);
 
   useEffect(() => {
     if (!rideId) return;
@@ -118,6 +135,24 @@ export function useRidePosition(
       if (!fix) return;
       const payload: LivePosition = { ...fix, ts: Date.now() };
       channel.send({ type: "broadcast", event: eventName, payload });
+      lastBroadcastTsRef.current = Date.now();
+    };
+
+    /** Heartbeat tick. Movement-driven broadcasts already fire inside
+     *  `handleFix` whenever the device actually moves, so the only
+     *  job of this tick is to keep a stationary driver's marker fresh
+     *  enough that the rider's UI doesn't go "stale". When stationary,
+     *  throttle to STATIONARY_REBROADCAST_MS instead of HEARTBEAT_MS.
+     *  Cuts broadcast volume ~3× for a parked vehicle and tracks 1:1
+     *  with movement when the driver is actually driving. */
+    const heartbeatTick = () => {
+      const fix = latestFixRef.current;
+      if (!fix) return;
+      const moving = (fix.speed ?? 0) > STATIONARY_SPEED_MPS;
+      const stale =
+        Date.now() - lastBroadcastTsRef.current >= STATIONARY_REBROADCAST_MS;
+      if (!moving && !stale) return;
+      broadcastLatest();
     };
 
     /** Common handler for either source of GPS fixes (browser
@@ -220,12 +255,23 @@ export function useRidePosition(
 
       // Heartbeat + server-cache timers are independent of which GPS
       // source we used — they just re-broadcast / cache the latest fix.
-      heartbeatTimer = setInterval(broadcastLatest, HEARTBEAT_MS);
+      // Both are motion-gated: a stationary device only fires them at
+      // the slower stationary cadence.
+      heartbeatTimer = setInterval(heartbeatTick, HEARTBEAT_MS);
 
       if (role === "driver") {
         const pushToServer = () => {
           const fix = latestFixRef.current;
           if (!fix) return;
+          // Skip the DB write if the car hasn't moved AND we wrote
+          // recently — the cached row is still accurate, no point
+          // burning a write to re-store the same lat/lng.
+          const moving = (fix.speed ?? 0) > STATIONARY_SPEED_MPS;
+          const stale =
+            Date.now() - lastServerCacheTsRef.current >=
+            STATIONARY_REBROADCAST_MS;
+          if (!moving && !stale) return;
+          lastServerCacheTsRef.current = Date.now();
           void fetch(`/api/driver/rides/${rideId}/position`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

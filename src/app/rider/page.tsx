@@ -126,7 +126,12 @@ export default function RiderDashboardPage() {
     (async () => {
       const [activeRes, historyRes, ratingsRes] = await Promise.allSettled([
         fetch("/api/rider/rides/active"),
-        fetch("/api/rider/rides/history?status=all&limit=50"),
+        // Was limit=50. The dashboard renders 3 recent rides + groups
+        // by dropoff_name for top-4 destinations + scans for the first
+        // unrated trip. 20 rows is plenty for all three (the 4th most
+        // common dropoff almost always falls inside the most recent
+        // 20 trips). Cuts payload + client-side reduce work ~60%.
+        fetch("/api/rider/rides/history?status=all&limit=20"),
         fetch("/api/rider/ratings"),
       ]);
       if (cancelled) return;

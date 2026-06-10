@@ -191,6 +191,42 @@ function interpolateRouteColor(t: number): string {
  * batching is wiped out by extra Maps overlay objects; any fewer and
  * the bands become visible at typical city zoom.
  */
+
+/**
+ * Cheap path fingerprint used to skip polyline rebuilds when the
+ * Directions API returned a geometrically-identical path. Samples 8
+ * evenly-spaced points (first, last, and 6 in between) plus the total
+ * length — enough to detect any meaningful re-route, fast to compute,
+ * easy to compare with string equality.
+ *
+ * Coordinates are rounded to 5 decimal places (~1m of resolution),
+ * which is well below GPS noise — two consecutive Direction responses
+ * along the same road will collapse to the same hash.
+ */
+function hashPath(
+  path: Array<google.maps.LatLng | { lat: number; lng: number }>,
+): string {
+  if (path.length === 0) return "";
+  const SAMPLES = 8;
+  const at = (i: number) => {
+    const p = path[Math.min(i, path.length - 1)];
+    const lat =
+      typeof (p as google.maps.LatLng).lat === "function"
+        ? (p as google.maps.LatLng).lat()
+        : (p as { lat: number }).lat;
+    const lng =
+      typeof (p as google.maps.LatLng).lng === "function"
+        ? (p as google.maps.LatLng).lng()
+        : (p as { lng: number }).lng;
+    return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  };
+  const parts: string[] = [String(path.length)];
+  for (let i = 0; i < SAMPLES; i++) {
+    parts.push(at(Math.floor((i * (path.length - 1)) / (SAMPLES - 1))));
+  }
+  return parts.join("|");
+}
+
 function drawGradientPolyline(
   map: google.maps.Map,
   path: Array<google.maps.LatLng | { lat: number; lng: number }>,
@@ -551,6 +587,12 @@ export function MapView({
   // Live route polyline (driver → target). Tracked separately so the
   // static-route effect doesn't accidentally clear it on every status flip.
   const livePolylineRef = useRef<google.maps.Polyline[]>([]);
+  // Hash of the polyline path currently drawn on the map. When the
+  // Directions API returns a path with the same geometry as what's
+  // already on screen (common when the driver moved 120m but the
+  // remaining route is essentially identical), we skip the 18-Polyline
+  // teardown + rebuild. Empty string = no polyline drawn yet.
+  const livePolylineHashRef = useRef<string>("");
   // Route taxi boarding / alighting overlays — added by the
   // corridor-aware pathfinder. The B / A pins land at the rider's
   // mid-corridor projection points; the corridor polylines visualise
@@ -1266,6 +1308,7 @@ export function MapView({
       liveRouteOriginRef.current = null;
       liveRouteTargetRef.current = null;
       liveRoutePathRef.current = [];
+      livePolylineHashRef.current = "";
       return;
     }
 
@@ -1315,12 +1358,37 @@ export function MapView({
         if (cancelled) return;
         const route = pickFastestRoute(response.routes ?? []);
         if (!route) return;
+        const rawPath = fullRoutePath(route);
+        // Skip the 18-polyline teardown/rebuild when the returned path
+        // is geometrically identical to what's already on screen.
+        // Common when the driver moved 120m but Google's routing
+        // engine returns the same downstream geometry.
+        const newHash = hashPath(rawPath);
+        if (
+          newHash &&
+          newHash === livePolylineHashRef.current &&
+          livePolylineRef.current.length > 0
+        ) {
+          // Still update the cached path ref so snap-to-route stays
+          // correct (the path objects from this fetch may be more
+          // accurate than the previously-stored ones).
+          liveRoutePathRef.current = rawPath.map((p) =>
+            typeof (p as google.maps.LatLng).lat === "function"
+              ? {
+                  lat: (p as google.maps.LatLng).lat(),
+                  lng: (p as google.maps.LatLng).lng(),
+                }
+              : (p as { lat: number; lng: number }),
+          );
+          onDirectionsRouteRef.current?.(route);
+          return;
+        }
         // Replace previous live polyline segments with the new gradient
         // strip. driver→target reads brand red at the car, deepening
         // to the pickup/dropoff pin's colour at the far end.
         livePolylineRef.current.forEach((p) => p.setMap(null));
-        const rawPath = fullRoutePath(route);
         livePolylineRef.current = drawGradientPolyline(map, rawPath, 5);
+        livePolylineHashRef.current = newHash;
         // Cache the polyline path as plain lat/lng so the nav-mode
         // snap-to-route can read it without the google.maps.LatLng
         // overhead on every position update.

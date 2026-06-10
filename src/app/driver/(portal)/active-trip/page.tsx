@@ -329,15 +329,20 @@ export default function DriverActiveTripPage() {
     };
   }, []);
 
-  // Belt-and-braces backup poll. Realtime is the fast path, but a
-  // websocket can drop silently while the driver is mid-trip — phone
-  // backgrounds the tab, mobile OS sleeps the radio, network blips.
-  // Without this the driver could come back to a stale "in progress"
-  // screen even after the rider cancelled, or miss the rider→driver
-  // status change that should have re-enabled an action button.
-  // Hook pauses while the tab is hidden and re-fetches the moment it
-  // comes back into focus, so the cost is bounded.
-  useBackgroundRefresh(refresh, 5_000);
+  // Belt-and-braces backup poll. Realtime is the fast path; this is
+  // the resilience layer for the rare cases the websocket drops
+  // silently (phone backgrounds the tab, mobile OS sleeps the radio,
+  // network blips). 60s is well within "stale within human-noticeable
+  // time" territory — Realtime catches anything faster, this just
+  // guarantees we're never wedged forever. The hook also refetches
+  // immediately on every visibility-change, so a tab the user is
+  // actively looking at always stays fresh.
+  //
+  // Previously this was 5s, which made the hook ~12× more expensive
+  // than its purpose justified — a Realtime subscription that drops
+  // for 30s is a real outage, not the kind of routine event a 5s
+  // poll should be paying for.
+  useBackgroundRefresh(refresh, 60_000);
 
   // Tick once a second only while the driver is parked at pickup, so
   // the no-show countdown stays live without re-rendering the whole

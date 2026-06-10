@@ -2,7 +2,23 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
-  /* base config — add Next.js options here */
+  /**
+   * next/image globally serves AVIF first, then webp, then the
+   * original. AVIF is ~50% smaller than JPEG at the same visual
+   * quality, webp ~30%; clients that support neither still get the
+   * original. `minimumCacheTTL` raises the CDN cache lifetime so a
+   * cold edge doesn't re-transcode the same photo for every region.
+   *
+   * `deviceSizes` is the set of widths Next will pre-generate when
+   * a component uses `sizes`. Default starts at 640 — we drop the
+   * 384 + 256 thumbs in because the landing cards / phone mockups
+   * render below 384 CSS px on mobile.
+   */
+  images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 30, // 30 days
+    deviceSizes: [256, 384, 640, 750, 828, 1080, 1200, 1920, 2048],
+  },
 };
 
 /**
