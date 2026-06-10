@@ -82,8 +82,8 @@ export const DRIVER_PREFETCH_URLS = [
   "/api/me/profile",
   // Trip tab — also used by the dashboard to show the "Active trip" banner
   "/api/driver/rides/active",
-  // Earnings / history tabs
-  "/api/driver/rides/history?limit=20&offset=0",
+  // Earnings + history tabs share the same first-page URL — both use
+  // limit=50, so a single prefetch warms both pages' first paint.
   "/api/driver/rides/history?limit=50&offset=0",
   // Profile (Me) tab
   "/api/driver/me",

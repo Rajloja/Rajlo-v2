@@ -163,6 +163,25 @@ export default function DriverHomePage() {
     cachedActive == null,
   );
 
+  /* ─── Shared "now" ticker for the inbox ───
+   *
+   * Each InboxCard used to spin its own setInterval just to refresh
+   * its "X mins ago" label every 30s. With 10 incoming rides on a
+   * busy driver's screen, that's 10 independent timers waking up
+   * every 30s and triggering 10 re-renders. One parent-level timer
+   * fans out via prop instead, and we only run it at all while the
+   * inbox actually has rows. */
+  const inboxHasRows = inboxRides.length > 0;
+  const [nowForInbox, setNowForInbox] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!inboxHasRows) return;
+    // Tick once immediately so cards landing from cache get fresh
+    // labels without waiting up to 30s for the first interval fire.
+    setNowForInbox(Date.now());
+    const id = setInterval(() => setNowForInbox(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [inboxHasRows]);
+
   /* ─── Auth user id (for fleet broadcaster) ─── */
   React.useEffect(() => {
     let mounted = true;
@@ -819,6 +838,7 @@ export default function DriverHomePage() {
                     entry={r}
                     onAccept={() => handleAccept(r.id)}
                     accepting={accepting === r.id}
+                    now={nowForInbox}
                   />
                 </li>
               ))}
@@ -1250,21 +1270,19 @@ function InboxCard({
   entry,
   onAccept,
   accepting,
+  now,
 }: {
   entry: InboxEntry;
   onAccept: () => void;
   accepting: boolean;
+  /** Shared "current time" tick from the parent — one interval at
+   *  the list level fans out to every card, instead of N cards each
+   *  spinning their own setInterval. */
+  now: number;
 }) {
   const fareJMD =
     entry.kind === "solo" ? entry.estimatedFareJMD : entry.combinedFareJMD;
   const seats = entry.kind === "solo" ? entry.seats : entry.totalSeats;
-  // Use a ticking state so the "X mins ago" label refreshes without
-  // shoving a Date.now() call into the render body (impure).
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
-  }, []);
   const minutesAgo = Math.max(
     0,
     Math.round((now - new Date(entry.requestedAt).getTime()) / 60_000),

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { Icon } from "@/components/icons";
-import { calculateRouteFare } from "@/lib/fare-engine";
+import { calculateRouteFare, getRouteTaxiTariff } from "@/lib/fare-engine";
 import { formatJMD } from "@/lib/jamaica";
 import {
   PARISH_INFO,
@@ -93,6 +93,10 @@ export default async function ParishRideshareLanding({
 
   const info = PARISH_INFO[parish];
   const canonicalPath = `/rideshare-in/${slug}`;
+  // TA tariff in effect right now — drives both the formula and the
+  // human-readable copy that follows. A fare schedule change auto-
+  // flows here.
+  const tariff = getRouteTaxiTariff();
   // Sample fares at three typical distances so visitors get a
   // concrete price expectation without having to open the calculator.
   // Uses the TA-anchored route-taxi formula — same engine the live app
@@ -164,7 +168,7 @@ export default async function ParishRideshareLanding({
     },
     {
       q: `How much does a ride from ${info.popularDestinations[0]} to ${info.popularDestinations[1]} cost?`,
-      a: `${SITE_NAME} fares follow Jamaica's Transport Authority rate schedule — JMD $113 base plus $7 per kilometre, rounded to the nearest $10. A typical run between popular ${parish} destinations falls in the ${formatJMD(fareSamples[0].jmd)} to ${formatJMD(fareSamples[2].jmd)} range. Open the app to see the exact price for your trip before booking.`,
+      a: `${SITE_NAME} fares follow Jamaica's Transport Authority rate schedule — JMD $${tariff.baseRateJmd} base plus $${tariff.perKmRateJmd} per kilometre, rounded to the nearest $10. A typical run between popular ${parish} destinations falls in the ${formatJMD(fareSamples[0].jmd)} to ${formatJMD(fareSamples[2].jmd)} range. Open the app to see the exact price for your trip before booking.`,
     },
     {
       q: `Do Rajlo drivers operate at night in ${parish}?`,
@@ -263,9 +267,9 @@ export default async function ParishRideshareLanding({
             What rides cost in {parish}
           </h2>
           <p className="mt-2 max-w-2xl text-muted">
-            Fares follow Jamaica's Transport Authority rates — flat ${" "}
-            113 base plus $7 per kilometre, rounded to the nearest $10.
-            No surge, no surprises.
+            Fares follow Jamaica's Transport Authority rates — flat $
+            {tariff.baseRateJmd} base plus ${tariff.perKmRateJmd} per
+            kilometre, rounded to the nearest $10. No surge, no surprises.
           </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {fareSamples.map((sample) => (

@@ -2,26 +2,38 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import {
-  ROUTE_TAXI_BASE_RATE_JMD,
-  ROUTE_TAXI_RATE_PER_KM_JMD,
   calculateRouteFareDetailed,
   calculateConcessionFare,
+  getRouteTaxiTariff,
 } from "@/lib/fare-engine";
 
 /**
  * POST /api/rider/route-taxi/quote
  *
- * Returns a fare quote for a Route Taxi (Mode B) trip.
+ * Returns a fare quote for a Route Taxi (Mode B) trip, priced under
+ * the TA tariff currently in effect.
  *
  * Body:
  *   { routeId: string }     — quote the seeded TA fare for this corridor
  *   { distanceKm: number }  — quote an ad-hoc distance via the formula
+ *   { tripDate?: string }   — optional ISO timestamp; defaults to now.
+ *                              Used by admin / receipt re-prints to price
+ *                              a trip under the tariff that was active
+ *                              when it was booked.
  *
- * The seeded TA fare is preferred when available (it's the legally
- * regulated number for that exact OD pair). Fall back to the formula
- * when the rider supplies a custom distance for a leg.
+ * The TA-published table (`routes.ta_fare_jmd`) reflects the 2023
+ * tariff for legacy routes. For trips priced under newer tariffs we
+ * compute from the formula directly — the table is only consulted
+ * when the formula and table happen to agree (i.e. for trips booked
+ * before 2026-06-02). After the June 2026 fare increase the formula
+ * is the source of truth; the legacy column is retained only so older
+ * receipts can still be reproduced.
  */
-type QuoteBody = { routeId?: string; distanceKm?: number };
+type QuoteBody = {
+  routeId?: string;
+  distanceKm?: number;
+  tripDate?: string;
+};
 
 export async function POST(request: Request) {
   const auth = await createSupabaseAuthServerClient();
@@ -46,6 +58,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Resolve the trip date. Invalid strings fall through to "now" so a
+  // malformed value doesn't 400 the request — quoting "right now" is
+  // the right default.
+  const tripDate = (() => {
+    if (!body.tripDate) return new Date();
+    const d = new Date(body.tripDate);
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  })();
+  const tariff = getRouteTaxiTariff(tripDate);
+
   // Direct ad-hoc quote — no DB lookup.
   if (typeof body.distanceKm === "number" && !body.routeId) {
     if (!Number.isFinite(body.distanceKm) || body.distanceKm < 0) {
@@ -54,16 +76,18 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const detail = calculateRouteFareDetailed(body.distanceKm);
+    const detail = calculateRouteFareDetailed(body.distanceKm, tripDate);
     return NextResponse.json({
       source: "formula",
       route: null,
       distanceKm: detail.distanceKm,
       fareJmd: detail.roundedFareJmd,
-      concessionFareJmd: calculateConcessionFare(body.distanceKm),
+      concessionFareJmd: calculateConcessionFare(body.distanceKm, tripDate),
       breakdown: {
-        baseRateJmd: ROUTE_TAXI_BASE_RATE_JMD,
-        perKmRateJmd: ROUTE_TAXI_RATE_PER_KM_JMD,
+        baseRateJmd: tariff.baseRateJmd,
+        perKmRateJmd: tariff.perKmRateJmd,
+        tariffLabel: tariff.label,
+        tariffEffectiveFrom: tariff.effectiveFrom,
         rawJmd: detail.rawFareJmd,
       },
     });
@@ -94,13 +118,20 @@ export async function POST(request: Request) {
   }
 
   const distanceKm = Number(route.distance_km);
-  const detail = calculateRouteFareDetailed(distanceKm);
-  // Prefer the published TA fare (regulated), fall back to formula.
-  const taFare = (route as { ta_fare_jmd: number }).ta_fare_jmd;
-  const fareJmd = taFare > 0 ? taFare : detail.roundedFareJmd;
+  const detail = calculateRouteFareDetailed(distanceKm, tripDate);
+  // Post-2026-06-02 the formula is the authority because the seeded
+  // `ta_fare_jmd` column is the 2023 figure. Pre-2023-06-02 trips
+  // (legacy receipts) keep using the seeded value when the formula
+  // agrees to within $20 — the published table was hand-rounded.
+  const legacyTaFare = (route as { ta_fare_jmd: number }).ta_fare_jmd;
+  const isLegacyTariff = tariff.effectiveFrom === "2023-10-15";
+  const fareJmd =
+    isLegacyTariff && legacyTaFare > 0
+      ? legacyTaFare
+      : detail.roundedFareJmd;
 
   return NextResponse.json({
-    source: "ta_table",
+    source: isLegacyTariff && legacyTaFare > 0 ? "ta_table" : "formula",
     route: {
       id: route.id,
       origin: route.origin_name,
@@ -112,11 +143,13 @@ export async function POST(request: Request) {
     fareJmd,
     concessionFareJmd: Math.round(fareJmd / 2),
     breakdown: {
-      baseRateJmd: ROUTE_TAXI_BASE_RATE_JMD,
-      perKmRateJmd: ROUTE_TAXI_RATE_PER_KM_JMD,
+      baseRateJmd: tariff.baseRateJmd,
+      perKmRateJmd: tariff.perKmRateJmd,
+      tariffLabel: tariff.label,
+      tariffEffectiveFrom: tariff.effectiveFrom,
       rawJmd: detail.rawFareJmd,
       formulaRoundedJmd: detail.roundedFareJmd,
-      taPublishedJmd: taFare,
+      taPublishedJmd: legacyTaFare,
     },
   });
 }

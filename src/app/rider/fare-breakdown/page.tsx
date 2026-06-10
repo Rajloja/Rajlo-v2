@@ -10,8 +10,7 @@ import { formatEta } from "@/lib/format-eta";
 import {
   calculateRouteFare,
   calculateConcessionFare,
-  ROUTE_TAXI_BASE_RATE_JMD,
-  ROUTE_TAXI_RATE_PER_KM_JMD,
+  getRouteTaxiTariff,
 } from "@/lib/fare-engine";
 
 /**
@@ -26,7 +25,9 @@ import {
 
 export default function RiderFareBreakdownPage() {
   // Mode tab — private ride uses the metered estimator; route taxi
-  // uses the TA fare engine ($113 + km × $7, round to nearest $10).
+  // uses the TA fare engine (base + km × per-km, rounded to nearest
+  // $10). Base and per-km come from the live tariff (`fare-engine`),
+  // so a tariff change automatically reflects here.
   const [mode, setMode] = useState<"private" | "route_taxi">("private");
   const [distanceKm, setDistanceKm] = useState(8);
   const [stops, setStops] = useState(0);
@@ -510,9 +511,11 @@ function NoChargeRow({
 }
 
 /* ════════════════════ Route Taxi calculator ════════════════════
- * TA-regulated estimator: $113 base + (km × $7), rounded to nearest
- * $10. Single-leg, single-seat. Concession toggle for the half-fare
- * categories TA recognises (children, students, seniors, disabled).
+ * TA-regulated estimator: base + (km × per-km), rounded to nearest
+ * $10. Base + per-km read live from `getRouteTaxiTariff()` so a TA
+ * fare increase automatically flows through. Single-leg, single-seat.
+ * Concession toggle for the half-fare categories TA recognises
+ * (children, students, seniors, disabled).
  */
 function RouteTaxiCalculator({
   distanceKm,
@@ -525,11 +528,11 @@ function RouteTaxiCalculator({
   concession: boolean;
   setConcession: (v: boolean) => void;
 }) {
+  const tariff = getRouteTaxiTariff();
   const fullFare = calculateRouteFare(distanceKm);
   const concessionFare = calculateConcessionFare(distanceKm);
   const displayed = concession ? concessionFare : fullFare;
-  const raw =
-    ROUTE_TAXI_BASE_RATE_JMD + distanceKm * ROUTE_TAXI_RATE_PER_KM_JMD;
+  const raw = tariff.baseRateJmd + distanceKm * tariff.perKmRateJmd;
   const rawLabel = formatJMD(Math.round(raw));
 
   return (
@@ -549,7 +552,7 @@ function RouteTaxiCalculator({
           )}
         </div>
         <p className="mt-1 text-xs text-muted">
-          {distanceKm.toFixed(1)} km · TA-regulated route fare
+          {distanceKm.toFixed(1)} km · {tariff.label} · TA-regulated
         </p>
       </div>
 
@@ -605,11 +608,15 @@ function RouteTaxiCalculator({
         </button>
 
         <div className="rounded-xl bg-surface-soft px-4 py-3 text-[11px] text-muted">
-          Formula: <span className="font-mono">JMD ${ROUTE_TAXI_BASE_RATE_JMD} + (km × ${ROUTE_TAXI_RATE_PER_KM_JMD})</span>
+          Formula: <span className="font-mono">JMD ${tariff.baseRateJmd} + (km × ${tariff.perKmRateJmd})</span>
           {" → "}
           <span className="font-mono">{rawLabel}</span>
           {" "}rounded to nearest $10 ={" "}
           <span className="font-bold text-foreground">{formatJMD(fullFare)}</span>.
+          <br />
+          <span className="text-[10px]">
+            Tariff: {tariff.label} (effective {tariff.effectiveFrom}).
+          </span>
         </div>
       </div>
     </>

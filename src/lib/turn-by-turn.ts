@@ -50,6 +50,11 @@ export type FlatStep = {
   end: { lat: number; lng: number };
   /** Start point of this step. */
   start: { lat: number; lng: number };
+  /** Sum of `distanceM` for every step AFTER this one. Precomputed at
+   *  flatten time so `computeSnapshot` is O(1) instead of O(steps). */
+  remainingDistanceM: number;
+  /** Sum of `durationS` for every step AFTER this one. Same idea. */
+  remainingDurationS: number;
 };
 
 export type NavSnapshot = {
@@ -129,8 +134,23 @@ export function flattenSteps(route: google.maps.DirectionsRoute): FlatStep[] {
           lat: step.start_location.lat(),
           lng: step.start_location.lng(),
         },
+        // Suffix sums filled in by the reverse pass below.
+        remainingDistanceM: 0,
+        remainingDurationS: 0,
       });
     }
+  }
+  // Reverse pass — compute the "everything after this step" totals
+  // once at route load time. computeSnapshot uses these as O(1)
+  // lookups instead of summing through the tail of the array on
+  // every position tick.
+  let suffixDist = 0;
+  let suffixDur = 0;
+  for (let i = out.length - 1; i >= 0; i--) {
+    out[i].remainingDistanceM = suffixDist;
+    out[i].remainingDurationS = suffixDur;
+    suffixDist += out[i].distanceM;
+    suffixDur += out[i].durationS;
   }
   return out;
 }
@@ -184,23 +204,18 @@ export function computeSnapshot(
 
   const distanceToManeuverM = distanceMeters(position, currentStep.end);
 
-  // Total remaining = distance-to-next-maneuver + lengths of all
-  // subsequent steps. This deliberately ignores the part of the
-  // current step already traversed — using the GPS-to-end-location
-  // line distance is close enough for an ETA badge.
-  let totalRemainingM = distanceToManeuverM;
-  let totalRemainingS = 0;
-  // Add proportional duration for the current step (rough — assumes
+  // Total remaining = distance-to-next-maneuver + precomputed
+  // suffix-sum of all subsequent steps. O(1) instead of looping
+  // through the route tail every position tick.
+  const totalRemainingM = distanceToManeuverM + currentStep.remainingDistanceM;
+  // Proportional duration for the current step (rough — assumes
   // average speed across the step). Better than nothing.
-  if (currentStep.distanceM > 0) {
-    totalRemainingS +=
-      currentStep.durationS *
-      Math.min(1, distanceToManeuverM / currentStep.distanceM);
-  }
-  for (let i = safeIdx + 1; i < steps.length; i++) {
-    totalRemainingM += steps[i].distanceM;
-    totalRemainingS += steps[i].durationS;
-  }
+  const currentPortionS =
+    currentStep.distanceM > 0
+      ? currentStep.durationS *
+        Math.min(1, distanceToManeuverM / currentStep.distanceM)
+      : 0;
+  const totalRemainingS = currentPortionS + currentStep.remainingDurationS;
 
   const arriving =
     safeIdx === steps.length - 1 &&

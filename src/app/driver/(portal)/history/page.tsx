@@ -45,7 +45,10 @@ type HistoryResponse = {
   pageEarningsJMD: number;
 };
 
-const PAGE_SIZE = 20;
+// Aligned with the earnings page so a single prefetch entry warms
+// both. Larger first page also means fewer "Load more" taps for the
+// typical driver who scrolls a week or two of history.
+const PAGE_SIZE = 50;
 const FIRST_PAGE_URL = `/api/driver/rides/history?limit=${PAGE_SIZE}&offset=0`;
 
 export default function DriverHistoryPage() {

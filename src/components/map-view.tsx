@@ -571,6 +571,11 @@ export function MapView({
   // re-decodes the SVG data URL, so we skip when we can.
   const pickupBubbleTextRef = useRef<string | null>(null);
   const dropoffBubbleTextRef = useRef<string | null>(null);
+  // Last lat/lng we called `setPosition` with, so a re-run of the
+  // bubble effect (caused by an ETA-minutes refresh rather than the
+  // pin actually moving) doesn't pay for a no-op Maps reflow.
+  const pickupBubblePosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const dropoffBubblePosRef = useRef<{ lat: number; lng: number } | null>(null);
   // Static polyline (pickup → stops → dropoff). Hidden when `liveRoute`
   // is engaged — the live route has its own polyline.
   // Multiple polylines now: the route is rendered as ~18 short
@@ -1243,11 +1248,16 @@ export function MapView({
           clickable: false,
         });
         pickupBubbleTextRef.current = pickupText;
+        pickupBubblePosRef.current = { lat: pickup.lat, lng: pickup.lng };
       } else {
-        pickupBubbleRef.current.setPosition({
-          lat: pickup.lat,
-          lng: pickup.lng,
-        });
+        const last = pickupBubblePosRef.current;
+        if (!last || last.lat !== pickup.lat || last.lng !== pickup.lng) {
+          pickupBubbleRef.current.setPosition({
+            lat: pickup.lat,
+            lng: pickup.lng,
+          });
+          pickupBubblePosRef.current = { lat: pickup.lat, lng: pickup.lng };
+        }
         if (pickupBubbleTextRef.current !== pickupText) {
           pickupBubbleRef.current.setIcon(buildBubbleIcon(pickupText, "red"));
           pickupBubbleTextRef.current = pickupText;
@@ -1257,6 +1267,7 @@ export function MapView({
       pickupBubbleRef.current?.setMap(null);
       pickupBubbleRef.current = null;
       pickupBubbleTextRef.current = null;
+      pickupBubblePosRef.current = null;
     }
 
     // Dropoff bubble — always renders when we have a dropoff + ETA.
@@ -1274,11 +1285,16 @@ export function MapView({
           clickable: false,
         });
         dropoffBubbleTextRef.current = dropoffText;
+        dropoffBubblePosRef.current = { lat: dropoff.lat, lng: dropoff.lng };
       } else {
-        dropoffBubbleRef.current.setPosition({
-          lat: dropoff.lat,
-          lng: dropoff.lng,
-        });
+        const last = dropoffBubblePosRef.current;
+        if (!last || last.lat !== dropoff.lat || last.lng !== dropoff.lng) {
+          dropoffBubbleRef.current.setPosition({
+            lat: dropoff.lat,
+            lng: dropoff.lng,
+          });
+          dropoffBubblePosRef.current = { lat: dropoff.lat, lng: dropoff.lng };
+        }
         if (dropoffBubbleTextRef.current !== dropoffText) {
           dropoffBubbleRef.current.setIcon(
             buildBubbleIcon(dropoffText, "red"),
@@ -1290,6 +1306,7 @@ export function MapView({
       dropoffBubbleRef.current?.setMap(null);
       dropoffBubbleRef.current = null;
       dropoffBubbleTextRef.current = null;
+      dropoffBubblePosRef.current = null;
     }
   }, [pickup, dropoff, pickupEtaMinutes, dropoffEtaMinutes, liveRoute, mapReady]);
 
