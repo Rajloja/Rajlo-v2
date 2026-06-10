@@ -133,7 +133,17 @@ export async function GET() {
       .eq("carpool_group_id", ride.carpool_group_id)
       .neq("id", ride.id)
       .maybeSingle();
-    const profile = partner?.profiles as { full_name: string | null } | null;
+    // Supabase's TS inference returns embedded resources as an array
+    // even when the FK is one-to-one. `rides.rider_id` → `profiles.id`
+    // can only ever match a single row, so unwrap either shape and
+    // pick the first.
+    type EmbeddedProfile = { full_name: string | null };
+    const embedded = partner?.profiles as
+      | EmbeddedProfile
+      | EmbeddedProfile[]
+      | null
+      | undefined;
+    const profile = Array.isArray(embedded) ? embedded[0] : embedded;
     // First name only — last names aren't useful for the rider and
     // err on the side of less PII exposure.
     carpoolPartnerFirstName = profile?.full_name?.split(" ")[0] ?? null;
