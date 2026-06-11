@@ -17,6 +17,7 @@ import {
   type Locale as PrefsLocale,
 } from "@/lib/preferences-client";
 import { useT } from "@/lib/i18n";
+import * as navVoice from "@/lib/nav-voice";
 
 /**
  * Driver settings — appearance, language, and notification preferences
@@ -287,6 +288,23 @@ export default function DriverSettingsPage() {
           ) : (
             <ToggleRowsSkeleton rows={1} />
           )}
+        </Section>
+      </FadeUp>
+
+      {/* Navigation voice — smoke test for the turn-by-turn TTS
+         engine. Lets the driver verify "is voice working at all" in
+         5 seconds without needing to be mid-trip. The same code path
+         that fires the real turn-by-turn prompts runs here (Capacitor
+         TTS plugin on native, Web Speech fallback on web). */}
+      <FadeUp delay={0.085}>
+        <Section
+          title={t(
+            "driver.settings.nav_voice.title",
+            "Navigation voice",
+          )}
+          icon="phone"
+        >
+          <NavVoiceTestRow />
         </Section>
       </FadeUp>
 
@@ -601,5 +619,94 @@ function LinkRow({
         className="h-4 w-4 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-rajlo-red"
       />
     </Link>
+  );
+}
+
+/**
+ * One-tap voice smoke test. Mirrors the live turn-by-turn voice
+ * path: same `navVoice.speak()` call, same Capacitor TTS plugin
+ * resolution + Web Speech fallback. If this button produces audio,
+ * the engine itself is fine and any silence during a real trip is a
+ * data problem (no route loaded, no GPS, distance threshold not hit,
+ * carpool gate) rather than a TTS plumbing problem.
+ *
+ * Also surfaces the persisted mute state — tapping the speaker icon
+ * toggles `localStorage.rajlo_nav_voice_muted` exactly like the
+ * in-trip NavControls button does, so the driver can clear a stuck
+ * mute from a quiet screen without booking a fake trip.
+ */
+function NavVoiceTestRow() {
+  const [muted, setMuted] = useState(() => navVoice.isMuted());
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  const toggleMute = () => {
+    const next = !muted;
+    navVoice.setMuted(next);
+    setMuted(next);
+    setLastResult(next ? "Voice muted." : "Voice unmuted.");
+  };
+
+  const test = async () => {
+    if (muted) {
+      setLastResult("Currently muted — tap the speaker to unmute first.");
+      return;
+    }
+    setLastResult("Speaking…");
+    try {
+      await navVoice.warmup();
+      await navVoice.speak(
+        "Voice navigation is working. In 250 meters, turn right onto Hope Road.",
+      );
+      setLastResult(
+        "Played. If you heard nothing, check media volume and adb logcat for [nav-voice] errors.",
+      );
+    } catch (e) {
+      setLastResult(
+        e instanceof Error ? `Failed: ${e.message}` : "Failed.",
+      );
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-3 px-4 py-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-rajlo-red">
+        <Icon name={muted ? "mic-off" : "mic"} className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">Test voice prompt</p>
+        <p className="mt-0.5 text-xs text-muted">
+          Plays one canned turn-by-turn prompt through the same engine
+          the live nav uses. Use this to verify the TTS plugin is
+          working on this phone before depending on it for a real trip.
+        </p>
+        {lastResult && (
+          <p className="mt-2 rounded-lg bg-surface-soft px-2.5 py-1.5 text-[11px] leading-snug text-muted">
+            {lastResult}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={test}
+            className="inline-flex items-center gap-1.5 rounded-full bg-rajlo-red px-3.5 py-1.5 text-xs font-extrabold text-white shadow-sm shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
+          >
+            <Icon name="phone" className="h-3 w-3" />
+            Test voice
+          </button>
+          <button
+            type="button"
+            onClick={toggleMute}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold transition-all hover:-translate-y-0.5 ${
+              muted
+                ? "bg-rajlo-red text-white shadow-sm shadow-rajlo-red/30 hover:bg-primary-hover"
+                : "border border-line bg-surface text-foreground hover:bg-surface-soft"
+            }`}
+          >
+            <Icon name={muted ? "mic-off" : "mic"} className="h-3 w-3" />
+            {muted ? "Unmute" : "Mute"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
