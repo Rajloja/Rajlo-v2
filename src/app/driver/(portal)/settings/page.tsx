@@ -648,21 +648,100 @@ function NavVoiceTestRow() {
 
   const test = async () => {
     if (muted) {
-      setLastResult("Currently muted — tap the speaker to unmute first.");
+      setLastResult("Currently muted — tap Unmute first.");
       return;
     }
-    setLastResult("Speaking…");
+    setLastResult("Starting test…");
+    const started = Date.now();
+
+    // Race the engine against a 6s timeout. If `speak()` hangs (the
+    // most common failure mode on a phone whose Android TTS engine
+    // isn't configured), we surface that as the actual symptom
+    // instead of leaving "Speaking…" stuck on screen forever.
+    const TIMEOUT_MS = 6000;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+    }, TIMEOUT_MS);
+
     try {
       await navVoice.warmup();
-      await navVoice.speak(
-        "Voice navigation is working. In 250 meters, turn right onto Hope Road.",
-      );
+
+      // ── Path A: Capacitor TTS plugin (preferred on native) ──
+      const cap = await navVoice.debugGetCapacitorTts();
+      if (cap) {
+        setLastResult("Speaking via Android TTS engine…");
+        try {
+          await Promise.race([
+            cap.speak({
+              text: "Voice navigation is working. In 250 meters, turn right onto Hope Road.",
+              lang: "en-US",
+              rate: 1.05,
+              pitch: 1.0,
+              volume: 1.0,
+            }),
+            new Promise((_, rej) =>
+              setTimeout(
+                () => rej(new Error("native_timeout")),
+                TIMEOUT_MS,
+              ),
+            ),
+          ]);
+          clearTimeout(timer);
+          const dur = Date.now() - started;
+          setLastResult(
+            `✓ Played via Android TTS in ${dur}ms. If you heard nothing, check (1) media volume on the phone, (2) Settings → Accessibility → Text-to-speech output → preferred engine has an English voice installed.`,
+          );
+          return;
+        } catch (err) {
+          // Native path failed — fall through to Web Speech below so
+          // the driver gets *some* audio while we report the failure.
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[settings] Capacitor TTS speak failed, falling back to Web Speech:",
+            err,
+          );
+        }
+      }
+
+      // ── Path B: Web Speech API (works on web + as a fallback) ──
+      setLastResult("Speaking via Web Speech…");
+      const synth =
+        typeof window !== "undefined" ? window.speechSynthesis : null;
+      if (!synth) {
+        clearTimeout(timer);
+        setLastResult(
+          "No TTS available on this device. Install Google Text-to-Speech from the Play Store, then retry.",
+        );
+        return;
+      }
+      synth.cancel();
+      await new Promise<void>((resolve, reject) => {
+        const u = new SpeechSynthesisUtterance(
+          "Voice navigation is working. In 250 meters, turn right onto Hope Road.",
+        );
+        u.lang = "en-US";
+        u.rate = 1.05;
+        u.volume = 1.0;
+        u.onend = () => resolve();
+        u.onerror = (e) => reject(new Error(e.error ?? "web_speech_error"));
+        synth.speak(u);
+        setTimeout(() => {
+          if (!timedOut) reject(new Error("web_speech_timeout"));
+        }, TIMEOUT_MS);
+      });
+      clearTimeout(timer);
+      const dur = Date.now() - started;
       setLastResult(
-        "Played. If you heard nothing, check media volume and adb logcat for [nav-voice] errors.",
+        `⚠ Played via Web Speech in ${dur}ms (fallback). The Capacitor TTS plugin didn't respond — likely no Android TTS engine installed. Phone Settings → Accessibility → Text-to-speech output → install Google TTS.`,
       );
     } catch (e) {
+      clearTimeout(timer);
+      const msg = e instanceof Error ? e.message : String(e);
       setLastResult(
-        e instanceof Error ? `Failed: ${e.message}` : "Failed.",
+        timedOut || msg.includes("timeout")
+          ? "Timed out — TTS engine on this phone isn't responding. Open Settings → Accessibility → Text-to-speech output, set 'Preferred engine' to Google Text-to-Speech, then tap the gear icon next to it → Install voice data → English. Re-run the test."
+          : `Failed: ${msg}`,
       );
     }
   };

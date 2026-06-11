@@ -135,6 +135,14 @@ function getCapTts(): Promise<CapTts | null> {
   return capTtsPromise;
 }
 
+/** Diagnostic-only — returns the resolved Capacitor TTS plugin handle
+ *  (or null) so the driver settings page's "Test voice" button can
+ *  probe + report whether the native path is even available. Not
+ *  intended for production speech — use `speak()` for that. */
+export function debugGetCapacitorTts(): Promise<CapTts | null> {
+  return getCapTts();
+}
+
 /* ─────────────── Web Speech voice picking ─────────────── */
 
 let preferredVoice: SpeechSynthesisVoice | null = null;
