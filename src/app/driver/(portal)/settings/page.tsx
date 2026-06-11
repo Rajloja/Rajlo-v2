@@ -668,12 +668,12 @@ function NavVoiceTestRow() {
       await navVoice.warmup();
 
       // ── Path A: Capacitor TTS plugin (preferred on native) ──
-      const cap = await navVoice.debugGetCapacitorTts();
-      if (cap) {
+      const wrapper = await navVoice.debugGetCapacitorTts();
+      if (wrapper) {
         setLastResult("Speaking via Android TTS engine…");
         try {
           await Promise.race([
-            cap.speak({
+            wrapper.tts.speak({
               text: "Voice navigation is working. In 250 meters, turn right onto Hope Road.",
               lang: "en-US",
               rate: 1.05,

@@ -85,8 +85,23 @@ type CapTts = {
   }) => Promise<void>;
   stop: () => Promise<void>;
 };
+
+/** The plugin object Capacitor exposes for `TextToSpeech` is a
+ *  Proxy that forwards EVERY property access (including `.then`) to
+ *  the native bridge. If we return that Proxy directly out of an
+ *  `async` function or `Promise.resolve()`, the Promise machinery
+ *  thenability-checks it by calling `.then()` — which the bridge
+ *  dispatches as a real plugin method named `then`, blowing up with
+ *  `"TextToSpeech.then() is not implemented on android"` (seen in
+ *  Sentry).
+ *
+ *  Wrapping the plugin handle inside this plain object hides the
+ *  Proxy behind a property and stops the thenability check from
+ *  ever reaching it. Callers do `wrapper.tts.speak(...)`. */
+type CapTtsWrapper = { tts: CapTts };
+
 let capTtsCached: CapTts | null = null;
-let capTtsPromise: Promise<CapTts | null> | null = null;
+let capTtsPromise: Promise<CapTtsWrapper | null> | null = null;
 
 function isNative(): boolean {
   if (typeof window === "undefined") return false;
@@ -96,8 +111,8 @@ function isNative(): boolean {
   return !!cap?.isNativePlatform?.();
 }
 
-async function resolveCapTts(): Promise<CapTts | null> {
-  if (capTtsCached) return capTtsCached;
+async function resolveCapTts(): Promise<CapTtsWrapper | null> {
+  if (capTtsCached) return { tts: capTtsCached };
   if (!isNative()) return null;
 
   // Path 1 — proper ES-module import. This is what
@@ -110,7 +125,7 @@ async function resolveCapTts(): Promise<CapTts | null> {
       capTtsCached = mod.TextToSpeech;
       // eslint-disable-next-line no-console
       console.log(`${LOG_TAG} using Capacitor TTS plugin (ES import)`);
-      return capTtsCached;
+      return { tts: capTtsCached };
     }
   } catch {
     /* plugin not installed yet — fall through to the global lookup */
@@ -125,21 +140,22 @@ async function resolveCapTts(): Promise<CapTts | null> {
     capTtsCached = tts;
     // eslint-disable-next-line no-console
     console.log(`${LOG_TAG} using Capacitor TTS plugin (window.Capacitor)`);
+    return { tts };
   }
-  return capTtsCached;
+  return null;
 }
 
-function getCapTts(): Promise<CapTts | null> {
+function getCapTts(): Promise<CapTtsWrapper | null> {
   if (capTtsPromise) return capTtsPromise;
   capTtsPromise = resolveCapTts();
   return capTtsPromise;
 }
 
-/** Diagnostic-only — returns the resolved Capacitor TTS plugin handle
+/** Diagnostic-only — returns the resolved Capacitor TTS plugin wrapper
  *  (or null) so the driver settings page's "Test voice" button can
  *  probe + report whether the native path is even available. Not
  *  intended for production speech — use `speak()` for that. */
-export function debugGetCapacitorTts(): Promise<CapTts | null> {
+export function debugGetCapacitorTts(): Promise<CapTtsWrapper | null> {
   return getCapTts();
 }
 
@@ -207,12 +223,12 @@ export async function speak(text: string): Promise<void> {
   if (!trimmed) return;
 
   // Capacitor TTS plugin (preferred on Android if installed).
-  const capTts = await getCapTts();
-  if (capTts) {
+  const wrapper = await getCapTts();
+  if (wrapper) {
     try {
       // Stop any in-flight utterance first so prompts don't stack.
-      await capTts.stop().catch(() => null);
-      await capTts.speak({
+      await wrapper.tts.stop().catch(() => null);
+      await wrapper.tts.speak({
         text: trimmed,
         lang: "en-US",
         rate: 1.05,
@@ -261,8 +277,8 @@ export async function speak(text: string): Promise<void> {
 /** Cancel any speaking / queued utterance immediately. */
 export function cancel(): void {
   // Fire-and-forget — the lookup is cheap if already resolved.
-  void getCapTts().then((capTts) => {
-    if (capTts) void capTts.stop().catch(() => null);
+  void getCapTts().then((wrapper) => {
+    if (wrapper) void wrapper.tts.stop().catch(() => null);
   });
   if (isWebSpeechAvailable()) {
     try {

@@ -58,31 +58,77 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Body;
   const wantsOffline = body.setOffline === true;
 
-  // Self heartbeat — also flips offline when the caller asked for it.
+  // Look up whether the caller has an active trip. If they do we
+  // SKIP the auto-offline path entirely — a driver mid-trip is by
+  // definition not idle, even if they haven't tapped the screen in
+  // an hour (they're driving). This catches the real-world bug
+  // where a driver on a long route gets force-flipped offline
+  // during the trip because they were focused on the road.
+  const { data: callerDriver } = await supabase
+    .from("drivers")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const callerDriverId = (callerDriver as { id?: string } | null)?.id ?? null;
+  let callerHasActiveTrip = false;
+  if (callerDriverId) {
+    const { count } = await supabase
+      .from("rides")
+      .select("id", { count: "exact", head: true })
+      .eq("driver_id", callerDriverId)
+      .in("status", ["accepted", "arrived", "in_progress"]);
+    callerHasActiveTrip = (count ?? 0) > 0;
+  }
+
+  // Self heartbeat — refreshes last_active_at always. The
+  // setOffline flag from the client (1hr idle) is HONOURED only
+  // when there's no active trip in flight; otherwise we keep the
+  // driver online so the rider's car keeps moving.
   const updates: Record<string, unknown> = {
     last_active_at: new Date().toISOString(),
   };
-  if (wantsOffline) updates.is_online = false;
+  if (wantsOffline && !callerHasActiveTrip) updates.is_online = false;
 
   await supabase
     .from("drivers")
     .update(updates)
     .eq("user_id", user.id);
 
-  // Lazy expire — flip stale online drivers offline. Indexed by
-  // `idx_drivers_online_last_active` so this is a partial-index scan
-  // over only currently-online drivers, not the whole table.
-  // We compute the threshold in JS rather than asking Postgres for
-  // `now() - interval '1 hour'` because the supabase-js builder
-  // doesn't accept raw SQL fragments in `.lt()` filters.
+  // Lazy expire — flip stale online drivers offline. Same active-trip
+  // exemption: never sweep a driver who's currently on a ride.
+  // Indexed by `idx_drivers_online_last_active` so this is a partial-
+  // index scan over only currently-online drivers, not the whole table.
   const staleThreshold = new Date(
     Date.now() - STALE_THRESHOLD_MS,
   ).toISOString();
-  await supabase
+  // First find the drivers.id of every driver currently on an active
+  // ride so we can exclude them. Cheaper than a NOT IN sub-select via
+  // the supabase-js builder.
+  const { data: activeRideRows } = await supabase
+    .from("rides")
+    .select("driver_id")
+    .in("status", ["accepted", "arrived", "in_progress"]);
+  const activeDriverIds = Array.from(
+    new Set(
+      ((activeRideRows ?? []) as Array<{ driver_id: string | null }>)
+        .map((r) => r.driver_id)
+        .filter((v): v is string => !!v),
+    ),
+  );
+  let sweep = supabase
     .from("drivers")
     .update({ is_online: false })
     .eq("is_online", true)
     .lt("last_active_at", staleThreshold);
+  if (activeDriverIds.length > 0) {
+    // `.not("id", "in", "(...)")` — supabase-js wants a parenthesized
+    // CSV list for IN/NOT IN filters.
+    sweep = sweep.not("id", "in", `(${activeDriverIds.join(",")})`);
+  }
+  await sweep;
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    activeTrip: callerHasActiveTrip,
+  });
 }

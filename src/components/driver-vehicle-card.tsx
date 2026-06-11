@@ -112,16 +112,21 @@ export function DriverVehicleCard({
             )}
           </div>
         </div>
-
-        {/* Action group — in-app call + chat launcher come in via
-           `extraAction` from the parent. The legacy `tel:` PSTN link
-           was removed: rider/driver privacy means phone numbers are
-           never exposed in the UI, and the in-app voice flow
-           (LiveKit) handles all rider↔driver voice contact. */}
-        {extraAction && (
-          <div className="flex shrink-0 items-center gap-2">{extraAction}</div>
-        )}
       </div>
+
+      {/* Action row — in-app call + chat launcher come in via
+         `extraAction` from the parent. Sits on its own line between
+         the identity block and the vehicle strip so the buttons
+         render at a comfortable touch-target size instead of being
+         crammed into the right edge of the name row. The legacy
+         `tel:` PSTN link was removed: rider/driver privacy means
+         phone numbers are never exposed in the UI, and the in-app
+         voice flow (LiveKit) handles all rider↔driver voice contact. */}
+      {extraAction && (
+        <div className="flex flex-wrap items-center gap-2 px-5 pb-4 -mt-1">
+          {extraAction}
+        </div>
+      )}
 
       {/* Vehicle strip — colour swatch + plate sit on a contrasting
          band so they read at a glance even in motion. */}

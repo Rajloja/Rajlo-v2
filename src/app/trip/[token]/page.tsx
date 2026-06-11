@@ -67,6 +67,12 @@ export default function TripSharePage({
   const [data, setData] = useState<TripData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Live ETA in minutes derived from the most recent Directions
+  // response the MapView fetched as the driver moves. Overrides the
+  // server's `estimatedEtaMinutes` (which is frozen at request time
+  // and never updates) so the trip-share viewer actually sees the
+  // ETA tick down as the car approaches.
+  const [liveEtaMinutes, setLiveEtaMinutes] = useState<number | null>(null);
 
   // Refresh on a slow timer so the friend's view gets status changes even
   // before the realtime channel pushes (we can't subscribe to RLS-protected
@@ -242,11 +248,24 @@ export default function TripSharePage({
           <h1 className="mt-2 text-3xl font-extrabold leading-tight tracking-tight md:text-4xl">
             {STATUS_LABELS[data.status]}
           </h1>
-          {data.estimatedEtaMinutes !== null && !isTerminal && (
-            <p className="mt-2 text-sm text-white/85">
-              ETA ~{data.estimatedEtaMinutes} min
-            </p>
-          )}
+          {/* Prefer the live ETA derived from the driver's current
+             position; fall back to the server's frozen estimate if
+             the live route hasn't returned yet. */}
+          {(() => {
+            const eta = liveEtaMinutes ?? data.estimatedEtaMinutes;
+            if (eta === null || isTerminal) return null;
+            return (
+              <p className="mt-2 text-sm text-white/85">
+                ETA ~{eta} min
+                {liveEtaMinutes !== null && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider opacity-80">
+                    <span className="h-1 w-1 animate-pulse rounded-full bg-white" />
+                    live
+                  </span>
+                )}
+              </p>
+            );
+          })()}
         </div>
 
         {/* Map */}
@@ -257,6 +276,36 @@ export default function TripSharePage({
             dropoff={dropoff}
             driverPosition={driverPosition}
             riderPosition={riderPosition}
+            // Engage the live-route polyline + Directions refresh so
+            // the ETA recomputes as the driver moves. Pre-pickup
+            // (accepted / arrived) → route driver→pickup; once the
+            // trip starts → route driver→dropoff. Idle / terminal
+            // states leave it null so we don't burn Directions API
+            // quota on a frozen view.
+            liveRoute={
+              data.status === "accepted" || data.status === "arrived"
+                ? { target: "pickup" }
+                : data.status === "in_progress"
+                  ? { target: "dropoff" }
+                  : null
+            }
+            // Every time MapView re-fetches Directions (driver moved
+            // 120m+, target flipped, etc.) it hands us the freshest
+            // route. We extract the traffic-adjusted duration and
+            // surface it as the live ETA.
+            onDirectionsRoute={(route) => {
+              const legSeconds = (route.legs ?? []).reduce(
+                (sum, leg) =>
+                  sum +
+                  (leg.duration_in_traffic?.value ??
+                    leg.duration?.value ??
+                    0),
+                0,
+              );
+              if (legSeconds > 0) {
+                setLiveEtaMinutes(Math.max(1, Math.round(legSeconds / 60)));
+              }
+            }}
             className="h-72 w-full md:h-96"
           />
         </div>
