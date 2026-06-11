@@ -61,14 +61,20 @@ export function setMuted(muted: boolean): void {
 
 /* ─────────────── Capacitor TTS plugin path (preferred on native) ─────────────── */
 
-/** Optional Capacitor TTS plugin lookup. We detect the plugin via the
- *  global `window.Capacitor.Plugins.TextToSpeech` rather than a static
- *  import so:
- *    1. The web bundle never tries to pull a native-only package
- *    2. TypeScript doesn't need the package types installed
- *    3. The driver-app build works whether or not the plugin has
- *       been added to package.json yet
- *  When the plugin IS installed + registered, this returns it. */
+/** Capacitor TTS plugin lookup.
+ *
+ *  Two detection paths, in order:
+ *    1. Dynamic ES-module import of `@capacitor-community/text-to-speech`.
+ *       This is the documented usage pattern for the plugin and the
+ *       most reliable detection — Capacitor's `registerPlugin()` exports
+ *       the live plugin object directly. Dynamic-import keeps the
+ *       package out of the web bundle.
+ *    2. Fallback to the global `window.Capacitor.Plugins.TextToSpeech`
+ *       for older Capacitor versions / SSR-loaded contexts where the
+ *       ES-module path isn't available yet.
+ *
+ *  Resolved lazily and cached so the first speak() call doesn't pay
+ *  the import cost on every word. */
 type CapTts = {
   speak: (opts: {
     text: string;
@@ -79,29 +85,54 @@ type CapTts = {
   }) => Promise<void>;
   stop: () => Promise<void>;
 };
-let capTtsChecked = false;
 let capTtsCached: CapTts | null = null;
+let capTtsPromise: Promise<CapTts | null> | null = null;
 
-function getCapTts(): CapTts | null {
-  if (capTtsChecked) return capTtsCached;
-  capTtsChecked = true;
-  if (typeof window === "undefined") return null;
+function isNative(): boolean {
+  if (typeof window === "undefined") return false;
   const cap = (
-    window as unknown as {
-      Capacitor?: {
-        isNativePlatform?: () => boolean;
-        Plugins?: { TextToSpeech?: CapTts };
-      };
-    }
+    window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }
   ).Capacitor;
-  if (!cap?.isNativePlatform?.()) return null;
-  const tts = cap.Plugins?.TextToSpeech ?? null;
-  if (tts) {
-    // eslint-disable-next-line no-console
-    console.log(`${LOG_TAG} using Capacitor TTS plugin`);
+  return !!cap?.isNativePlatform?.();
+}
+
+async function resolveCapTts(): Promise<CapTts | null> {
+  if (capTtsCached) return capTtsCached;
+  if (!isNative()) return null;
+
+  // Path 1 — proper ES-module import. This is what
+  // `@capacitor-community/text-to-speech` exports.
+  try {
+    const mod = (await import(
+      "@capacitor-community/text-to-speech"
+    )) as { TextToSpeech?: CapTts };
+    if (mod.TextToSpeech) {
+      capTtsCached = mod.TextToSpeech;
+      // eslint-disable-next-line no-console
+      console.log(`${LOG_TAG} using Capacitor TTS plugin (ES import)`);
+      return capTtsCached;
+    }
+  } catch {
+    /* plugin not installed yet — fall through to the global lookup */
   }
-  capTtsCached = tts;
-  return tts;
+
+  // Path 2 — legacy global. Some older registrations land here.
+  const cap = (
+    window as unknown as { Capacitor?: { Plugins?: { TextToSpeech?: CapTts } } }
+  ).Capacitor;
+  const tts = cap?.Plugins?.TextToSpeech ?? null;
+  if (tts) {
+    capTtsCached = tts;
+    // eslint-disable-next-line no-console
+    console.log(`${LOG_TAG} using Capacitor TTS plugin (window.Capacitor)`);
+  }
+  return capTtsCached;
+}
+
+function getCapTts(): Promise<CapTts | null> {
+  if (capTtsPromise) return capTtsPromise;
+  capTtsPromise = resolveCapTts();
+  return capTtsPromise;
 }
 
 /* ─────────────── Web Speech voice picking ─────────────── */
@@ -168,7 +199,7 @@ export async function speak(text: string): Promise<void> {
   if (!trimmed) return;
 
   // Capacitor TTS plugin (preferred on Android if installed).
-  const capTts = getCapTts();
+  const capTts = await getCapTts();
   if (capTts) {
     try {
       // Stop any in-flight utterance first so prompts don't stack.
@@ -221,8 +252,10 @@ export async function speak(text: string): Promise<void> {
 
 /** Cancel any speaking / queued utterance immediately. */
 export function cancel(): void {
-  const capTts = getCapTts();
-  if (capTts) void capTts.stop().catch(() => null);
+  // Fire-and-forget — the lookup is cheap if already resolved.
+  void getCapTts().then((capTts) => {
+    if (capTts) void capTts.stop().catch(() => null);
+  });
   if (isWebSpeechAvailable()) {
     try {
       window.speechSynthesis.cancel();
@@ -245,7 +278,8 @@ export async function warmup(): Promise<void> {
   // Trigger the voiceschanged-wait path eagerly so the first real
   // speak() doesn't have to.
   void whenVoicesReady();
-  // Probe the Capacitor plugin presence so the cached lookup is warm
-  // before the first incoming prompt.
-  getCapTts();
+  // Resolve the Capacitor plugin lookup so the cached promise is
+  // warm before the first incoming prompt. Fire-and-forget — the
+  // call site doesn't need to await.
+  void getCapTts();
 }
