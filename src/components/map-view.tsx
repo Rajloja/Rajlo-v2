@@ -696,6 +696,21 @@ export function MapView({
   // button. Default ON because most page-loads land on a moving
   // trip where the centered behaviour is wanted.
   const followModeRef = useRef(true);
+  // Tracks the most recent zoom level so the zoom-changed listener
+  // can tell whether the user zoomed IN (no action) or OUT (debounce
+  // the auto-restore). Initialised to the constructor zoom.
+  const lastZoomRef = useRef<number>(9);
+  // Pending auto-restore timer. Fires 3s after the last user zoom-OUT
+  // and snaps the camera back to the in-trip default. Cleared on every
+  // new zoom event so consecutive pinch-outs reset the countdown.
+  const zoomRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of the `navMode` prop into a ref so the zoom-changed
+  // listener (declared once at init) reads the live value instead of
+  // a stale closure capture.
+  const navModeRef = useRef(false);
+  useEffect(() => {
+    navModeRef.current = navMode;
+  }, [navMode]);
   // Internal "self GPS" state — populated when the user taps the
   // locate-me button on a page that doesn't otherwise feed riderPosition
   // (e.g. the rider booking screen). The puck renders from
@@ -973,6 +988,12 @@ export function MapView({
           disableDefaultUI: true,
           gestureHandling: "greedy",
           clickableIcons: false,
+          // Cap the maximum zoom so users can't pinch deep into
+          // satellite-level detail that breaks the carefully-tuned
+          // marker / polyline visuals. 18 still resolves individual
+          // buildings and street names — plenty for any in-trip
+          // decision the driver or rider has to make.
+          maxZoom: 18,
           ...(mapId ? { mapId } : { styles: MAP_STYLE }),
         });
         directionsServiceRef.current = new g.maps.DirectionsService();
@@ -991,6 +1012,53 @@ export function MapView({
             onUserDragRef.current?.();
           }
         });
+        // Seed the zoom-tracking ref with whatever zoom the map
+        // settled at after the constructor.
+        lastZoomRef.current = mapRef.current.getZoom() ?? 9;
+        // Pinch-zoom-only (no pan) doesn't fire `dragstart`, so we
+        // mirror followMode-off onto raw wheel + touch events. Without
+        // this, a user who only pinch-zooms out would have followMode
+        // still TRUE, and the zoom-changed listener below would
+        // (correctly) ignore the change as "programmatic" — leaving
+        // them stuck zoomed out forever.
+        const el2 = mapRef.current.getDiv();
+        const markUserGesture = () => {
+          followModeRef.current = false;
+        };
+        el2.addEventListener("wheel", markUserGesture, { passive: true });
+        el2.addEventListener("touchstart", markUserGesture, { passive: true });
+        // Zoom-change auto-restore. When the user (driver) zooms OUT
+        // to scan a broader area mid-trip, snap the camera back to the
+        // in-trip default 3s after they stop fiddling — that's the
+        // requested "broaden the view, then auto-frame back" UX. Only
+        // fires on zoom-OUT (zooming in is a deliberate close look the
+        // user wants to keep) and only when followMode is off (which
+        // means we're reacting to user input, not a programmatic
+        // fitBounds/setZoom call elsewhere in this component).
+        mapRef.current.addListener("zoom_changed", () => {
+          const m = mapRef.current;
+          if (!m) return;
+          const newZoom = m.getZoom() ?? 0;
+          const prevZoom = lastZoomRef.current;
+          lastZoomRef.current = newZoom;
+          if (newZoom >= prevZoom) return;       // zoomed in, no restore
+          if (followModeRef.current) return;     // programmatic
+          if (zoomRestoreTimerRef.current) {
+            clearTimeout(zoomRestoreTimerRef.current);
+          }
+          zoomRestoreTimerRef.current = setTimeout(() => {
+            const mm = mapRef.current;
+            if (!mm) return;
+            zoomRestoreTimerRef.current = null;
+            // Re-arm follow so the camera tracks the moving puck
+            // again — the existing driverPosition/riderPosition
+            // effects do the actual pan + zoom restore as soon as
+            // they see followMode flip back on. Nav mode runs
+            // tighter (~18) so the steering icon stays prominent.
+            followModeRef.current = true;
+            mm.setZoom(navModeRef.current ? 18 : 16);
+          }, 3000);
+        });
         // Wake up any effects waiting for the map to exist (markers,
         // polyline, fleet dots, live-route).
         setMapReady(true);
@@ -1007,6 +1075,10 @@ export function MapView({
     return () => {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (zoomRestoreTimerRef.current) {
+        clearTimeout(zoomRestoreTimerRef.current);
+        zoomRestoreTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -1175,10 +1247,14 @@ export function MapView({
           departureTime: new Date(),
           trafficModel: google.maps.TrafficModel.BEST_GUESS,
         },
-        // NB: alternatives aren't returned when waypoints are present
-        // (Google API restriction), so we don't request them here.
-        // The live route fetch below DOES request alternatives + picks
-        // the fastest, which is the path drivers actually navigate by.
+        // Alternatives are only supported when there are no waypoints
+        // (Google API restriction). When we have a clean A→B trip we
+        // ask for them + run `pickFastestRoute` so the rider preview
+        // shows the SAME route the driver's nav engine will actually
+        // pick. Without this gate, the preview's first-returned route
+        // could diverge from the driver's chosen fastest-by-traffic
+        // route — confusing on a shared live-trip view.
+        provideRouteAlternatives: waypoints.length === 0,
       })
       .then((response) => {
         if (cancelled) return;
@@ -1522,7 +1598,10 @@ export function MapView({
         position: pos,
         zIndex: 999,
         icon: buildIcon(),
-        title: "Driver",
+        // No `title` — the marker's role is obvious from its red car
+        // icon, and the hover tooltip just adds visual noise (and on
+        // admin maps where the viewer is neither party, "Driver" reads
+        // as a label about the viewer rather than the marker).
       });
       driverIconBucketRef.current = bucket;
     } else {
@@ -1621,7 +1700,6 @@ export function MapView({
           map,
           position,
           icon: buildCarIcon(d.heading),
-          title: "Driver online",
           // Below the active ride driver dot but above the route polyline.
           zIndex: 500,
           // Keep them out of the way of the rider clicking on the map.
@@ -1752,7 +1830,9 @@ export function MapView({
         position: pos,
         zIndex: 998,
         icon: buildRiderIcon(bucket),
-        title: "You",
+        // No `title` — same reasoning as the driver dot. On admin maps
+        // the viewer isn't the rider, so a "You" tooltip is misleading;
+        // on rider/driver maps the blue puck is self-evident.
       });
       riderHeadingBucketRef.current = bucket;
     } else {

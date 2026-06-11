@@ -476,9 +476,21 @@ export function InCallSheet({
   // Compact WhatsApp-style top bar so the rider/driver can keep
   // navigating mid-call. Tap to restore the full sheet. Audio stays
   // flowing because the Room object is kept alive in the ref.
+  //
+  // Position:
+  //   - `fixed` so it never scrolls with page content.
+  //   - On mobile, sits 68px from the viewport top so it clears the
+  //     portal's 60px-tall mobile header (sticky `py-3` + h-9 buttons)
+  //     with an 8px breathing gap. Previously `top-3` parked it
+  //     inside the navbar's vertical band even though z-100 put it on
+  //     top, which read as the pill being "under" the navbar.
+  //   - Desktop has no top navbar (sidebar layout) so a small `top-3`
+  //     gap is enough.
+  //   - z-[100] keeps it above the navbar (z-40), the mobile drawer
+  //     backdrop (z-55), and the drawer panel (z-60).
   if (minimized && phase !== "ended") {
     return (
-      <div className="fixed inset-x-0 top-3 z-[100] mx-auto flex max-w-md justify-center px-4">
+      <div className="fixed inset-x-0 top-[68px] z-[100] mx-auto flex max-w-md justify-center px-4 md:top-3">
         <div className="flex w-full items-center gap-3 rounded-2xl bg-emerald-600 px-4 py-3 text-white shadow-2xl ring-1 ring-white/20">
           {/* Restore — clicking the body (not the hangup button)
              expands back to the full sheet. */}

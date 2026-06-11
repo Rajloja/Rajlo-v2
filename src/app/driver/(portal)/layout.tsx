@@ -12,6 +12,7 @@ import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
 import { IncomingCallProvider } from "@/components/incoming-call-provider";
 import { ActiveCallProvider } from "@/components/active-call-provider";
+import { ActiveTripPositionProvider } from "@/components/active-trip-position-provider";
 import { driverNav } from "@/lib/mock-data";
 import { getDriverStatus } from "@/lib/driver-status";
 
@@ -66,6 +67,16 @@ export default async function DriverPortalLayout({
       nav={driverNav}
     >
       <ActiveCallProvider>
+      {/* Active-trip position broadcaster — mounted at layout level
+         so the driver's GPS keeps flowing to the rider regardless of
+         which page the driver is on (Wallet, Settings, Earnings,
+         etc.). Without this, the rider sees the car freeze the moment
+         the driver navigates away from /driver/active-trip — a direct
+         transparency hit. The provider also exposes the driver +
+         rider live positions via `useActiveTripPosition()` so the
+         active-trip page consumes them via context instead of
+         spinning up its own duplicate watcher. */}
+      <ActiveTripPositionProvider>
       <SessionGuard />
       {/* One-time launch warm-up: holds a branded loader until the
          bottom-nav tab chunks + data caches are prefetched, so the
@@ -107,6 +118,7 @@ export default async function DriverPortalLayout({
          The server-side getDriverStatus above already handles
          the unverified-redirect-to-pending/onboarding flow. */}
       <DriverPortalGate>{children}</DriverPortalGate>
+      </ActiveTripPositionProvider>
       </ActiveCallProvider>
     </PortalLayout>
   );

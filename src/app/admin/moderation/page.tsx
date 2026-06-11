@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Skeleton } from "@/components/skeleton";
 import { useLiveQuery } from "@/lib/use-live-query";
+import { AdminPromptDialog } from "@/components/admin-prompt-dialog";
 
 /**
  * /admin/moderation — enforcement console.
@@ -65,12 +66,12 @@ export default function AdminModerationPage() {
   });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Active release-hold confirmation. Holds the target hold so the
+  // dialog knows whose hold to release on confirm.
+  const [releaseTarget, setReleaseTarget] = useState<Hold | null>(null);
   const data = query.data;
 
   const releaseHold = async (driverUserId: string) => {
-    if (!confirm("Release this payout hold? The driver can withdraw again.")) {
-      return;
-    }
     setBusyId(driverUserId);
     setError(null);
     try {
@@ -128,26 +129,38 @@ export default function AdminModerationPage() {
                 key={h.id}
                 className="rounded-xl border border-line bg-surface p-4"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <Link
-                    href={`/admin/fraud/${h.driverUserId}`}
-                    className="text-sm font-extrabold hover:text-rajlo-red"
-                  >
-                    {h.driverName}
-                  </Link>
-                  <button
-                    type="button"
-                    disabled={busyId === h.driverUserId}
-                    onClick={() => releaseHold(h.driverUserId)}
-                    className="shrink-0 rounded-full border border-line bg-background px-3 py-1.5 text-xs font-bold hover:bg-surface-2 disabled:opacity-50"
-                  >
-                    Release
-                  </button>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-extrabold">
+                      {h.driverName}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">{h.reason}</p>
+                    <p className="mt-1 text-[11px] text-muted">
+                      By {h.createdBy} · {timeAgo(h.createdAt)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busyId === h.driverUserId}
+                      onClick={() => setReleaseTarget(h)}
+                      className="rounded-full border border-line bg-background px-3 py-1.5 text-xs font-bold hover:bg-surface-2 disabled:opacity-50"
+                    >
+                      Release
+                    </button>
+                    {/* Explicit, labelled "open in fraud" link instead
+                       of a whole-row link — the user's complaint was
+                       that clicking moderation rows felt like a loop
+                       back to fraud. Now the row is informational and
+                       the navigation is a deliberate opt-in. */}
+                    <Link
+                      href={`/admin/fraud/${h.driverUserId}`}
+                      className="text-[11px] font-bold text-rajlo-red hover:underline"
+                    >
+                      View profile →
+                    </Link>
+                  </div>
                 </div>
-                <p className="mt-1 text-xs text-muted">{h.reason}</p>
-                <p className="mt-1 text-[11px] text-muted">
-                  By {h.createdBy} · {timeAgo(h.createdAt)}
-                </p>
               </li>
             ))}
             {data?.pagination?.hasMoreHolds && (
@@ -178,24 +191,26 @@ export default function AdminModerationPage() {
                 key={a.id}
                 className="rounded-xl border border-line bg-surface p-3.5"
               >
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{a.targetName}</p>
+                    <p className="mt-1 text-xs font-semibold text-rajlo-red">
+                      {ACTION_LABEL[a.actionType] ?? a.actionType}
+                    </p>
+                    {a.reason && (
+                      <p className="mt-0.5 text-xs text-muted">{a.reason}</p>
+                    )}
+                    <p className="mt-1 text-[11px] text-muted">
+                      by {a.admin} · {timeAgo(a.createdAt)}
+                    </p>
+                  </div>
                   <Link
                     href={`/admin/fraud/${a.targetUserId}`}
-                    className="text-sm font-bold hover:text-rajlo-red"
+                    className="shrink-0 text-[11px] font-bold text-rajlo-red hover:underline"
                   >
-                    {a.targetName}
+                    View profile →
                   </Link>
-                  <span className="text-[11px] text-muted">
-                    {timeAgo(a.createdAt)}
-                  </span>
                 </div>
-                <p className="mt-1 text-xs font-semibold text-rajlo-red">
-                  {ACTION_LABEL[a.actionType] ?? a.actionType}
-                </p>
-                {a.reason && (
-                  <p className="mt-0.5 text-xs text-muted">{a.reason}</p>
-                )}
-                <p className="mt-1 text-[11px] text-muted">by {a.admin}</p>
               </li>
             ))}
             {data?.pagination?.hasMoreActions && (
@@ -207,6 +222,29 @@ export default function AdminModerationPage() {
           </ul>
         )}
       </section>
+
+      {/* Release-hold confirmation — replaces the native confirm()
+         dialog. No reason input required (the original hold's reason
+         is what's already logged), so the dialog is a pure confirm. */}
+      <AdminPromptDialog
+        open={releaseTarget !== null}
+        title={
+          releaseTarget
+            ? `Release ${releaseTarget.driverName}'s payout hold?`
+            : ""
+        }
+        description="The driver can withdraw again immediately. The release is logged in the moderation trail under your admin id."
+        tone="amber"
+        inputType="none"
+        confirmLabel="Release hold"
+        busy={busyId !== null}
+        onCancel={() => setReleaseTarget(null)}
+        onConfirm={async () => {
+          if (!releaseTarget) return;
+          await releaseHold(releaseTarget.driverUserId);
+          setReleaseTarget(null);
+        }}
+      />
     </div>
   );
 }

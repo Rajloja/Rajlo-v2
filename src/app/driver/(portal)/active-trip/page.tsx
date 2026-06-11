@@ -15,7 +15,7 @@ import { NavBanner } from "@/components/nav/nav-banner";
 import { NavControls } from "@/components/nav/nav-controls";
 import { NavTripCard } from "@/components/nav/nav-trip-card";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
-import { useRidePosition } from "@/lib/use-ride-position";
+import { useActiveTripPosition } from "@/components/active-trip-position-provider";
 import { useLocationViolationMonitor } from "@/lib/use-location-violation-monitor";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useTurnByTurn } from "@/lib/use-turn-by-turn";
@@ -190,15 +190,14 @@ export default function DriverActiveTripPage() {
   // updates live.
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Live position channel: driver streams own GPS so the rider can watch
-  // the car move on the map. Hook also receives the rider's position so
-  // the driver sees a blue dot for the passenger as they approach pickup.
+  // Live position channel: driver's GPS is broadcast from the
+  // portal-level `<ActiveTripPositionProvider>` so it keeps flowing
+  // regardless of which page the driver is on. This page just reads
+  // the latest driver + rider positions from the provider context —
+  // no second `useRidePosition` mount, which avoided duplicate
+  // `watchPosition` watchers and duplicate Supabase channels.
+  const { driverPosition, riderPosition, geoError } = useActiveTripPosition();
   const activeRideId = data?.ride?.id ?? null;
-  const { driverPosition, riderPosition, geoError } = useRidePosition(
-    activeRideId,
-    "driver",
-    /* streamSelf */ true,
-  );
 
   // ─── In-app turn-by-turn navigation state ───
   // The driver's primary surface during an active trip is the

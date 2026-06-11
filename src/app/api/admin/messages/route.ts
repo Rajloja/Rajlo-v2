@@ -239,8 +239,15 @@ export async function POST(request: Request) {
     }
   }
 
-  /* ─────────── Persist + audit ─────────── */
-  const { data: messageRow } = await supabase
+  /* ─────────── Persist + audit ───────────
+   * If the insert fails we surface the DB error to the admin instead
+   * of swallowing it — without this branch a schema/constraint
+   * regression reads to the admin as "send succeeded but History is
+   * empty," which is the exact symptom that prompted this fix. The
+   * outbound channels already fired by the time we reach this point,
+   * so a 500 here means "delivered but not logged"; the response
+   * still tells the truth. */
+  const { data: messageRow, error: persistError } = await supabase
     .from("admin_messages")
     .insert({
       actor_id: actor.userId,
@@ -257,6 +264,22 @@ export async function POST(request: Request) {
     })
     .select("id")
     .single();
+
+  if (persistError) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[admin/messages] Persist failed despite delivery succeeding:",
+      persistError,
+    );
+    return NextResponse.json(
+      {
+        error: `Delivered to ${recipients.length} recipient(s), but the History row failed to save: ${persistError.message}`,
+        recipients: recipients.length,
+        results,
+      },
+      { status: 500 },
+    );
+  }
 
   await logAdminAction(supabase, actor, {
     targetType:

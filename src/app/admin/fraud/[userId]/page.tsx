@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { Skeleton } from "@/components/skeleton";
+import {
+  AdminPromptDialog,
+  type DialogTone,
+} from "@/components/admin-prompt-dialog";
 
 /**
  * /admin/fraud/[userId] — full fraud profile for one account.
@@ -56,6 +60,78 @@ const LEVEL_STYLE: Record<string, string> = {
   critical: "bg-primary-soft text-rajlo-red",
 };
 
+/** All possible single-dialog configurations on this page. Each is
+ *  fully self-contained so the JSX `<AdminPromptDialog>` below just
+ *  consumes whatever is currently active without inline branching. */
+type DialogState =
+  | null
+  | {
+      kind: "moderation";
+      action: string;
+      label: string;
+      tone: DialogTone;
+      chips: string[];
+    }
+  | { kind: "raise_flag_type" }
+  | {
+      kind: "raise_flag_description";
+      flagType: string;
+    }
+  | {
+      kind: "raise_flag_severity";
+      flagType: string;
+      description: string;
+    }
+  | { kind: "open_investigation" }
+  | {
+      kind: "resolve_investigation";
+      investigationId: string;
+    };
+
+/** Quick-reason chips per enforcement action — common phrasings the
+ *  admin can tap to pre-fill the reason field. Drives the dialog's
+ *  `chips` prop. Keeping the chips action-specific makes them
+ *  genuinely useful instead of one-size-fits-all noise. */
+const MODERATION_CHIPS: Record<string, string[]> = {
+  warning: [
+    "First-time complaint logged",
+    "Late pickup pattern",
+    "Minor TA tariff violation",
+    "Customer-service tone",
+  ],
+  temporary_suspension: [
+    "Multiple complaints in 7 days",
+    "GPS spoofing — under investigation",
+    "Unverified vehicle change",
+    "Repeated trip cancellations",
+  ],
+  permanent_ban: [
+    "Confirmed GPS spoofing",
+    "Identity fraud confirmed",
+    "Safety incident — TA-reported",
+    "Repeated bans evaded via new account",
+  ],
+  reinstatement: [
+    "Investigation closed — no fault",
+    "Customer complaint withdrawn",
+    "Compliance docs re-submitted",
+  ],
+  payout_hold: [
+    "Pending fraud investigation",
+    "Bank details under verification",
+    "TA compliance check",
+    "Suspected wash trades",
+  ],
+};
+
+const MODERATION_TONE: Record<string, DialogTone> = {
+  warning: "amber",
+  temporary_suspension: "amber",
+  permanent_ban: "red",
+  reinstatement: "emerald",
+  payout_hold: "red",
+};
+
 export default function FraudUserPage() {
   const params = useParams<{ userId: string }>();
   const userId = params.userId;
@@ -63,6 +139,11 @@ export default function FraudUserPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DialogState>(null);
+  // Inline confirmation banner shown right above the enforcement
+  // grid so the admin sees the action landed without having to
+  // hunt for a toast elsewhere. Auto-clears on next action.
+  const [actionResult, setActionResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -82,9 +163,13 @@ export default function FraudUserPage() {
     load();
   }, [load]);
 
-  const act = async (body: Record<string, unknown>) => {
+  const act = async (
+    body: Record<string, unknown>,
+    successMessage?: string,
+  ) => {
     setBusy(true);
     setError(null);
+    setActionResult(null);
     try {
       const res = await fetch(`/api/admin/fraud/${userId}`, {
         method: "POST",
@@ -93,6 +178,7 @@ export default function FraudUserPage() {
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      if (successMessage) setActionResult(successMessage);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed.");
@@ -102,9 +188,10 @@ export default function FraudUserPage() {
   };
 
   // Enforcement actions route to the moderation API.
-  const moderate = async (action: string, reason: string) => {
+  const moderate = async (action: string, reason: string, label: string) => {
     setBusy(true);
     setError(null);
+    setActionResult(null);
     try {
       const res = await fetch(`/api/admin/moderation/${userId}`, {
         method: "POST",
@@ -118,6 +205,7 @@ export default function FraudUserPage() {
       if (!res.ok) {
         throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`);
       }
+      setActionResult(`${label} recorded. Action logged in moderation.`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Enforcement failed.");
@@ -223,6 +311,12 @@ export default function FraudUserPage() {
           Actions are recorded in the moderation log. Suspensions and
           bans block the account from signing in.
         </p>
+        {actionResult && (
+          <p className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+            <Icon name="check-circle" className="h-3 w-3" />
+            {actionResult}
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           {[
             { action: "warning", label: "Warn" },
@@ -237,18 +331,15 @@ export default function FraudUserPage() {
               key={b.action}
               type="button"
               disabled={busy}
-              onClick={() => {
-                const reason =
-                  window.prompt(`Reason for "${b.label}"`) ?? "";
-                if (
-                  b.action !== "reinstatement" &&
-                  b.action !== "warning" &&
-                  !reason.trim()
-                ) {
-                  return;
-                }
-                moderate(b.action, reason);
-              }}
+              onClick={() =>
+                setDialog({
+                  kind: "moderation",
+                  action: b.action,
+                  label: b.label,
+                  tone: MODERATION_TONE[b.action] ?? "red",
+                  chips: MODERATION_CHIPS[b.action] ?? [],
+                })
+              }
               className="rounded-full border border-rajlo-red/30 bg-background px-3 py-1.5 text-xs font-bold text-rajlo-red hover:bg-surface-2 disabled:opacity-50"
             >
               {b.label}
@@ -266,16 +357,7 @@ export default function FraudUserPage() {
           <button
             type="button"
             disabled={busy}
-            onClick={() => {
-              const flagType = window.prompt("Flag type (e.g. gps_spoofing)");
-              if (!flagType) return;
-              const description = window.prompt("Description");
-              if (!description) return;
-              const severity =
-                window.prompt("Severity: low / medium / high / critical", "medium") ??
-                "medium";
-              act({ action: "raise_flag", flagType, description, severity });
-            }}
+            onClick={() => setDialog({ kind: "raise_flag_type" })}
             className="rounded-full bg-rajlo-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
           >
             Raise flag
@@ -359,11 +441,7 @@ export default function FraudUserPage() {
           <button
             type="button"
             disabled={busy}
-            onClick={() => {
-              const summary = window.prompt("Investigation summary");
-              if (!summary) return;
-              act({ action: "open_investigation", summary });
-            }}
+            onClick={() => setDialog({ kind: "open_investigation" })}
             className="rounded-full bg-rajlo-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
           >
             Open investigation
@@ -395,16 +473,12 @@ export default function FraudUserPage() {
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => {
-                      const resolution =
-                        window.prompt("Resolution note (optional)") ?? "";
-                      act({
-                        action: "resolve_investigation",
+                    onClick={() =>
+                      setDialog({
+                        kind: "resolve_investigation",
                         investigationId: inv.id,
-                        status: "resolved",
-                        resolution,
-                      });
-                    }}
+                      })
+                    }
                     className="mt-2 rounded-full border border-line bg-background px-3 py-1 text-[11px] font-bold hover:bg-surface-2 disabled:opacity-50"
                   >
                     Resolve
@@ -444,6 +518,175 @@ export default function FraudUserPage() {
           </ul>
         )}
       </section>
+
+      {/* ─── Custom admin prompt dialog ───
+         Single mount; the active configuration is driven by the
+         `dialog` state. Every admin action that used to spawn a
+         native `window.prompt` flows through here so the UX is
+         consistent and the chip suggestions land. */}
+      <AdminPromptDialog
+        open={dialog?.kind === "moderation"}
+        title={
+          dialog?.kind === "moderation"
+            ? `Reason for "${dialog.label}"`
+            : ""
+        }
+        description="Logged in the moderation trail. The affected user is notified of the action (not the reason text itself)."
+        tone={dialog?.kind === "moderation" ? dialog.tone : "red"}
+        inputType="textarea"
+        inputLabel="Reason"
+        placeholder="Why are you taking this action?"
+        chips={dialog?.kind === "moderation" ? dialog.chips : []}
+        requireValue={
+          dialog?.kind === "moderation" &&
+          dialog.action !== "warning" &&
+          dialog.action !== "reinstatement"
+        }
+        confirmLabel={dialog?.kind === "moderation" ? dialog.label : ""}
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={async (reason) => {
+          if (dialog?.kind !== "moderation") return;
+          await moderate(dialog.action, reason, dialog.label);
+          setDialog(null);
+        }}
+      />
+
+      {/* Raise flag — three-step prompt: type → description → severity. */}
+      <AdminPromptDialog
+        open={dialog?.kind === "raise_flag_type"}
+        title="Raise a fraud flag — type"
+        description="Step 1 of 3 · pick or type the flag type"
+        tone="red"
+        inputType="text"
+        inputLabel="Flag type"
+        placeholder="gps_spoofing"
+        chips={[
+          "gps_spoofing",
+          "impossible_travel",
+          "shared_device",
+          "shared_ip",
+          "identity_mismatch",
+          "rapid_account_creation",
+        ]}
+        confirmLabel="Next"
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={(flagType) =>
+          setDialog({ kind: "raise_flag_description", flagType })
+        }
+      />
+      <AdminPromptDialog
+        open={dialog?.kind === "raise_flag_description"}
+        title="Raise a fraud flag — description"
+        description="Step 2 of 3 · what evidence supports this flag?"
+        tone="red"
+        inputType="textarea"
+        inputLabel="Description"
+        placeholder="What did you observe?"
+        chips={[
+          "Driver GPS jumped 30 km in under a minute",
+          "Same device fingerprint across multiple accounts",
+          "Photo ID doesn't match selfie",
+          "Multiple accounts created from same IP within an hour",
+        ]}
+        confirmLabel="Next"
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={(description) => {
+          if (dialog?.kind !== "raise_flag_description") return;
+          setDialog({
+            kind: "raise_flag_severity",
+            flagType: dialog.flagType,
+            description,
+          });
+        }}
+      />
+      <AdminPromptDialog
+        open={dialog?.kind === "raise_flag_severity"}
+        title="Raise a fraud flag — severity"
+        description="Step 3 of 3 · how serious is this?"
+        tone="red"
+        inputType="text"
+        inputLabel="Severity"
+        placeholder="medium"
+        chips={["low", "medium", "high", "critical"]}
+        confirmLabel="Raise flag"
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={async (severity) => {
+          if (dialog?.kind !== "raise_flag_severity") return;
+          await act(
+            {
+              action: "raise_flag",
+              flagType: dialog.flagType,
+              description: dialog.description,
+              severity: severity || "medium",
+            },
+            "Fraud flag raised.",
+          );
+          setDialog(null);
+        }}
+      />
+
+      <AdminPromptDialog
+        open={dialog?.kind === "open_investigation"}
+        title="Open an investigation"
+        description="A short summary of what you're looking into. The investigation row is logged immediately and can be resolved later with a final note."
+        tone="red"
+        inputType="textarea"
+        inputLabel="Summary"
+        placeholder="e.g. Driver accumulated 4 impossible-travel flags this week"
+        chips={[
+          "Multiple impossible-travel flags in 24h",
+          "Identity verification mismatch",
+          "Shared-device cluster review",
+          "Suspected fraud ring — see linked accounts",
+        ]}
+        confirmLabel="Open"
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={async (summary) => {
+          await act(
+            { action: "open_investigation", summary },
+            "Investigation opened.",
+          );
+          setDialog(null);
+        }}
+      />
+
+      <AdminPromptDialog
+        open={dialog?.kind === "resolve_investigation"}
+        title="Resolve investigation"
+        description="Optional final note. Closes the investigation and marks it resolved."
+        tone="emerald"
+        inputType="textarea"
+        inputLabel="Resolution note"
+        placeholder="Optional"
+        requireValue={false}
+        chips={[
+          "Closed — no fraud confirmed",
+          "Account warned and reinstated",
+          "Account suspended pending compliance",
+          "Linked accounts reviewed and cleared",
+        ]}
+        confirmLabel="Resolve"
+        busy={busy}
+        onCancel={() => setDialog(null)}
+        onConfirm={async (resolution) => {
+          if (dialog?.kind !== "resolve_investigation") return;
+          await act(
+            {
+              action: "resolve_investigation",
+              investigationId: dialog.investigationId,
+              status: "resolved",
+              resolution,
+            },
+            "Investigation resolved.",
+          );
+          setDialog(null);
+        }}
+      />
     </div>
   );
 }

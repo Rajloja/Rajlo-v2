@@ -108,6 +108,17 @@ export async function GET() {
         .select("id", { count: "exact", head: true })
         .eq("status", "open"),
     ),
+
+    // Driver violations — unresolved entries (resolved_at IS NULL).
+    // The `driver_violations` table has no `status` column; presence
+    // of `resolved_at` is the closed/open signal. Mirrors what the
+    // /admin/violations page surfaces by default.
+    tally("/admin/violations", () =>
+      supabase
+        .from("driver_violations")
+        .select("id", { count: "exact", head: true })
+        .is("resolved_at", null),
+    ),
   ]);
 
   return NextResponse.json({ counts });

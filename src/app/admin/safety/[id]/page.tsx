@@ -104,6 +104,11 @@ export default function AdminSafetyAlertDetailPage() {
   const [draft, setDraft] = useState("");
   const [resolveNote, setResolveNote] = useState("");
   const [showResolve, setShowResolve] = useState(false);
+  // Acknowledge is a one-tap state-change with regulatory weight (it
+  // tells the rider/driver "Rajlo has seen your alert"), so we gate
+  // it behind an explicit confirm dialog rather than firing on the
+  // first click — same pattern as Resolve.
+  const [confirmingAck, setConfirmingAck] = useState(false);
 
   const send = async (payload: { body?: string; tipId?: string }) => {
     if (busy) return;
@@ -224,7 +229,7 @@ export default function AdminSafetyAlertDetailPage() {
                 {alert.status === "open" && (
                   <button
                     type="button"
-                    onClick={() => decide("acknowledged")}
+                    onClick={() => setConfirmingAck(true)}
                     disabled={busy}
                     className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-amber-600 disabled:opacity-50"
                   >
@@ -345,6 +350,67 @@ export default function AdminSafetyAlertDetailPage() {
           busy={busy}
         />
       </div>
+
+      {/* ─── Acknowledge confirm modal ───
+         Fires when the safety admin clicks "Acknowledge." Held behind
+         an explicit confirm because acknowledging is a logged action
+         that surfaces to the rider/driver immediately. The state
+         change isn't reversible without a follow-up resolve, so the
+         extra tap is cheap insurance against fat-fingering. */}
+      {confirmingAck && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ack-confirm-title"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-rajlo-black/55 backdrop-blur-sm px-4"
+          onClick={() => !busy && setConfirmingAck(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-2xl ring-1 ring-line"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-700">
+                <Icon name="shield-alert" className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2
+                  id="ack-confirm-title"
+                  className="text-base font-extrabold tracking-tight"
+                >
+                  Acknowledge this alert?
+                </h2>
+                <p className="mt-1 text-sm text-muted">
+                  The rider and driver will be notified that Rajlo Safety has
+                  seen their alert and is engaging. This action is logged.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingAck(false)}
+                disabled={busy}
+                className="rounded-full border border-line bg-surface px-4 py-1.5 text-xs font-bold text-foreground hover:bg-surface-soft disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await decide("acknowledged");
+                  setConfirmingAck(false);
+                }}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+              >
+                <Icon name="check-circle" className="h-3 w-3" />
+                {busy ? "Acknowledging…" : "Acknowledge"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

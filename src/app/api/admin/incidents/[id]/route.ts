@@ -5,6 +5,73 @@ import {
   logAdminAction,
 } from "@/lib/admin-auth";
 import { hasPermission } from "@/lib/admin-rbac";
+import { sendEmail } from "@/lib/email";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const INCIDENT_PUBLIC_STATUS: Record<string, string> = {
+  open: "Open",
+  under_review: "Under review",
+  awaiting_response: "Awaiting response",
+  escalated: "Escalated",
+  resolved: "Resolved",
+  closed: "Closed",
+};
+
+/** Look up the reporter's email + first name for a notification.
+ *  Returns null when we don't have an email to write to — caller
+ *  short-circuits the send in that case. */
+async function loadReporterContact(
+  supabase: SupabaseClient,
+  reporterUserId: string | null,
+): Promise<{ email: string; firstName: string | null } | null> {
+  if (!reporterUserId) return null;
+  const { data } = await supabase
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", reporterUserId)
+    .maybeSingle();
+  const row = data as { email: string | null; full_name: string | null } | null;
+  if (!row?.email) return null;
+  return {
+    email: row.email,
+    firstName: row.full_name?.split(" ")[0] ?? null,
+  };
+}
+
+/** Send an incident-progress email to the reporter. Fire-and-forget;
+ *  the calling endpoint reports whether a notification was actually
+ *  dispatched via the response payload so the admin UI can confirm. */
+async function emailReporter(
+  contact: { email: string; firstName: string | null },
+  args: {
+    incidentTitle: string;
+    body: string;
+    cta?: { label: string; href: string };
+  },
+): Promise<boolean> {
+  const greeting = contact.firstName ? `Hi ${contact.firstName},` : "Hi,";
+  const ctaHtml = args.cta
+    ? `<p style="margin:24px 0"><a href="${args.cta.href}" style="background:#f10100;color:#fff;text-decoration:none;padding:12px 20px;border-radius:9999px;font-weight:700;display:inline-block">${args.cta.label}</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:-apple-system,Segoe UI,sans-serif;color:#111906;max-width:560px;margin:0 auto;padding:24px">
+      <p style="margin:0 0 16px;font-size:18px"><strong>Rajlo Safety — incident update</strong></p>
+      <p style="margin:0 0 12px">${greeting}</p>
+      <p style="margin:0 0 12px"><em>${args.incidentTitle}</em></p>
+      <div style="margin:0 0 12px;white-space:pre-wrap">${args.body}</div>
+      ${ctaHtml}
+      <p style="margin:24px 0 0;color:#6b7077;font-size:12px">You're getting this because you filed this report through the Rajlo app. Reply to this email to add more info; we read every message.</p>
+    </div>`;
+  const text = `${greeting}\n\n${args.incidentTitle}\n\n${args.body}\n\n— Rajlo Safety`;
+  const result = await sendEmail({
+    to: contact.email,
+    subject: `Rajlo Safety — ${args.incidentTitle}`,
+    html,
+    text,
+    replyTo: process.env.SAFETY_REPLY_TO_EMAIL,
+  });
+  return "ok" in result && result.ok;
+}
 
 /**
  * GET   /api/admin/incidents/[id] — full incident dossier
@@ -133,12 +200,16 @@ export async function PATCH(
 
   const { data: incident } = await supabase
     .from("incidents")
-    .select("id, status")
+    .select("id, status, title, reporter_user_id")
     .eq("id", id)
     .maybeSingle();
   if (!incident) {
     return NextResponse.json({ error: "Incident not found" }, { status: 404 });
   }
+  const incidentTitle =
+    (incident as { title?: string | null }).title ?? "Your incident report";
+  const reporterUserId = (incident as { reporter_user_id?: string | null })
+    .reporter_user_id ?? null;
 
   const body = (await request.json().catch(() => ({}))) as PatchBody;
 
@@ -150,12 +221,17 @@ export async function PATCH(
         { status: 403 },
       );
     }
+    // Default-isInternal: notes are internal-by-default unless the
+    // admin explicitly flips it off. Only NON-internal notes notify
+    // the reporter — internal notes are working-comments for the
+    // admin team.
+    const isInternal = body.isInternal !== false;
     await supabase.from("support_notes").insert({
       incident_id: id,
       admin_user_id: actor.userId,
       admin_label: actor.label,
       note_text: body.note.trim(),
-      is_internal: body.isInternal !== false,
+      is_internal: isInternal,
     });
     await supabase.from("incident_audit_logs").insert({
       incident_id: id,
@@ -163,7 +239,17 @@ export async function PATCH(
       action_description: `${actor.label} added a support note`,
       admin_user_id: actor.userId,
     });
-    return NextResponse.json({ ok: true });
+    let notified = false;
+    if (!isInternal) {
+      const contact = await loadReporterContact(supabase, reporterUserId);
+      if (contact) {
+        notified = await emailReporter(contact, {
+          incidentTitle,
+          body: `An update has been added to your incident report:\n\n${body.note.trim()}`,
+        });
+      }
+    }
+    return NextResponse.json({ ok: true, notified });
   }
 
   // ── Self-assign ──
@@ -228,7 +314,30 @@ export async function PATCH(
       action: "incident_status_changed",
       summary: `${actor.label} set incident status to ${body.status}`,
     });
-    return NextResponse.json({ ok: true });
+    // Notify the reporter on every status change. The resolution
+    // summary + action-taken get folded into the body when present
+    // so the email carries the actual outcome, not just "status
+    // changed."
+    let notified = false;
+    const contact = await loadReporterContact(supabase, reporterUserId);
+    if (contact) {
+      const publicStatus =
+        INCIDENT_PUBLIC_STATUS[body.status] ?? body.status;
+      let mailBody = `Your report is now: ${publicStatus}.`;
+      if (typeof body.resolutionSummary === "string" && body.resolutionSummary.trim()) {
+        mailBody += `\n\nWhat we found / decided:\n${body.resolutionSummary.trim()}`;
+      }
+      if (typeof body.actionTaken === "string" && body.actionTaken.trim()) {
+        mailBody += `\n\nAction we took:\n${body.actionTaken.trim()}`;
+      }
+      mailBody +=
+        "\n\nIf there's anything else we should know, reply to this email — it goes straight to our safety team.";
+      notified = await emailReporter(contact, {
+        incidentTitle,
+        body: mailBody,
+      });
+    }
+    return NextResponse.json({ ok: true, notified });
   }
 
   return NextResponse.json({ error: "Nothing to update." }, { status: 400 });

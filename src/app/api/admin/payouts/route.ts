@@ -73,12 +73,28 @@ export async function GET(request: NextRequest) {
   const list = hasMore ? fetched.slice(0, limit) : fetched;
 
   // Hydrate driver display name + email + external id + TRN.
+  // We pull from BOTH `profiles` and `drivers` because the two tables
+  // can disagree: a driver may complete TA onboarding (drivers row
+  // populated) before their profile row gets a full_name from the
+  // app (which happens later via account settings). When the profile
+  // is sparse we fall through to the drivers row so the payout queue
+  // doesn't show "Unnamed · no email" for a verified driver whose
+  // name we already have on file.
   const userIds = Array.from(new Set(list.map((r) => r.user_id)));
   const profileMap = new Map<
     string,
     { fullName: string | null; email: string | null }
   >();
-  const driverMap = new Map<string, { externalId: string; trn: string | null }>();
+  const driverMap = new Map<
+    string,
+    {
+      externalId: string;
+      trn: string | null;
+      firstName: string | null;
+      lastName: string | null;
+      email: string | null;
+    }
+  >();
   if (userIds.length > 0) {
     const [{ data: profileRows }, { data: driverRows }] = await Promise.all([
       supabase
@@ -87,7 +103,7 @@ export async function GET(request: NextRequest) {
         .in("id", userIds),
       supabase
         .from("drivers")
-        .select("user_id, external_id, trn")
+        .select("user_id, external_id, trn, first_name, last_name, email")
         .in("user_id", userIds),
     ]);
     ((profileRows ?? []) as Array<{
@@ -101,8 +117,43 @@ export async function GET(request: NextRequest) {
       user_id: string;
       external_id: string;
       trn: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      email: string | null;
     }>).forEach((d) =>
-      driverMap.set(d.user_id, { externalId: d.external_id, trn: d.trn }),
+      driverMap.set(d.user_id, {
+        externalId: d.external_id,
+        trn: d.trn,
+        firstName: d.first_name,
+        lastName: d.last_name,
+        email: d.email,
+      }),
+    );
+  }
+
+  /** Resolve the most-complete display name for a row. Cascade:
+   *  profile.full_name → drivers.first+last → bank account_holder
+   *  → "Unnamed" (true unknown — only fires for genuinely empty rows). */
+  function resolveDriverName(r: Row): string {
+    const profile = profileMap.get(r.user_id);
+    if (profile?.fullName && profile.fullName.trim()) return profile.fullName;
+    const driver = driverMap.get(r.user_id);
+    const driverName = [driver?.firstName, driver?.lastName]
+      .filter((s): s is string => Boolean(s && s.trim()))
+      .join(" ")
+      .trim();
+    if (driverName) return driverName;
+    if (r.account_holder_name && r.account_holder_name.trim()) {
+      return r.account_holder_name;
+    }
+    return "Unnamed";
+  }
+
+  function resolveDriverEmail(r: Row): string | null {
+    return (
+      profileMap.get(r.user_id)?.email ??
+      driverMap.get(r.user_id)?.email ??
+      null
     );
   }
 
@@ -112,8 +163,8 @@ export async function GET(request: NextRequest) {
       userId: r.user_id,
       driverExternalId: driverMap.get(r.user_id)?.externalId ?? null,
       driverTrn: driverMap.get(r.user_id)?.trn ?? null,
-      driverName: profileMap.get(r.user_id)?.fullName ?? "Unnamed",
-      driverEmail: profileMap.get(r.user_id)?.email ?? null,
+      driverName: resolveDriverName(r),
+      driverEmail: resolveDriverEmail(r),
       amountJmd: r.amount_jmd,
       bankName: r.bank_name,
       bankAccountNumber: r.bank_account_number,

@@ -86,23 +86,31 @@ export function DriverVehicleCard({
           <p className="mt-0.5 truncate text-base font-extrabold tracking-tight">
             {name}
           </p>
-          {/* Rating row — only shown when we have data */}
-          {rating !== undefined &&
-            (rating !== null ? (
-              <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-rajlo-red">
-                <Icon name="star" className="h-3 w-3" />
-                {rating.toFixed(1)}
-                {typeof ratingCount === "number" && (
-                  <span className="font-semibold text-muted">
-                    ({ratingCount})
+          {/* Rating row — always renders so the rider knows what to
+             look for. When the driver has at least one rating, show
+             stars + value. Otherwise surface "TA-verified" so the
+             space isn't blank and a brand-new driver doesn't look
+             unrated/untrusted. */}
+          <div className="mt-1.5 flex items-center gap-2">
+            {rating != null ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-xs font-extrabold text-white shadow-sm shadow-rajlo-red/30">
+                  <Icon name="star" className="h-3 w-3" />
+                  {rating.toFixed(1)}
+                </span>
+                {typeof ratingCount === "number" && ratingCount > 0 && (
+                  <span className="text-[11px] font-semibold text-muted">
+                    {ratingCount} trip{ratingCount === 1 ? "" : "s"} rated
                   </span>
                 )}
-              </p>
+              </>
             ) : (
-              <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-rajlo-red/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                New driver
-              </p>
-            ))}
+              <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red/10 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-rajlo-red">
+                <Icon name="shield-check" className="h-3 w-3" />
+                TA-verified
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Action group — in-app call + chat launcher come in via

@@ -590,6 +590,26 @@ export default function AdminMessagesPage() {
             >
               {historyLoading ? (
                 <ActivityFeedSkeleton rows={4} />
+              ) : historyQuery.error && history.length === 0 ? (
+                // Surface the actual fetch error rather than the
+                // "no messages" empty state — without this, a 500 on
+                // /api/admin/messages reads to the admin as "we
+                // haven't sent anything," which masks real outages.
+                <div className="py-10 text-center">
+                  <p className="text-xs font-bold text-rajlo-red">
+                    Couldn&apos;t load history
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted">
+                    {historyQuery.error}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={reloadHistory}
+                    className="mt-3 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1.5 text-[11px] font-bold text-foreground hover:bg-surface-soft"
+                  >
+                    Try again
+                  </button>
+                </div>
               ) : history.length === 0 ? (
                 <p className="py-10 text-center text-xs text-muted">
                   No messages have been sent yet.

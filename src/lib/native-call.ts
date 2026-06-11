@@ -264,31 +264,66 @@ export async function addNativeCallEventListener(
   }
 }
 
-/* ─── Screen wake-lock during active call ─── */
+/* ─── Screen wake-lock (ref-counted) ───
+ *
+ * Multiple parts of the driver app legitimately need to keep the
+ * screen + WebView JS thread alive at once: an active LiveKit call,
+ * an active ride mid-trip, possibly an SOS flow. Each owns its own
+ * tag and we hold the lock for as long as ANY owner still has it.
+ *
+ * Without this, the active-trip provider would call `keepAwake()`,
+ * a call would also call `keepAwake()`, and then the FIRST one to
+ * end would `allowSleep()` and break the other. Ref-counting fixes
+ * that.
+ *
+ * Why we need this at all on the driver side:
+ *   Android pauses the WebView's JS thread when the screen is off
+ *   even though the @capacitor-community/background-geolocation
+ *   foreground service keeps GPS firing natively. That means the
+ *   plugin's onFix callback fires natively but can't reach our
+ *   Supabase broadcast — the rider's car appears frozen even
+ *   though the driver is moving. Holding the screen-wake lock
+ *   keeps the WebView (and therefore the JS broadcast loop) active
+ *   for the entire trip. Battery cost is acceptable — the phone is
+ *   the driver's tool, plugged in or on a dashboard mount almost
+ *   always anyway.
+ */
 
-let _wakeHeld = false;
+const _wakeOwners = new Set<string>();
 
-export async function acquireScreenWake(): Promise<void> {
+/** Acquire the screen-wake lock under the given owner tag. Calling
+ *  with the same tag twice is a no-op. The lock is held until every
+ *  owner that acquired it has released it.
+ *
+ *  `tag` defaults to `"default"` so existing call sites that didn't
+ *  pass a tag keep behaving like they always did. */
+export async function acquireScreenWake(
+  tag: string = "default",
+): Promise<void> {
   if (!isNativeApp()) return;
-  if (_wakeHeld) return;
+  const wasEmpty = _wakeOwners.size === 0;
+  _wakeOwners.add(tag);
+  if (!wasEmpty) return;
   try {
     const { KeepAwake } = await import("@capacitor-community/keep-awake");
     await KeepAwake.keepAwake();
-    _wakeHeld = true;
   } catch {
     /* silent */
   }
 }
 
-export async function releaseScreenWake(): Promise<void> {
+/** Release the screen-wake lock for the given owner tag. The lock
+ *  is only allowed-to-sleep when EVERY owner has released. */
+export async function releaseScreenWake(
+  tag: string = "default",
+): Promise<void> {
   if (!isNativeApp()) return;
-  if (!_wakeHeld) return;
+  if (!_wakeOwners.delete(tag)) return;
+  if (_wakeOwners.size > 0) return;
   try {
     const { KeepAwake } = await import("@capacitor-community/keep-awake");
     await KeepAwake.allowSleep();
   } catch {
     /* silent */
-  } finally {
-    _wakeHeld = false;
   }
 }
