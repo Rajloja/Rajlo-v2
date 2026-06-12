@@ -334,10 +334,10 @@ export function SiteHeader({
 }
 
 /* ─────────────── Desktop dropdown menu ──────────────────
- * Click-to-open menu (closes on outside-click, Escape, or
- * navigation). Click-open beats pure hover for accessibility +
- * touch on a laptop trackpad — hover misfires when the cursor
- * drifts onto the panel through the gap. */
+ * Hover-open with a small close delay so the cursor can travel
+ * the gap between trigger and panel without the menu snapping
+ * shut. Click still works as a fallback for keyboard users and
+ * touch-on-trackpad sessions (closes on outside-click + Escape). */
 function DesktopMenu({
   label,
   items,
@@ -355,6 +355,19 @@ function DesktopMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancel any pending close (cursor came back into the menu area).
+  const clearCloseTimer = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    clearCloseTimer();
+    closeTimerRef.current = setTimeout(() => setOpen(false), 140);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -374,13 +387,24 @@ function DesktopMenu({
     };
   }, [open]);
 
+  useEffect(() => () => clearCloseTimer(), []);
+
   return (
-    <div ref={wrapRef} className="relative">
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => {
+        clearCloseTimer();
+        setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
+        onFocus={() => setOpen(true)}
         className={`inline-flex items-center gap-1 text-sm font-medium ${
           active ? `font-semibold ${activeLinkTone}` : linkTone
         }`}
@@ -402,19 +426,22 @@ function DesktopMenu({
       </button>
 
       {/* Dropdown panel — light card on solid header, frosted-dark
-         card on the glass landing header. Either way it pops up
-         just below the trigger with a small offset. */}
+         card on the glass landing header. The wrapping pt-2 keeps
+         a continuous hover zone over the trigger→panel gap so the
+         menu doesn't snap shut while the cursor travels down. */}
       <div
         role="menu"
         aria-label={label}
-        className={`absolute right-0 top-full z-50 mt-2 min-w-[220px] origin-top overflow-hidden rounded-2xl border shadow-2xl transition-all duration-150 ${
+        onMouseEnter={clearCloseTimer}
+        onMouseLeave={scheduleClose}
+        className={`absolute right-0 top-full z-50 min-w-[220px] origin-top overflow-hidden rounded-2xl border pt-0 shadow-2xl transition-all duration-150 ${
           open
             ? "pointer-events-auto translate-y-0 opacity-100"
             : "pointer-events-none -translate-y-1 opacity-0"
         } ${
           isGlass
-            ? "border-white/15 bg-rajlo-black/80 backdrop-blur-xl"
-            : "border-line bg-surface"
+            ? "mt-2 border-white/15 bg-rajlo-black/80 backdrop-blur-xl"
+            : "mt-2 border-line bg-surface"
         }`}
       >
         <ul className="p-1.5">

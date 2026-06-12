@@ -203,6 +203,14 @@ export default function RiderRequestPage() {
         parish: null,
       });
     }
+
+    // Passenger count from the landing booking widget. Clamped to the
+    // 1–4 range the seats picker exposes; anything else falls back to
+    // the default of 1.
+    const seatsParam = parseInt(params.get("seats") ?? "", 10);
+    if (Number.isFinite(seatsParam) && seatsParam >= 1 && seatsParam <= 4) {
+      setSeats(seatsParam);
+    }
   }, []);
 
   const filledStops = useMemo(

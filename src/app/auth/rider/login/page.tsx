@@ -155,7 +155,14 @@ function RiderLoginInner() {
 
         <p className="text-center text-sm text-muted">
           Don&apos;t have an account?{" "}
-          <Link href="/auth/rider/signup" className="font-semibold text-rajlo-red hover:underline">
+          <Link
+            href={
+              next === "/rider"
+                ? "/auth/rider/signup"
+                : `/auth/rider/signup?next=${encodeURIComponent(next)}`
+            }
+            className="font-semibold text-rajlo-red hover:underline"
+          >
             Sign up
           </Link>
         </p>

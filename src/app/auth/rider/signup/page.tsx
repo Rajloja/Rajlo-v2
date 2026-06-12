@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AuthShell,
   AuthField,
@@ -15,12 +16,30 @@ import { LegalConsent } from "@/components/legal-consent";
 import { documentsForRole } from "@/lib/legal-documents";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-// The full set of policies a rider agrees to at signup. The logged,
-// timestamped acceptance is recorded server-side by the consent gate
-// on first authenticated entry to the portal (POST /api/legal/accept).
 const RIDER_LEGAL_DOCS = documentsForRole("rider");
 
 export default function RiderSignupPage() {
+  // Suspense required by Next.js 16 for useSearchParams — without it,
+  // the production prerender step fails. Matches the same shape as
+  // the sibling login page.
+  return (
+    <Suspense>
+      <RiderSignupInner />
+    </Suspense>
+  );
+}
+
+function RiderSignupInner() {
+  // Preserve any destination handed in from a public surface (e.g. the
+  // landing-page booking widget pushes the visitor here with
+  // ?next=/rider/request?to_name=…). The email-confirmation link
+  // routes back through /auth/callback with that same `next`, and the
+  // GoogleAuthButton / AppleAuthButton wrappers thread it through the
+  // OAuth state so post-auth lands the rider in the right place
+  // with their trip params still filled in.
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") ?? "/rider";
+
   const [step, setStep] = useState<"info" | "check-email">("info");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -76,7 +95,7 @@ export default function RiderSignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/rider`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         data: {
           full_name: name,
           phone,
@@ -94,6 +113,13 @@ export default function RiderSignupPage() {
     setIsLoading(false);
     setStep("check-email");
   };
+
+  // Preserve `next` when handing the visitor back to the login page so
+  // the cross-flow doesn't drop their pending destination.
+  const loginHref =
+    next === "/rider"
+      ? "/auth/rider/login"
+      : `/auth/rider/login?next=${encodeURIComponent(next)}`;
 
   if (step === "check-email") {
     return (
@@ -120,7 +146,7 @@ export default function RiderSignupPage() {
             .
           </p>
           <Link
-            href="/auth/rider/login"
+            href={loginHref}
             className="block rounded-full border border-line bg-surface px-6 py-3 text-sm font-semibold text-foreground hover:bg-surface-soft"
           >
             Back to sign in
@@ -143,8 +169,8 @@ export default function RiderSignupPage() {
           </div>
         )}
 
-        <GoogleAuthButton intent="rider" label="Sign up with Google" />
-        <AppleAuthButton intent="rider" label="Sign up with Apple" />
+        <GoogleAuthButton intent="rider" label="Sign up with Google" next={next} />
+        <AppleAuthButton intent="rider" label="Sign up with Apple" next={next} />
         <AuthDivider label="or sign up with email" />
 
         <AuthField label="Full name" placeholder="Your name" value={name} onChange={setName} autoComplete="name" icon="user" required />
@@ -161,7 +187,7 @@ export default function RiderSignupPage() {
         </AuthSubmit>
         <p className="text-center text-sm text-muted">
           Already have an account?{" "}
-          <Link href="/auth/rider/login" className="font-semibold text-rajlo-red hover:underline">
+          <Link href={loginHref} className="font-semibold text-rajlo-red hover:underline">
             Sign in
           </Link>
         </p>

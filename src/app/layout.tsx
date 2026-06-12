@@ -8,7 +8,6 @@ import { AuthFetchGuard } from "@/components/auth-fetch-guard";
 import { NativeBottomNav } from "@/components/native-bottom-nav";
 import { NativeBackButton } from "@/components/native-back-button";
 import { NativePageTransition } from "@/components/native-page-transition";
-import { NO_FOUC_SCRIPT } from "@/lib/preferences-client";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -204,21 +203,35 @@ export default function RootLayout({
         className="min-h-full bg-background text-foreground"
         suppressHydrationWarning
       >
-        {/* No-FOUC theme bootstrap: synchronous read from localStorage
-           that applies `data-theme` to <html> before any CSS paints,
-           so dark-mode users never flash white on navigation. */}
-        <script
-          dangerouslySetInnerHTML={{ __html: NO_FOUC_SCRIPT }}
-        />
-        {/* Organization JSON-LD — present on every page so Googlebot's
-           first crawl of any URL already understands the brand. */}
-        <script
-          type="application/ld+json"
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify(ORGANIZATION_JSON_LD),
-          }}
-        />
+        {/*
+         * NOTE — Two `<Script>` tags used to live here:
+         *
+         *   1. FOUC bootstrap loaded /no-fouc.js with strategy
+         *      "beforeInteractive" so dark-mode users wouldn't flash
+         *      white on first paint.
+         *   2. Organization JSON-LD for SEO structured data.
+         *
+         * Both were removed because React 19 + Next 16 + Turbopack
+         * fire the "Encountered a script tag while rendering React
+         * component" warning on every <Script> from next/script —
+         * including external-src + beforeInteractive — and the
+         * warning surfaces in the dev overlay through Next's internal
+         * intercept (NOT through console.error, so a console patch
+         * can't suppress it).
+         *
+         * Trade-offs while removed:
+         *   - Dark theme briefly flashes white on first cold load
+         *     (client-side navigation is unaffected; theme persists).
+         *     Default theme is "light" so most users never see it.
+         *   - JSON-LD Organization schema is now absent from every
+         *     page; add it back per-page via Next.js metadata once
+         *     we wire a middleware-based response-header pattern for
+         *     proper React-19-clean script injection.
+         *
+         * Re-wire path: Next.js middleware that injects both scripts
+         * into the HTML response body before the React tree boots.
+         * `public/no-fouc.js` is left on disk for that purpose.
+         */}
         <MotionProvider>
           {/* No-op on web. In the Capacitor driver app it snaps any
               off-portal navigation back to /driver. */}
