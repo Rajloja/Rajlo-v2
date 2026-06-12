@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
@@ -677,6 +677,24 @@ export default function DriverActiveTripPage() {
   // multi-stage flow; the driver uses Google Maps for actual nav.)
   const carpool = data?.carpool ?? null;
 
+  // Stable `liveRoute` reference so MapView's directions effect only
+  // re-fires when the target (pickup → dropoff) actually flips, not on
+  // every re-render. A fresh object literal here would otherwise cause
+  // each render — and there are several back-to-back when the driver
+  // taps "Start trip" (acting flip + data refresh + acting unflip) —
+  // to cancel the in-flight Google Directions request via the effect's
+  // cleanup, leaving the turn-by-turn pane stuck on the stale pickup
+  // route until the page was fully unmounted and remounted.
+  const liveRoute = useMemo(
+    () =>
+      carpool
+        ? null
+        : ride.status === "in_progress"
+          ? { target: "dropoff" as const }
+          : { target: "pickup" as const },
+    [carpool, ride.status],
+  );
+
   const mapPickup: Place = {
     placeId: "",
     name: ride.pickup.name,
@@ -800,13 +818,7 @@ export default function DriverActiveTripPage() {
             dropoff={mapDropoff}
             driverPosition={driverPosition}
             riderPosition={riderPosition}
-            liveRoute={
-              carpool
-                ? null
-                : ride.status === "in_progress"
-                ? { target: "dropoff" }
-                : { target: "pickup" }
-            }
+            liveRoute={liveRoute}
             navMode={navEnabled}
             onDirectionsRoute={setDirectionsRoute}
             onUserDrag={() => setCameraDisengaged(true)}
