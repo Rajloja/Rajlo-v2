@@ -37,9 +37,10 @@ export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
          actually saying it in plain language. */}
       <div className="mx-auto max-w-7xl px-6 lg:px-12">
         <m.div
-          initial={reveal.initial}
-          whileInView={reveal.animate}
+          initial="initial"
+          whileInView="animate"
           viewport={{ once: true, amount: 0.4 }}
+          variants={reveal}
           transition={revealTransition}
         >
           <h2 className="max-w-3xl text-[clamp(2rem,3vw+1rem,3.5rem)] font-extrabold leading-[1.05] tracking-[-0.025em] text-foreground [text-wrap:balance]">
