@@ -6,7 +6,6 @@ import {
   AuthShell,
   AuthField,
   AuthSubmit,
-  AuthPhoneField,
   GoogleAuthButton,
   AppleAuthButton,
   AuthDivider,
@@ -22,12 +21,27 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 // authenticated entry (POST /api/legal/accept).
 const DRIVER_LEGAL_DOCS = documentsForRole("driver");
 
+/**
+ * Driver signup — email + password only.
+ *
+ * Personal info (name, phone, red plate, TRN/NIS, licence, vehicle
+ * details, all 10 TA documents) is collected on the dedicated
+ * /driver/onboarding wizard the driver lands on after they confirm
+ * their email. That wizard already UPDATEs profiles.full_name from
+ * the composed first+last (see /api/driver/onboarding) and inserts
+ * the drivers row with plate + everything else — so collecting any
+ * of that here is wasted typing for the driver, who has to enter it
+ * all again on the next screen.
+ *
+ * The signUp() metadata still pins `role: "driver"` because the
+ * `handle_new_user()` Postgres trigger reads that to seed the
+ * profiles row with the correct role on insert. Without it the
+ * profile would default to 'rider' and the auth callback wouldn't
+ * route the user to /driver/onboarding.
+ */
 export default function DriverSignupPage() {
   const [step, setStep] = useState<"info" | "check-email">("info");
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [plate, setPlate] = useState("");
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +95,13 @@ export default function DriverSignupPage() {
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback?next=/driver/onboarding`,
         data: {
-          full_name: name,
-          phone,
+          // role is the ONLY metadata field that has to be set here —
+          // the handle_new_user() Postgres trigger reads it to seed the
+          // profiles row with role='driver' on insert. Everything else
+          // (full_name, phone, plate, etc.) is captured by the
+          // onboarding wizard, which UPSERTs into profiles + drivers
+          // when the driver submits.
           role: "driver",
-          plate_number: plate,
         },
       },
     });
@@ -114,7 +131,7 @@ export default function DriverSignupPage() {
             </svg>
           </div>
           <p className="text-sm text-muted">
-            After confirming, you&apos;ll be redirected to driver onboarding to upload your TA documents.
+            After confirming, you&apos;ll be redirected to driver onboarding to enter your personal info and upload your TA documents.
           </p>
           <p className="text-sm text-muted">
             Didn&apos;t get it? Check your spam folder, or{" "}
@@ -140,7 +157,7 @@ export default function DriverSignupPage() {
   return (
     <AuthShell
       title="Become a Rajlo driver"
-      subtitle="Create your account, then complete TA verification."
+      subtitle="Create your account in seconds. You'll add your personal info and TA documents on the next step."
       audience="driver"
     >
       <div className="space-y-5">
@@ -162,14 +179,11 @@ export default function DriverSignupPage() {
         />
         <AuthDivider label="or sign up with email" />
 
-        <AuthField label="Full name" placeholder="Your full name" value={name} onChange={setName} autoComplete="name" icon="user" required />
         <AuthField label="Email" type="email" placeholder="driver@example.com" value={email} onChange={setEmail} autoComplete="email" icon="email" required />
-        <AuthPhoneField label="Phone" placeholder="876 555 0123" value={phone} onChange={setPhone} required />
-        <AuthField label="Red plate number" placeholder="e.g. PP1234" value={plate} onChange={setPlate} icon="plate" required />
         <AuthField label="Password" type="password" placeholder="At least 8 characters" value={password} onChange={setPassword} autoComplete="new-password" icon="password" required />
 
         <div className="rounded-xl bg-primary-soft px-4 py-3 text-xs text-rajlo-black">
-          <strong>Red plate only.</strong> Rajlo accepts drivers with valid TA Franchise Certificates and PPV-rated insurance.
+          <strong>Red plate only.</strong> Rajlo accepts drivers with valid TA Franchise Certificates and PPV-rated insurance. You&apos;ll be asked to upload these on the next step.
         </div>
 
         <LegalConsent
@@ -178,8 +192,8 @@ export default function DriverSignupPage() {
           onChange={setAgreed}
         />
 
-        <AuthSubmit onClick={handleSubmit} loading={isLoading} disabled={!name || !email || !phone || !plate || !password || !agreed}>
-          Create account & start onboarding
+        <AuthSubmit onClick={handleSubmit} loading={isLoading} disabled={!email || !password || !agreed}>
+          Create account & continue to onboarding
         </AuthSubmit>
 
         <p className="text-center text-sm text-muted">

@@ -49,3 +49,6 @@ next-env.d.ts
 /android/key.properties
 *.jks
 *.keystore
+
+# Staging migration script — never commit
+.env.staging-migration

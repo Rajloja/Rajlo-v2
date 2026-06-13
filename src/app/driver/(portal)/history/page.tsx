@@ -291,12 +291,8 @@ function DriverHistoryCard({
             >
               {cancelled ? "Cancelled" : "Completed"}
             </span>
-            {row.carpool && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                <Icon name="users" className="h-3 w-3" />
-                Carpool
-              </span>
-            )}
+            {/* Carpool badge intentionally removed — feature retired
+               from the driver UI. */}
           </div>
           <p className="mt-2 text-xs text-muted">{dateLabel}</p>
         </div>

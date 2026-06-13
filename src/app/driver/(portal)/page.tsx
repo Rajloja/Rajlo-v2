@@ -479,8 +479,14 @@ export default function DriverHomePage() {
         const res = await fetch(INBOX_URL);
         if (res.ok && !cancelled) {
           const json = (await res.json()) as { rides: InboxEntry[] };
-          setInboxRides(json.rides ?? []);
-          setCachedDriverData(INBOX_URL, json);
+          // Carpool was retired from the driver UI. Filter any carpool
+          // entries out at the choke-point so the inbox card never
+          // tries to render the carpool branch downstream.
+          const soloOnly = (json.rides ?? []).filter(
+            (e) => e.kind !== "carpool",
+          );
+          setInboxRides(soloOnly);
+          setCachedDriverData(INBOX_URL, { ...json, rides: soloOnly });
         }
       } catch {
         /* Realtime will retry */

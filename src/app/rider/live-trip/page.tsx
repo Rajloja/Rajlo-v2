@@ -854,28 +854,10 @@ export default function RiderLiveTripPage() {
         </div>
       </FadeUp>
 
-      {/* Carpool badge — shown when this trip was matched with another
-         rider via the share-and-save toggle. We don't expose the
-         partner's pickup/dropoff (privacy), just their first name. */}
-      {ride.carpool && (
-        <FadeUp delay={0.04}>
-          <div className="flex items-center gap-3 rounded-2xl border border-rajlo-red/30 bg-primary-soft px-4 py-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-rajlo-red text-white">
-              <Icon name="users" className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                Carpool
-              </p>
-              <p className="mt-0.5 text-sm font-bold leading-snug">
-                {ride.carpool.partnerFirstName
-                  ? `Sharing this trip with ${ride.carpool.partnerFirstName}`
-                  : "Sharing this trip with another rider"}
-              </p>
-            </div>
-          </div>
-        </FadeUp>
-      )}
+      {/* Carpool badge intentionally hidden — backend may still return
+         a `carpool` field on existing trips, but the feature is no
+         longer offered through the UI. Block kept removed (not just
+         commented) so JSX bundle stays lean. */}
 
       {error && (
         <div className="rounded-xl border border-rajlo-red/30 bg-primary-soft px-4 py-3 text-sm font-semibold text-rajlo-red">

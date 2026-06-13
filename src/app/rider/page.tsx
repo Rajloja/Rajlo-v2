@@ -229,19 +229,19 @@ export default function RiderDashboardPage() {
   const stats = useMemo(() => {
     const completed = history.filter((r) => r.status === "completed");
     const totalSpent = completed.reduce((s, r) => s + r.fareJMD, 0);
-    const carpoolTrips = completed.filter((r) => r.carpool).length;
     return {
       totalTrips: completed.length,
       totalSpent,
-      carpoolTrips,
+      // Kept on the stats shape for downstream compat; carpool is no
+      // longer surfaced through the UI, so this stays at 0.
+      carpoolTrips: 0,
     };
   }, [history]);
 
   /* ─── Derived: most recent unrated completed trip ───
    *
    * If the rider has at least one completed trip they haven't
-   * rated, surface a "Rate your last trip" CTA instead of the
-   * carpool promo — feedback loop > marketing.
+   * rated, surface a "Rate your last trip" CTA — feedback loop > marketing.
    */
   const unratedTrip = useMemo(
     () =>
@@ -553,7 +553,6 @@ export default function RiderDashboardPage() {
                     </p>
                     <p className="truncate text-[11px] text-muted">
                       {r.endedAt ? friendlyDate(r.endedAt) : "—"}
-                      {r.carpool ? " · Carpool" : ""}
                     </p>
                   </div>
                   <div className="text-right">
@@ -616,24 +615,17 @@ export default function RiderDashboardPage() {
                 prefix="JMD "
               />
             </div>
-            {stats.carpoolTrips > 0 ? (
-              <p className="mt-5 text-[11px] leading-relaxed text-white/60">
-                You&apos;ve carpooled {stats.carpoolTrips} time
-                {stats.carpoolTrips === 1 ? "" : "s"} — that&apos;s real money
-                saved and one fewer car on Jamaica&apos;s roads.
-              </p>
-            ) : (
-              <p className="mt-5 text-[11px] leading-relaxed text-white/60">
-                Try carpool on your next trip and save 35% on the fare.
-              </p>
-            )}
+            {/* Carpool footnote intentionally removed — feature is no
+               longer offered through the UI. */}
           </div>
         </FadeUp>
       )}
 
       {/* ============== UNRATED TRIP CTA  ==============
          If there's a recent trip the rider hasn't rated, surface it
-         here. Falls back to the carpool promo if everyone's rated. */}
+         here. Falls back to a generic "Book a ride" prompt for new
+         riders / fully-rated returners (the carpool promo that used
+         to live in the fallback was removed when carpool was retired). */}
       {unratedTrip ? (
         <FadeUp delay={0.25}>
           <Link
@@ -677,17 +669,17 @@ export default function RiderDashboardPage() {
                 className="pointer-events-none absolute -right-12 -bottom-12 opacity-20"
               />
               <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-rajlo-red text-white shadow-md shadow-rajlo-red/30">
-                <Icon name="users" className="h-5 w-5" />
+                <Icon name="map-pin" className="h-5 w-5" />
               </span>
               <div className="relative min-w-0 flex-1">
                 <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
-                  Save 35% with carpool
+                  Where to next?
                 </p>
                 <p className="mt-0.5 text-sm font-extrabold tracking-tight md:text-base">
-                  Match with a rider going your way
+                  Book your next ride
                 </p>
                 <p className="hidden text-xs text-foreground/70 sm:block">
-                  Toggle &ldquo;Share this ride&rdquo; on your next booking
+                  Private rides + TA-tariff route taxis from one wallet.
                 </p>
               </div>
               <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-rajlo-red transition-all group-hover:bg-rajlo-red group-hover:text-white">

@@ -38,11 +38,6 @@ const FAQS: FAQ[] = [
   },
   {
     category: "trips",
-    q: "How does carpool actually work?",
-    a: "Toggle 'Share this ride' when booking. We'll try to pair you with another rider going the same direction; if matched, both fares drop ~35%. If no match, you ride solo at the regular fare.",
-  },
-  {
-    category: "trips",
     q: "What if my driver doesn't show up?",
     a: "First, check the live tracking — the car icon shows their real position. If they're stationary or moving away, tap Cancel to free yourself up to re-book, then report it via 'Report a problem' below.",
   },

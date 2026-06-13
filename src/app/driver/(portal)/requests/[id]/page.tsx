@@ -162,7 +162,20 @@ export default function DriverRequestDetailPage() {
     );
   }
 
-  const { ride, rider, partner, payment } = query.data;
+  // Carpool was retired from the driver UI. We keep the original
+  // partner type from the API payload so all `if (partner)` conditional
+  // branches below still type-check, but route the value through a
+  // helper that returns `null` regardless of what the backend sent —
+  // every solo branch renders, no carpool branch ever does.
+  const { ride, rider, payment } = query.data;
+  const stripCarpoolPartner = (
+    p: typeof query.data.partner,
+  ): typeof query.data.partner => {
+    // Argument intentionally unused; lint silencer.
+    void p;
+    return null;
+  };
+  const partner = stripCarpoolPartner(query.data.partner);
   const elapsedMin = Math.max(
     0,
     Math.floor((Date.now() - new Date(ride.requestedAt).getTime()) / 60_000),

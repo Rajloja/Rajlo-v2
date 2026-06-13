@@ -59,16 +59,37 @@ type PopularRoute = {
   distanceKm: number;
 };
 
-/** Headline pairs that rotate in lockstep with the photo carousel.
- *  Top line gets type-written character-by-character; the red pill
- *  word swaps with a slide-up/slide-in transition. Keep the pill
- *  words to roughly the same character count so the pill width
- *  stays comfortable across rotations. */
-const HEADLINES: ReadonlyArray<{ top: string; pill: string }> = [
-  { top: "Move across Jamaica,", pill: "your way." },
-  { top: "Pay from your wallet,", pill: "no cash." },
-  { top: "Drivers vetted by", pill: "the law." },
-  { top: "Two ways to ride,", pill: "one app." },
+/** Headline + sublede rotation tied to the photo carousel. The top
+ *  line gets type-written character-by-character; the red pill word
+ *  swaps with a slide-up/slide-in transition; the sublede
+ *  cross-fades in sync with the pill so the whole hero copy block
+ *  reads as one synchronized message per photo. Keep pill words
+ *  near-equal char count so the pill width stays consistent. */
+const HEADLINES: ReadonlyArray<{
+  top: string;
+  pill: string;
+  sub: string;
+}> = [
+  {
+    top: "Move across Jamaica,",
+    pill: "your way.",
+    sub: "Two ride modes, one app — private cars and shared route taxis. Pick the trip, we handle the rest.",
+  },
+  {
+    top: "Pay from your wallet,",
+    pill: "no cash.",
+    sub: "Top up once, ride for weeks. Every fare settles straight from your Rajlo wallet — no change, no haggling, no cash at the curb.",
+  },
+  {
+    top: "Drivers vetted by",
+    pill: "the law.",
+    sub: "Every Rajlo driver is TA-licensed, background-checked, and verified on a red plate. The people who move you, on record.",
+  },
+  {
+    top: "Two ways to ride,",
+    pill: "one app.",
+    sub: "Private rides priced by the kilometre, route taxis anchored to the TA tariff. Same wallet, same screen, same wait time.",
+  },
 ];
 
 const POPULAR_ROUTES: PopularRoute[] = [
@@ -550,14 +571,33 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               </AnimatePresence>
             </m.h1>
 
-            <m.p
+            {/* Sublede rotates in sync with the pill (same
+               `headlineIdx` key) so the whole copy block reads as
+               one synchronized message per photo. Min-height holds
+               the layout so the booking widget below doesn't
+               shimmy as longer/shorter lines swap. */}
+            <m.div
               variants={reveal}
               transition={revealTransition}
-              className="mt-4 max-w-xl text-sm leading-relaxed text-white/85 [text-wrap:pretty] md:text-base"
+              className="mt-4 min-h-[3.5rem] max-w-xl md:min-h-[3rem]"
             >
-              Verified TA-licensed drivers, two ride modes, one cashless
-              wallet. Tell us where you&apos;re going.
-            </m.p>
+              <AnimatePresence mode="wait" initial={false}>
+                <m.p
+                  key={headlineIdx}
+                  initial={
+                    reduce ? false : { opacity: 0, y: "0.35em" }
+                  }
+                  animate={reduce ? undefined : { opacity: 1, y: 0 }}
+                  exit={
+                    reduce ? undefined : { opacity: 0, y: "-0.35em" }
+                  }
+                  transition={{ type: "spring", duration: 0.45, bounce: 0 }}
+                  className="text-sm leading-relaxed text-white/85 [text-wrap:pretty] md:text-base"
+                >
+                  {HEADLINES[headlineIdx].sub}
+                </m.p>
+              </AnimatePresence>
+            </m.div>
 
             {!reduce && (
               <m.div

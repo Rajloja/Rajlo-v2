@@ -61,14 +61,24 @@ export async function GET() {
         .eq("status", "pending"),
     ),
 
-    // Verification queue — pending driver documents (license, registration,
-    // insurance, etc.) awaiting admin review.
-    tally("/admin/verification-queue", () =>
-      supabase
+    // Verification queue — drivers with at least one pending document
+    // awaiting admin review. Counted per DRIVER, not per document,
+    // because a single driver typically submits 5-9 docs (license,
+    // registration, insurance, road tax, photo, etc.) and the queue
+    // page collapses them into one row per driver — so the badge
+    // should match. Previously this counted document rows directly,
+    // which surfaced "9" when only one driver was actually waiting.
+    tally("/admin/verification-queue", async () => {
+      const { data, error } = await supabase
         .from("driver_documents")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "pending"),
-    ),
+        .select("driver_id")
+        .eq("status", "pending");
+      if (error) return { count: null, error };
+      const unique = new Set(
+        (data ?? []).map((r) => r.driver_id).filter(Boolean),
+      );
+      return { count: unique.size, error: null };
+    }),
 
     // Vehicle changes — driver swapped cars, needs admin to bless
     // the new vehicle before they go online with it.

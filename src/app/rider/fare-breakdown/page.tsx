@@ -32,8 +32,10 @@ export default function RiderFareBreakdownPage() {
   const [distanceKm, setDistanceKm] = useState(8);
   const [stops, setStops] = useState(0);
   const [seats, setSeats] = useState(1);
-  const [carpool, setCarpool] = useState(false);
   const [concession, setConcession] = useState(false);
+  // Carpool toggle was scoped out — feature no longer offered through
+  // the UI. Helpers below treat the displayed fare as always full-fare.
+  const carpool = false;
 
   // Manufacture a synthetic point list that haversine'd would equal
   // the slider distance. Two points at the right great-circle gap
@@ -132,11 +134,6 @@ export default function RiderFareBreakdownPage() {
               <p className="text-4xl font-extrabold tracking-tight text-rajlo-red md:text-5xl">
                 {formatJMD(displayedFare)}
               </p>
-              {carpool && carpoolSavings > 0 && (
-                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
-                  Save {formatJMD(carpoolSavings)}
-                </span>
-              )}
             </div>
             <p className="mt-1 text-xs text-muted">
               ~{formatEta(fare.etaMinutes)} · {distanceKm.toFixed(1)} km · {seats} seat
@@ -196,44 +193,8 @@ export default function RiderFareBreakdownPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setCarpool((c) => !c)}
-              className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-all ${
-                carpool
-                  ? "border-rajlo-red bg-primary-soft shadow-md shadow-rajlo-red/15"
-                  : "border-line bg-surface hover:border-rajlo-red/40"
-              }`}
-            >
-              <span
-                className={`grid h-10 w-10 place-items-center rounded-xl ${
-                  carpool
-                    ? "bg-rajlo-red text-white"
-                    : "bg-primary-soft text-rajlo-red"
-                }`}
-              >
-                <Icon name="users" className="h-5 w-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="text-sm font-extrabold tracking-tight">
-                  Carpool · save 35%
-                </span>
-                <span className="mt-0.5 block text-xs text-muted">
-                  Match with a rider going the same way.
-                </span>
-              </span>
-              <span
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                  carpool ? "bg-rajlo-red" : "bg-line"
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-all ${
-                    carpool ? "translate-x-5" : "translate-x-0.5"
-                  }`}
-                />
-              </span>
-            </button>
+            {/* Carpool toggle intentionally removed — feature is no
+               longer offered through the UI. */}
           </div>
           </>
           ) : (
@@ -269,13 +230,6 @@ export default function RiderFareBreakdownPage() {
               />
             ))}
             <BreakdownRow label="Subtotal" amount={fare.fareJMD} bold />
-            {carpool && (
-              <BreakdownRow
-                label="Carpool match (−35%)"
-                amount={carpoolFare - fare.fareJMD}
-                accent="emerald"
-              />
-            )}
             <li className="flex items-center justify-between border-t border-line pt-3 text-sm font-extrabold">
               <span>Total</span>
               <span className="text-rajlo-red">{formatJMD(displayedFare)}</span>

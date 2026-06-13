@@ -412,14 +412,7 @@ export default function DriverEarningsPage() {
                             minute: "2-digit",
                           })
                         : ""}
-                      {r.carpool && (
-                        <>
-                          {" · "}
-                          <span className="font-bold text-rajlo-red">
-                            Carpool
-                          </span>
-                        </>
-                      )}
+                      {/* Carpool suffix removed with feature retirement. */}
                     </p>
                   </div>
                   <p className="shrink-0 text-sm font-extrabold text-rajlo-red">

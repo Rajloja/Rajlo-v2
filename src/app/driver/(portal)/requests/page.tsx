@@ -174,8 +174,12 @@ export default function DriverLiveRequestsPage() {
   const [parish, setParish] = useState("");
   const [minSeats, setMinSeats] = useState(1);
 
+  // Carpool was retired from the driver UI. The inbox API may still
+  // surface carpool entries to other consumers, so we filter them
+  // out at the top of the funnel here — every downstream filter,
+  // sort, and render path treats this page as solo-only.
   const allEntries = useMemo<Entry[]>(
-    () => inbox.data?.rides ?? [],
+    () => (inbox.data?.rides ?? []).filter((e) => e.kind !== "carpool"),
     [inbox.data?.rides],
   );
 
@@ -433,16 +437,10 @@ export default function DriverLiveRequestsPage() {
               );
             })}
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <select
-              value={rideKind}
-              onChange={(e) => setRideKind(e.target.value as RideKind)}
-              className="rounded-full border border-line bg-surface-soft px-4 py-2 text-xs font-semibold focus:border-rajlo-red focus:outline-none"
-            >
-              <option value="all">All ride types</option>
-              <option value="solo">Solo only</option>
-              <option value="carpool">Carpool only</option>
-            </select>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {/* Solo/carpool ride-type filter removed with the
+               carpool retirement; only solo rides surface now, so
+               there's nothing to filter between. */}
             <select
               value={parish}
               onChange={(e) => setParish(e.target.value)}

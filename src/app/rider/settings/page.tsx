@@ -526,7 +526,7 @@ export default function RiderSettingsPage() {
               />
               <ToggleRow
                 label="Promotions & discounts"
-                description="Carpool deals, free-trip rewards, and seasonal promos."
+                description="Free-trip rewards, seasonal deals, and promo codes."
                 value={prefs.pushPromos}
                 disabled={!prefs.pushEnabled || !push.subscribed}
                 onChange={(v) => update("pushPromos", v)}

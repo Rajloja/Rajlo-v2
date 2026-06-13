@@ -21,6 +21,14 @@ export const metadata: Metadata = {
     "Private rides and TA-tariff route taxis from one wallet. Verified drivers. Made for Jamaica.",
 };
 
+// Always render per-request so the CTA reflects the visitor's live
+// session. Without this, Next.js 16 may partially prerender and
+// freeze the "not signed in" CTA values into the cached HTML, which
+// shows up as "I logged in but Find a Ride still bounces me to
+// /auth/rider/login". `getLandingCtaTargets` reads cookies(), but
+// the directive removes any ambiguity.
+export const dynamic = "force-dynamic";
+
 export default async function LandingV3Page() {
   const cta = await getLandingCtaTargets();
   return <LandingV3 cta={cta} />;

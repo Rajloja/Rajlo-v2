@@ -232,18 +232,26 @@ export function MobileDrawer({
 
   const handleSignOut = async () => {
     const supabase = createSupabaseBrowserClient();
-    // Role detection — prefer the loaded profile, but fall back to the
-    // pathname so a sign-out tap that beats the profile fetch (or an
-    // admin whose profile row is missing somehow) still routes to the
-    // correct login page. Previously this fell back to "rider" via
-    // `?? "rider"`, which is what was bouncing admins to the rider
-    // login.
-    const pathRole = (pathname ?? "").startsWith("/admin")
+    // Portal detection — derived from the current PATH, not the
+    // loaded profile.role. The path is the source of truth for
+    // "which login screen should I return to", because any account
+    // permitted on `/admin/*` (admin, safety_officer, support, etc.)
+    // should return to the admin login regardless of their specific
+    // role string. The previous logic preferred profile.role and
+    // bounced any non-"admin" account on the admin portal back to
+    // the rider login, which is what was happening to safety officers
+    // (and any future non-"admin" admin-portal role) on sign-out.
+    const portal: "admin" | "driver" | "rider" = (pathname ?? "").startsWith(
+      "/admin",
+    )
       ? "admin"
       : (pathname ?? "").startsWith("/driver")
         ? "driver"
         : "rider";
-    const role = profile?.role ?? pathRole;
+    // We still use `role` below for the driver-specific offline flip;
+    // for that we trust the profile if loaded, otherwise the portal
+    // (since the API will refuse if the account isn't a driver anyway).
+    const role = profile?.role ?? portal;
 
     // Drivers: flip them offline before clearing the session so the
     // persisted is_online flag matches their actual intent (won't be
@@ -278,9 +286,9 @@ export function MobileDrawer({
     void supabase.auth.signOut();
     clearSessionPolicy();
     const loginPath =
-      role === "admin"
+      portal === "admin"
         ? "/auth/admin/login"
-        : role === "driver"
+        : portal === "driver"
           ? "/auth/driver/login"
           : "/auth/rider/login";
     router.push(loginPath);

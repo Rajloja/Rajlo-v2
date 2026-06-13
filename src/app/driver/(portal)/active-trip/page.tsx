@@ -149,7 +149,19 @@ export default function DriverActiveTripPage() {
   // Seed from the cross-page cache so a tab-switch back to /driver/active-trip
   // renders content instantly instead of flashing skeletons. The
   // background refresh below still re-fetches to stay accurate.
-  const cachedActive = getCachedDriverData<ActiveResponse>(ACTIVE_URL);
+  //
+  // Carpool was retired from the UI. The backend may still return a
+  // `carpool` field for some historical rides, but every consumer in
+  // this page checks `data.carpool` to branch between solo and
+  // multi-rider tours — so we force-null carpool on every load via
+  // `stripCarpool()` below. Single choke-point keeps the JSX intact
+  // (no need to remove every branch) while guaranteeing every code
+  // path takes the solo-trip route.
+  const stripCarpool = (json: ActiveResponse | null): ActiveResponse | null =>
+    json ? { ...json, carpool: null } : json;
+  const cachedActive = stripCarpool(
+    getCachedDriverData<ActiveResponse>(ACTIVE_URL),
+  );
   const [data, setData] = useState<ActiveResponse | null>(cachedActive);
   const [loading, setLoading] = useState(cachedActive == null);
   const [acting, setActing] = useState(false);
@@ -279,7 +291,9 @@ export default function DriverActiveTripPage() {
     try {
       const res = await fetch(ACTIVE_URL);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as ActiveResponse;
+      const json = stripCarpool(
+        (await res.json()) as ActiveResponse,
+      ) as ActiveResponse;
       setData(json);
       setCachedDriverData(ACTIVE_URL, json);
     } catch (e) {

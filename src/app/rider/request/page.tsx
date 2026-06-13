@@ -62,6 +62,12 @@ export default function RiderRequestPage() {
   const [dropoff, setDropoff] = useState<Place | null>(null);
   const [seats, setSeats] = useState(1);
   const [notes, setNotes] = useState("");
+  // Concession (half-fare) for TA-recognised categories: children,
+  // students in uniform, physically disabled, seniors. Self-declared
+  // here; drivers do the visual eligibility check at pickup. Only
+  // applies to route-taxi trips — Private rides aren't covered by
+  // the TA tariff concession.
+  const [concession, setConcession] = useState(false);
   // Carpool was scoped out of launch — the toggle and matching logic
   // are intentionally hidden from the UI until we have the bandwidth
   // to do the matcher properly. The server still defaults `allowCarpool`
@@ -576,6 +582,7 @@ export default function RiderRequestPage() {
               parish: dropoff.parish,
             },
             plan: journeyQuote,
+            concession,
           }),
         });
         const json = (await res.json().catch(() => ({}))) as {
@@ -638,6 +645,7 @@ export default function RiderRequestPage() {
               lng: dropoff.lng,
               parish: dropoff.parish,
             },
+            concession,
           }),
         });
         const json = (await res.json().catch(() => ({}))) as {
@@ -1721,6 +1729,57 @@ export default function RiderRequestPage() {
         </FadeUp>
       )}
 
+      {/* ─── Concession (half-fare) toggle ─────────────────────────
+         Self-declared per the TA tariff. Only relevant when the
+         rider is booking a route-taxi trip (Private rides aren't
+         tariff-covered). Drivers do the eligibility check visually
+         at pickup — uniform for students, ID for seniors, etc. */}
+      {mode === "route_taxi" && (selectedMatch || journeyQuote) && (
+        <FadeUp delay={0.28}>
+          <button
+            type="button"
+            onClick={() => setConcession((c) => !c)}
+            aria-pressed={concession}
+            className={`mt-3 flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-all ${
+              concession
+                ? "border-emerald-500/40 bg-emerald-50 shadow-sm"
+                : "border-line bg-surface hover:border-emerald-500/30"
+            }`}
+          >
+            <span
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                concession
+                  ? "bg-emerald-600 text-white"
+                  : "bg-emerald-100 text-emerald-700"
+              }`}
+            >
+              <Icon name="users" className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-extrabold tracking-tight text-foreground">
+                I qualify for half-fare
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+                Students in uniform, children, seniors, and physically
+                disabled riders pay half the TA fare. Your driver may verify
+                eligibility at pickup.
+              </span>
+            </span>
+            <span
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                concession ? "bg-emerald-600" : "bg-line"
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-all ${
+                  concession ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+          </button>
+        </FadeUp>
+      )}
+
       </>)}
       {/* ═════════════════ END STEP 3 ═════════════════ */}
     </>
@@ -1730,17 +1789,28 @@ export default function RiderRequestPage() {
   // shows the regulated TA fare (the one the rider committed to in
   // the picker); Private Ride shows the live estimate from the
   // existing fare engine.
-  const barFareJmd =
+  // Route-taxi base fares before concession adjustment. When the rider
+  // self-declares concession we halve the displayed value (matches
+  // the server-side rounding rule: Math.round(baseFare / 2)). Private
+  // rides aren't tariff-covered, so concession doesn't apply.
+  const routeTaxiBaseFareJmd =
     mode === "route_taxi" && selectedMatch
       ? selectedMatch.fareJmd
       : mode === "route_taxi" && journeyQuote
         ? journeyQuote.totalFareJmd
-        : fare.fareJMD;
+        : null;
+  const barFareJmd =
+    routeTaxiBaseFareJmd !== null
+      ? concession
+        ? Math.round(routeTaxiBaseFareJmd / 2)
+        : routeTaxiBaseFareJmd
+      : fare.fareJMD;
+  const concessionSuffix = concession ? " · half-fare" : "";
   const barLabel =
     mode === "route_taxi" && selectedMatch
-      ? "Route taxi fare"
+      ? `Route taxi fare${concessionSuffix}`
       : mode === "route_taxi" && journeyQuote
-        ? `Route taxi · ${journeyQuote.legCount} legs`
+        ? `Route taxi · ${journeyQuote.legCount} legs${concessionSuffix}`
         : fareCalculating
           ? "Calculating fare…"
           : fare.fareJMD > 0

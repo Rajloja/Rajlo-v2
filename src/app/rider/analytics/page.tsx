@@ -322,17 +322,8 @@ export default function RiderAnalyticsPage() {
                     : "You haven't cancelled a trip yet"
                 }
               />
-              <FootnoteCard
-                icon="users"
-                tone="positive"
-                eyebrow="Carpool trips"
-                value={String(data.carpool.trips)}
-                hint={
-                  data.carpool.trips > 0
-                    ? "You shared rides — cheaper for you, greener for Jamaica"
-                    : "Toggle carpool when booking to share rides + fares"
-                }
-              />
+              {/* Carpool stat card intentionally hidden — feature is
+                 no longer offered through the UI. */}
             </div>
           </FadeUp>
 
