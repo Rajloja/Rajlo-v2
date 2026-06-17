@@ -55,13 +55,30 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
             className="mx-auto max-w-3xl text-center"
           >
             <h2 className="text-[clamp(2rem,3vw+1rem,3.75rem)] font-extrabold leading-[1.05] tracking-[-0.03em] text-foreground [text-wrap:balance]">
-              Be one of the <span className="text-rajlo-red">first</span>.
+              Be Part of Building{" "}
+              <span className="text-rajlo-red">Jamaica&apos;s Future</span>
             </h2>
-            <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg">
-              Rajlo is new. Every rider who signs up and every driver who
-              gets verified now shapes what this becomes — the corridors we
-              add next, the features we ship, the way the tariff is read.
-            </p>
+            <div className="mx-auto mt-5 max-w-2xl space-y-4 text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg">
+              <p>
+                Rajlo is more than a new ride-hailing platform — it&apos;s an
+                opportunity to help shape a service built by Jamaicans, for
+                Jamaicans.
+              </p>
+              <p>
+                As one of our first drivers, your voice matters. Every ride
+                completed, every suggestion shared, and every community served
+                helps shape how Rajlo grows across the island. From routes
+                and service areas to driver features and fare structures,
+                we&apos;re building alongside the people who use the platform
+                every day.
+              </p>
+              <p>
+                By joining early, you&apos;re not just earning income — you&apos;re
+                helping create jobs, improve transportation, and contribute to
+                a stronger, more connected Jamaica. Be among the pioneers
+                helping drive the future forward.
+              </p>
+            </div>
           </m.div>
 
           {/* Two non-identical panels. Grid sizes differ on lg+ —
