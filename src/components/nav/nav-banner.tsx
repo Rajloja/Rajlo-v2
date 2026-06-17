@@ -12,27 +12,41 @@ import { ManeuverIcon } from "./maneuver-icon";
  *
  * Two-row layout matching the look of Google Maps / Uber driver:
  *   ┌────────────────────────────────────────────────────┐
- *   │  ↑   Head north                       200 m         │
+ *   │  →   Turn right onto Hope Rd          200 m         │
  *   │  ─────────────────────────────────────────────      │
- *   │  Then →  Turn right onto Hope Rd                    │
+ *   │  Then ↑  Continue on Hope Rd                        │
  *   └────────────────────────────────────────────────────┘
+ *
+ * KEY MODEL: Google's `currentStep` describes the segment the driver
+ * is currently *driving* — its `instruction` reads e.g. "Head west on
+ * Hope Road" and is NOT useful as a banner headline (it's the road
+ * they're already on). The headline must be `nextStep.instruction`
+ * — the maneuver they're approaching — paired with the distance to
+ * that maneuver. The secondary "Then" row uses `stepAfterNext` so
+ * the driver can plan two moves ahead.
  *
  * Branding: dark green (#0E4D4A) per Rajlo's nav-banner colour, white
  * text. Top-safe-area padding so it clears the notch on phones.
  *
- * Empty states (no current step) → renders nothing. The active-trip
+ * Empty states (no upcoming maneuver) → renders nothing. The active-trip
  * page is responsible for deciding when to mount the banner; the
  * banner just trusts the snapshot it's given.
  */
 export function NavBanner({ snapshot }: { snapshot: NavSnapshot }) {
-  const step = snapshot.currentStep;
-  if (!step) return null;
+  // The PRIMARY headline is the upcoming maneuver, not the road the
+  // driver is currently on. If there's no upcoming maneuver and the
+  // driver isn't arriving yet, there's nothing to announce — bail.
+  const upcoming = snapshot.nextStep;
+  if (!upcoming && !snapshot.arriving) return null;
 
   const distLabel = formatDistance(snapshot.distanceToManeuverM);
   const mainText = snapshot.arriving
     ? "Arriving at destination"
-    : step.instruction;
-  const next = snapshot.nextStep;
+    : upcoming?.instruction ?? "";
+  const mainIcon = snapshot.arriving
+    ? "arrive"
+    : maneuverToIcon(upcoming?.maneuver ?? "straight");
+  const after = snapshot.stepAfterNext;
 
   return (
     <div
@@ -47,16 +61,9 @@ export function NavBanner({ snapshot }: { snapshot: NavSnapshot }) {
       }}
     >
       <div className="pointer-events-auto rounded-2xl bg-[#0E4D4A] text-white shadow-xl ring-1 ring-black/20">
-        {/* Primary instruction row */}
+        {/* Primary instruction row — UPCOMING maneuver. */}
         <div className="flex items-center gap-4 px-4 py-4">
-          <ManeuverIcon
-            icon={
-              snapshot.arriving
-                ? "arrive"
-                : maneuverToIcon(step.maneuver)
-            }
-            className="h-9 w-9 shrink-0"
-          />
+          <ManeuverIcon icon={mainIcon} className="h-9 w-9 shrink-0" />
           <p className="flex-1 truncate text-xl font-bold leading-tight">
             {mainText}
           </p>
@@ -67,18 +74,20 @@ export function NavBanner({ snapshot }: { snapshot: NavSnapshot }) {
           )}
         </div>
 
-        {/* Next-step preview row (only when there's a next step). */}
-        {next && !snapshot.arriving && (
+        {/* "Then" preview row — the maneuver AFTER the upcoming one,
+           so the driver can plan two moves ahead. Hidden when no
+           subsequent maneuver exists or we're already arriving. */}
+        {after && !snapshot.arriving && (
           <div className="flex items-center gap-3 border-t border-white/15 px-4 py-2.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">
               Then
             </span>
             <ManeuverIcon
-              icon={maneuverToIcon(next.maneuver)}
+              icon={maneuverToIcon(after.maneuver)}
               className="h-4 w-4 shrink-0 text-white/85"
             />
             <p className="flex-1 truncate text-sm font-semibold text-white/90">
-              {next.instruction}
+              {after.instruction}
             </p>
           </div>
         )}

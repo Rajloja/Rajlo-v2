@@ -105,32 +105,62 @@ export function useTurnByTurn({
   // Voice prompts. Fires inside an effect (not during render) so the
   // hook stays pure for React's concurrent rendering. Skip entirely
   // when disabled or no current step.
+  //
+  // KEY MODEL: Google's `currentStep` describes the segment the driver
+  // is currently *driving along* — its `instruction` reads e.g. "Head
+  // west on Hope Road", and its `end` is the location of the NEXT
+  // maneuver (which is `nextStep`'s start). So:
+  //
+  //   distance     → distanceToManeuverM (distance from driver to the
+  //                  end of currentStep, i.e. to the upcoming turn)
+  //   wording      → nextStep.instruction (the actual turn, e.g.
+  //                  "Turn right onto Cross Roads")
+  //
+  // Using `currentStep.instruction` here would announce the road the
+  // driver is already on ("In 200m, head west on Hope Road") instead
+  // of the maneuver they're approaching ("In 200m, turn right onto
+  // Cross Roads"). That was the original bug.
+  //
+  // When `nextStep` is null we're on the FINAL approach to the
+  // destination — the "arrived" prompt below covers it, so we
+  // skip turn-by-turn voice here.
   useEffect(() => {
     if (!enabled) return;
     const step = snapshot.currentStep;
+    const maneuverStep = snapshot.nextStep;
     const dist = snapshot.distanceToManeuverM;
-    if (!step || dist == null) return;
+    if (!step || !maneuverStep || dist == null) return;
 
-    const fired = firedRef.current.get(step.index) ?? {
+    // Track fired flags against the upcoming maneuver's index — that's
+    // what the prompt is about, so prompts re-arm correctly the moment
+    // the driver advances past one turn into the next.
+    const fired = firedRef.current.get(maneuverStep.index) ?? {
       far: false,
       imminent: false,
     };
 
     // Far announcement — only fire if there's enough runway to even
-    // make sense (don't say "in 250m turn right" when the step is
-    // 80m long; the imminent trigger will handle it).
+    // make sense (don't say "in 250m turn right" when the segment
+    // we're driving is only 80m long; the imminent trigger will
+    // handle it). Gate is on the CURRENT step's length (the segment
+    // we're approaching the turn FROM), since that's the runway.
     const farThreshold = Math.min(Math.max(step.distanceM * 0.6, 100), 400);
-    if (!fired.far && step.distanceM > 150 && dist <= farThreshold && dist > 50) {
-      voice.speak(buildPrompt(step, "far", dist));
+    if (
+      !fired.far &&
+      step.distanceM > 150 &&
+      dist <= farThreshold &&
+      dist > 50
+    ) {
+      voice.speak(buildPrompt(maneuverStep, "far", dist));
       fired.far = true;
     }
 
     if (!fired.imminent && dist <= 50) {
-      voice.speak(buildPrompt(step, "imminent"));
+      voice.speak(buildPrompt(maneuverStep, "imminent"));
       fired.imminent = true;
     }
 
-    firedRef.current.set(step.index, fired);
+    firedRef.current.set(maneuverStep.index, fired);
   }, [enabled, snapshot]);
 
   // "Arrived" prompt — fires once when the final step is within range.

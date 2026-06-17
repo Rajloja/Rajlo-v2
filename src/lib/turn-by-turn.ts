@@ -58,8 +58,20 @@ export type FlatStep = {
 };
 
 export type NavSnapshot = {
+  /** The segment the driver is currently *driving along*. Google's
+   *  `instruction` here reads e.g. "Head west on Hope Road" — it
+   *  describes the road, NOT the upcoming maneuver. Use `nextStep`
+   *  for the maneuver wording. */
   currentStep: FlatStep | null;
+  /** The IMMEDIATE upcoming maneuver — its `instruction` is what the
+   *  banner/voice should read out ("Turn right onto Cross Roads")
+   *  and its `start` is where it happens (= `currentStep.end`).
+   *  Null on the final approach. */
   nextStep: FlatStep | null;
+  /** The maneuver AFTER the upcoming one — drives the "Then" preview
+   *  row on the banner so the driver can plan two moves ahead. Null
+   *  when the upcoming maneuver IS the last maneuver. */
+  stepAfterNext: FlatStep | null;
   /** Distance from the driver to the next maneuver (end of currentStep)
    *  in meters. Null if no current step. */
   distanceToManeuverM: number | null;
@@ -190,6 +202,7 @@ export function computeSnapshot(
     return {
       currentStep: null,
       nextStep: null,
+      stepAfterNext: null,
       distanceToManeuverM: null,
       totalRemainingM: 0,
       totalRemainingS: 0,
@@ -201,6 +214,8 @@ export function computeSnapshot(
   const currentStep = steps[safeIdx];
   const nextStep =
     safeIdx + 1 < steps.length ? steps[safeIdx + 1] : null;
+  const stepAfterNext =
+    safeIdx + 2 < steps.length ? steps[safeIdx + 2] : null;
 
   const distanceToManeuverM = distanceMeters(position, currentStep.end);
 
@@ -224,6 +239,7 @@ export function computeSnapshot(
   return {
     currentStep,
     nextStep,
+    stepAfterNext,
     distanceToManeuverM,
     totalRemainingM,
     totalRemainingS,
