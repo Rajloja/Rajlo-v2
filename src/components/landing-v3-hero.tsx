@@ -693,63 +693,38 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
             })}
           </div>
 
-          {/* PASSENGERS ROW — sits ABOVE the trip-fields row so the
-             rider can adjust seat count without it shoving the Find-
-             a-ride button onto a new line on desktop. Private-ride
-             only; route taxi hides it (van capacity is fixed by the
-             corridor). */}
+          {/* PASSENGERS ROW (lg+) — sits ABOVE the trip-fields row on
+             desktop, because the form below is a single 3-col row
+             (FROM | TO | Find a ride) and we can't slot the picker
+             between them without forcing the button onto its own
+             line. Hidden under lg; mobile/md gets a sibling render
+             INSIDE the form (after the TO label, before submit) so
+             the picker appears in its expected reading order. */}
           <AnimatePresence>
-            {mode === "private" && (toValue.trim().length > 0 || toPlace) && (
-              <m.div
-                initial={
-                  reduce ? false : { opacity: 0, height: 0, marginTop: 0 }
-                }
-                animate={
-                  reduce
-                    ? undefined
-                    : { opacity: 1, height: "auto", marginTop: 12 }
-                }
-                exit={
-                  reduce
-                    ? undefined
-                    : { opacity: 0, height: 0, marginTop: 0 }
-                }
-                transition={{ type: "spring", duration: 0.35, bounce: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-muted">
-                    Passengers
-                  </span>
-                  <div className="inline-flex rounded-full border border-line bg-surface-soft p-1">
-                    {[1, 2, 3, 4].map((n) => {
-                      const active = seats === n;
-                      return (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => setSeats(n)}
-                          aria-label={`${n} passenger${n === 1 ? "" : "s"}`}
-                          aria-pressed={active}
-                          className={`inline-flex h-8 min-w-[2.25rem] items-center justify-center rounded-full px-3 text-sm font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rajlo-red ${
-                            active
-                              ? "bg-rajlo-red text-white shadow-sm"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span className="text-xs text-muted">
-                    {seats === 1
-                      ? "Just you"
-                      : `${seats} passengers including you`}
-                  </span>
-                </div>
-              </m.div>
-            )}
+            {mode === "private" &&
+              (toValue.trim().length > 0 || toPlace) && (
+                <m.div
+                  initial={
+                    reduce
+                      ? false
+                      : { opacity: 0, height: 0, marginTop: 0 }
+                  }
+                  animate={
+                    reduce
+                      ? undefined
+                      : { opacity: 1, height: "auto", marginTop: 12 }
+                  }
+                  exit={
+                    reduce
+                      ? undefined
+                      : { opacity: 0, height: 0, marginTop: 0 }
+                  }
+                  transition={{ type: "spring", duration: 0.35, bounce: 0 }}
+                  className="hidden overflow-hidden lg:block"
+                >
+                  <PassengersPicker seats={seats} onSeats={setSeats} />
+                </m.div>
+              )}
           </AnimatePresence>
 
           {/* TRIP FIELDS — single row on lg+: FROM | TO | Find a ride.
@@ -1085,6 +1060,43 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               </AnimatePresence>
             </label>
 
+            {/* PASSENGERS ROW (mobile + md) — slots BETWEEN the TO
+               input and the Find-a-ride button on small screens so
+               the picker appears where the user expects (after the
+               trip is described, before the commit). Span 2 cols on
+               md so it sits on its own line. Hidden on lg+ where the
+               above-form copy takes over. */}
+            <AnimatePresence>
+              {mode === "private" &&
+                (toValue.trim().length > 0 || toPlace) && (
+                  <m.div
+                    initial={
+                      reduce
+                        ? false
+                        : { opacity: 0, height: 0, marginTop: 0 }
+                    }
+                    animate={
+                      reduce
+                        ? undefined
+                        : { opacity: 1, height: "auto", marginTop: 0 }
+                    }
+                    exit={
+                      reduce
+                        ? undefined
+                        : { opacity: 0, height: 0, marginTop: 0 }
+                    }
+                    transition={{
+                      type: "spring",
+                      duration: 0.35,
+                      bounce: 0,
+                    }}
+                    className="overflow-hidden md:col-span-2 lg:hidden"
+                  >
+                    <PassengersPicker seats={seats} onSeats={setSeats} />
+                  </m.div>
+                )}
+            </AnimatePresence>
+
             {/* Submit lives BACK inside the form as the third grid
                cell on lg+ (auto-width column). On md it spans both
                columns; on mobile it stacks. `h-full` makes it match
@@ -1171,5 +1183,53 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Shared seat picker rendered at two sites in the hero:
+ *   - Above the form on lg+ (single-row trip layout)
+ *   - Inside the form between TO and submit on mobile/md (stacked
+ *     layout, picker reads naturally after the trip is described)
+ * Same controlled state in both places so swapping breakpoints
+ * doesn't lose the selection.
+ */
+function PassengersPicker({
+  seats,
+  onSeats,
+}: {
+  seats: number;
+  onSeats: (n: number) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <span className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-muted">
+        Passengers
+      </span>
+      <div className="inline-flex rounded-full border border-line bg-surface-soft p-1">
+        {[1, 2, 3, 4].map((n) => {
+          const active = seats === n;
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onSeats(n)}
+              aria-label={`${n} passenger${n === 1 ? "" : "s"}`}
+              aria-pressed={active}
+              className={`inline-flex h-8 min-w-[2.25rem] items-center justify-center rounded-full px-3 text-sm font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rajlo-red ${
+                active
+                  ? "bg-rajlo-red text-white shadow-sm"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+      <span className="text-xs text-muted">
+        {seats === 1 ? "Just you" : `${seats} passengers including you`}
+      </span>
+    </div>
   );
 }
