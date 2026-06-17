@@ -693,10 +693,71 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
             })}
           </div>
 
-          {/* TRIP FIELDS */}
+          {/* PASSENGERS ROW — sits ABOVE the trip-fields row so the
+             rider can adjust seat count without it shoving the Find-
+             a-ride button onto a new line on desktop. Private-ride
+             only; route taxi hides it (van capacity is fixed by the
+             corridor). */}
+          <AnimatePresence>
+            {mode === "private" && (toValue.trim().length > 0 || toPlace) && (
+              <m.div
+                initial={
+                  reduce ? false : { opacity: 0, height: 0, marginTop: 0 }
+                }
+                animate={
+                  reduce
+                    ? undefined
+                    : { opacity: 1, height: "auto", marginTop: 12 }
+                }
+                exit={
+                  reduce
+                    ? undefined
+                    : { opacity: 0, height: 0, marginTop: 0 }
+                }
+                transition={{ type: "spring", duration: 0.35, bounce: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-muted">
+                    Passengers
+                  </span>
+                  <div className="inline-flex rounded-full border border-line bg-surface-soft p-1">
+                    {[1, 2, 3, 4].map((n) => {
+                      const active = seats === n;
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setSeats(n)}
+                          aria-label={`${n} passenger${n === 1 ? "" : "s"}`}
+                          aria-pressed={active}
+                          className={`inline-flex h-8 min-w-[2.25rem] items-center justify-center rounded-full px-3 text-sm font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rajlo-red ${
+                            active
+                              ? "bg-rajlo-red text-white shadow-sm"
+                              : "text-muted hover:text-foreground"
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-xs text-muted">
+                    {seats === 1
+                      ? "Just you"
+                      : `${seats} passengers including you`}
+                  </span>
+                </div>
+              </m.div>
+            )}
+          </AnimatePresence>
+
+          {/* TRIP FIELDS — single row on lg+: FROM | TO | Find a ride.
+             On md the button drops onto its own row (col-span-2).
+             On mobile everything stacks vertically. */}
           <form
             onSubmit={onSubmitForm}
-            className="mt-4 grid gap-2.5 md:grid-cols-[1fr_1.4fr] md:gap-3"
+            className="mt-4 grid gap-2.5 md:grid-cols-2 md:gap-3 lg:grid-cols-[1fr_1.4fr_auto]"
           >
             {/* ─── FROM ─── */}
             <label
@@ -1024,94 +1085,28 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               </AnimatePresence>
             </label>
 
-          </form>
-
-          {/* PASSENGERS ROW — sits between the FROM/TO grid and the
-             submit button so the rider can adjust seat count before
-             committing. Private-ride only; route taxi hides it (van
-             capacity is fixed by the corridor, not a rider choice). */}
-          <AnimatePresence>
-            {mode === "private" && (toValue.trim().length > 0 || toPlace) && (
-              <m.div
-                initial={
-                  reduce ? false : { opacity: 0, height: 0, marginTop: 0 }
-                }
-                animate={
-                  reduce
-                    ? undefined
-                    : { opacity: 1, height: "auto", marginTop: 12 }
-                }
-                exit={
-                  reduce
-                    ? undefined
-                    : { opacity: 0, height: 0, marginTop: 0 }
-                }
-                transition={{ type: "spring", duration: 0.35, bounce: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-muted">
-                    Passengers
-                  </span>
-                  <div className="inline-flex rounded-full border border-line bg-surface-soft p-1">
-                    {[1, 2, 3, 4].map((n) => {
-                      const active = seats === n;
-                      return (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => setSeats(n)}
-                          aria-label={`${n} passenger${n === 1 ? "" : "s"}`}
-                          aria-pressed={active}
-                          className={`inline-flex h-8 min-w-[2.25rem] items-center justify-center rounded-full px-3 text-sm font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rajlo-red ${
-                            active
-                              ? "bg-rajlo-red text-white shadow-sm"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                        >
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span className="text-xs text-muted">
-                    {seats === 1
-                      ? "Just you"
-                      : `${seats} passengers including you`}
-                  </span>
-                </div>
-              </m.div>
-            )}
-          </AnimatePresence>
-
-          {/* SUBMIT — full-width below the form + passengers row.
-             Lives outside the <form> so the grid above isn't forced
-             to reserve a third column when the passengers row toggles
-             on/off. Enter-to-submit still works from inside any input
-             because the inputs remain inside the <form> (its onSubmit
-             fires); this external button just routes click → handler. */}
-          <m.div
-            whileHover={hoverLift}
-            whileTap={tapDown}
-            transition={hoverLiftTransition}
-            className="mt-3"
-          >
-            <button
-              type="button"
-              onClick={() =>
-                onSubmitForm({
-                  preventDefault: () => undefined,
-                } as unknown as React.FormEvent)
-              }
-              className="group inline-flex h-full min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-rajlo-red px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-colors hover:bg-primary-hover hover:shadow-rajlo-red/50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rajlo-red lg:px-6"
+            {/* Submit lives BACK inside the form as the third grid
+               cell on lg+ (auto-width column). On md it spans both
+               columns; on mobile it stacks. `h-full` makes it match
+               the FROM/TO pill heights so the row reads as one unit. */}
+            <m.div
+              whileHover={hoverLift}
+              whileTap={tapDown}
+              transition={hoverLiftTransition}
+              className="md:col-span-2 lg:col-span-1"
             >
-              {mode === "route_taxi" ? "Hail a ride" : "Find a ride"}
-              <Icon
-                name="arrow-right"
-                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-              />
-            </button>
-          </m.div>
+              <button
+                type="submit"
+                className="group inline-flex h-full min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-rajlo-red px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-colors hover:bg-primary-hover hover:shadow-rajlo-red/50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rajlo-red lg:px-6"
+              >
+                {mode === "route_taxi" ? "Hail a ride" : "Find a ride"}
+                <Icon
+                  name="arrow-right"
+                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                />
+              </button>
+            </m.div>
+          </form>
 
           {placesError && (
             <p className="mt-3 text-xs font-medium text-rajlo-red">
