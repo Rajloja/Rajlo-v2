@@ -234,6 +234,27 @@ export default function DriverActiveTripPage() {
   // details + cancel + no-show controls.
   const [tripCardHeight, setTripCardHeight] = useState(0);
 
+  // Stable `liveRoute` reference so MapView's directions effect only
+  // re-fires when the target (pickup → dropoff) actually flips, not on
+  // every re-render. A fresh object literal here would otherwise cause
+  // each render to cancel the in-flight Google Directions request via
+  // the effect's cleanup, leaving the turn-by-turn pane stuck on the
+  // stale pickup route.
+  //
+  // MUST live above the early returns below — `useMemo` is a hook and
+  // React's rules require the same hook-call count on every render.
+  // A previous version of this file placed the useMemo near the JSX,
+  // which fired a "Rendered fewer hooks than expected" production
+  // error whenever the page mounted in the loading-skeleton state
+  // (early return before the hook) and then transitioned to data-ready
+  // (hook now called). Keep this here.
+  const liveRoute = useMemo(() => {
+    if (!data?.ride || data.carpool) return null;
+    return data.ride.status === "in_progress"
+      ? ({ target: "dropoff" } as const)
+      : ({ target: "pickup" } as const);
+  }, [data?.ride?.status, data?.carpool]);
+
   // Warm up the TTS engine on mount so the first turn-by-turn voice
   // prompt actually produces audio. Some Android WebViews silently
   // swallow the first speechSynthesis call before the voice list
@@ -691,23 +712,10 @@ export default function DriverActiveTripPage() {
   // multi-stage flow; the driver uses Google Maps for actual nav.)
   const carpool = data?.carpool ?? null;
 
-  // Stable `liveRoute` reference so MapView's directions effect only
-  // re-fires when the target (pickup → dropoff) actually flips, not on
-  // every re-render. A fresh object literal here would otherwise cause
-  // each render — and there are several back-to-back when the driver
-  // taps "Start trip" (acting flip + data refresh + acting unflip) —
-  // to cancel the in-flight Google Directions request via the effect's
-  // cleanup, leaving the turn-by-turn pane stuck on the stale pickup
-  // route until the page was fully unmounted and remounted.
-  const liveRoute = useMemo(
-    () =>
-      carpool
-        ? null
-        : ride.status === "in_progress"
-          ? { target: "dropoff" as const }
-          : { target: "pickup" as const },
-    [carpool, ride.status],
-  );
+  // `liveRoute` is computed by the useMemo near the top of the
+  // component (it has to live above the early-return guards to keep
+  // the hook count stable). Nothing to compute here — `liveRoute` is
+  // already in scope and ready to pass into MapView below.
 
   const mapPickup: Place = {
     placeId: "",
