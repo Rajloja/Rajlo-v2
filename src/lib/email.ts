@@ -12,7 +12,11 @@
  */
 
 type SendEmailArgs = {
-  to: string;
+  /** Single recipient or array of recipients. Resend's REST API
+   *  accepts either shape; an array fans the message out to multiple
+   *  addresses in one API call (same content, same Message-ID, all
+   *  on the To: header). */
+  to: string | string[];
   subject: string;
   html: string;
   /** Optional plain-text fallback. */

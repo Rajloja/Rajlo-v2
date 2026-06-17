@@ -400,13 +400,15 @@ export default function DriverJoinPage() {
               Become a Rajlo driver
               <Icon name="arrow-right" className="h-4 w-4" />
             </Link>
-            <Link
-              href="/download"
+            <a
+              href="https://play.google.com/store/apps/details?id=com.rajlodriversapp"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-full border-2 border-white/40 px-7 py-4 text-sm font-bold text-white transition-colors hover:bg-white/10"
             >
-              <Icon name="upload" className="h-4 w-4 rotate-180" />
-              Download the app
-            </Link>
+              <Icon name="google-play" className="h-4 w-4" />
+              Download on Google Play
+            </a>
           </div>
         </div>
       </section>

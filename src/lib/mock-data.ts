@@ -91,6 +91,7 @@ export const adminNav: NavItem[] = [
   { label: "Riders", labelKey: "nav.admin.users", href: "/admin/users", icon: "users" },
   { label: "Drivers", labelKey: "nav.admin.drivers", href: "/admin/drivers", icon: "user" },
   { label: "Messaging", labelKey: "nav.admin.messages", href: "/admin/messages", icon: "mail" },
+  { label: "Contact recipients", labelKey: "nav.admin.contactRecipients", href: "/admin/contact-recipients", icon: "mail" },
   { label: "Verification queue", labelKey: "nav.admin.verification", href: "/admin/verification-queue", icon: "clipboard-check" },
   { label: "Driver violations", labelKey: "nav.admin.violations", href: "/admin/violations", icon: "shield-alert" },
   { label: "Vehicle changes", labelKey: "nav.admin.vehicle", href: "/admin/vehicle-changes", icon: "car" },

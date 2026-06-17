@@ -50,7 +50,8 @@ export type IconName =
   | "phone-off"
   | "mic"
   | "mic-off"
-  | "bar-chart";
+  | "bar-chart"
+  | "google-play";
 
 const props = {
   fill: "none",
@@ -335,6 +336,16 @@ const paths: Record<IconName, React.ReactNode> = {
       <rect x="7" y="13" width="3" height="6" rx="0.5" />
       <rect x="12" y="9" width="3" height="10" rx="0.5" />
       <rect x="17" y="5" width="3" height="14" rx="0.5" />
+    </>
+  ),
+  // Google Play triangular "play" mark — the consumer-recognisable
+  // shape that lives on the Play Store launcher icon. Single-colour
+  // stroke version so it inherits the surrounding text colour
+  // (matches the rest of this icon set's monochrome treatment).
+  "google-play": (
+    <>
+      <path d="M5 3.5v17a1 1 0 0 0 1.55.83l13-8.5a1 1 0 0 0 0-1.66l-13-8.5A1 1 0 0 0 5 3.5Z" />
+      <path d="M5 3.5 14.5 12 5 20.5" />
     </>
   ),
 };

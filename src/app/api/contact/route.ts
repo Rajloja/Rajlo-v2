@@ -1,21 +1,56 @@
 import { NextResponse } from "next/server";
 import { sendEmail } from "@/lib/email";
 import { esc } from "@/lib/email-render";
+import { getSupabaseServerClient } from "@/lib/supabase-server";
 
 /**
  * POST /api/contact
  *
- * Public contact-form endpoint. Emails the submission to the support
- * inbox with the sender's address as Reply-To, so support can reply
- * straight to the person.
+ * Public contact-form endpoint. Emails each submission to every
+ * active recipient in the `contact_recipients` table (managed by
+ * admins via /admin/contact-recipients — defaults seeded: raj/daniel/
+ * support). Sender's address rides along as Reply-To so support can
+ * reply straight to the person.
  *
- * Body: { name, email, topic, message }
+ * Recipient resolution order:
+ *   1. Active rows in `contact_recipients` (admin-managed list)
+ *   2. CONTACT_INBOX_EMAIL env var (legacy single-inbox fallback)
+ *   3. "support@rajlo.com" (final fallback)
  *
  * No auth (the form is on the marketing site). Inputs are length-
  * capped and HTML-escaped before they reach the email body.
  */
 
-const CONTACT_INBOX = process.env.CONTACT_INBOX_EMAIL ?? "support@rajlo.com";
+const CONTACT_INBOX_FALLBACK =
+  process.env.CONTACT_INBOX_EMAIL ?? "support@rajlo.com";
+
+/**
+ * Resolve the list of email addresses to deliver this submission to.
+ * Reads the admin-managed roster via the service-role client (the
+ * table's RLS only allows admin reads; bypassing it here keeps the
+ * public endpoint working without admin credentials).
+ *
+ * Best-effort: any failure (missing service client, query error,
+ * empty result) falls back to the env-var inbox so submissions
+ * never silently vanish.
+ */
+async function resolveRecipients(): Promise<string[]> {
+  try {
+    const supabase = getSupabaseServerClient();
+    if (!supabase) return [CONTACT_INBOX_FALLBACK];
+    const { data, error } = await supabase
+      .from("contact_recipients")
+      .select("email")
+      .eq("active", true)
+      .returns<{ email: string }[]>();
+    if (error || !data || data.length === 0) {
+      return [CONTACT_INBOX_FALLBACK];
+    }
+    return data.map((r) => r.email);
+  } catch {
+    return [CONTACT_INBOX_FALLBACK];
+  }
+}
 
 type Body = {
   name?: unknown;
@@ -65,8 +100,9 @@ export async function POST(request: Request) {
     `From: ${name}\nEmail: ${email}\nTopic: ${topic}\n\n` +
     `Message:\n${message}`;
 
+  const recipients = await resolveRecipients();
   const result = await sendEmail({
-    to: CONTACT_INBOX,
+    to: recipients,
     subject: `[Contact · ${topic}] ${name}`,
     html,
     text,

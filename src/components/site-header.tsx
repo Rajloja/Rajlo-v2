@@ -12,6 +12,7 @@ type NavItem = NavLink | { label: string; menu: NavLink[] };
  * key render as a dropdown (desktop) or expandable accordion
  * (mobile drawer). Plain `href` items render as a single link. */
 const NAV_ITEMS: NavItem[] = [
+  { label: "Home", href: "/" },
   { label: "How it works", href: "/how-it-works" },
   { label: "Fare estimator", href: "/fare-estimator" },
   { label: "Drive with us", href: "/driver-join" },
