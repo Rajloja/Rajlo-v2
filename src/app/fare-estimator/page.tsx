@@ -102,7 +102,7 @@ export default function FareEstimatorPage() {
     <MarketingShell>
       {/* ─── HERO STRIP ─── Compact, dark, photo-backed. */}
       <section className="relative isolate overflow-hidden">
-        <div className="relative min-h-[280px] md:min-h-[340px]">
+        <div className="relative min-h-[360px] md:min-h-[420px]">
           <div
             className="absolute inset-0"
             style={{ background: BRAND_FALLBACK_BG }}
@@ -126,7 +126,7 @@ export default function FareEstimatorPage() {
             }}
           />
 
-          <div className="relative mx-auto flex max-w-6xl flex-col justify-center px-6 pb-12 pt-28 text-white md:pb-16 md:pt-32 lg:px-12">
+          <div className="relative mx-auto flex max-w-6xl flex-col justify-center px-6 pb-28 pt-28 text-white md:pb-36 md:pt-32 lg:px-12">
             <m.div
               initial="initial"
               animate="animate"
@@ -166,7 +166,7 @@ export default function FareEstimatorPage() {
 
       {/* ─── CALCULATOR ─── Floating card that overlaps the hero edge. */}
       <section className="relative">
-        <div className="relative z-10 mx-auto -mt-12 max-w-5xl px-4 sm:px-6 md:-mt-16 lg:px-8">
+        <div className="relative z-10 mx-auto -mt-10 max-w-5xl px-4 sm:px-6 md:-mt-14 lg:px-8">
           <m.div
             initial={reduce ? false : { opacity: 0, y: 24, filter: "blur(6px)" }}
             animate={
