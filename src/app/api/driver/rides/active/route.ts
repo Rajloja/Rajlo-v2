@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
+import { getAverageRating } from "@/lib/ratings";
 
 /**
  * GET /api/driver/rides/active
@@ -129,11 +130,16 @@ export async function GET() {
 
   // Rider profile (name + avatar + phone) so the driver can see who
   // they're picking up and tap-to-call when needed ("I'm at your gate").
-  const { data: riderProfile } = await supabase
-    .from("profiles")
-    .select("full_name, avatar_url, phone")
-    .eq("id", ride.rider_id)
-    .maybeSingle();
+  // Rider's average rating + count comes from the same helper drivers
+  // see on the rider side, so the live-trip cards mirror each other.
+  const [{ data: riderProfile }, riderRating] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("full_name, avatar_url, phone")
+      .eq("id", ride.rider_id)
+      .maybeSingle(),
+    getAverageRating(supabase, ride.rider_id, "rider"),
+  ]);
 
   let partnerProfile: { full_name: string | null } | null = null;
   if (partnerRow) {
@@ -186,6 +192,8 @@ export async function GET() {
       name: riderProfile?.full_name ?? "Rider",
       avatarUrl: riderProfile?.avatar_url ?? null,
       phone: riderProfile?.phone ?? null,
+      rating: riderRating.average,
+      ratingCount: riderRating.count,
     },
     // Carpool block — null for solo trips, populated when the driver's
     // currently-assigned ride is part of a matched group. The active-trip

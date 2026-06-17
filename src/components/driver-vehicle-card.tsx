@@ -83,49 +83,44 @@ export function DriverVehicleCard({
           <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
             Your driver
           </p>
-          <p className="mt-0.5 truncate text-base font-extrabold tracking-tight">
-            {name}
-          </p>
-          {/* Rating row — always renders so the rider knows what to
-             look for. When the driver has at least one rating, show
-             stars + value. Otherwise surface "TA-verified" so the
-             space isn't blank and a brand-new driver doesn't look
-             unrated/untrusted. */}
-          <div className="mt-1.5 flex items-center gap-2">
+          {/* Name + rating on a single row. Rating sits as a small
+             red star-pill immediately to the right of the name (or
+             a "TA-verified" pill when there's no rating yet) so the
+             rider knows what they're looking at without their eye
+             dropping a line. */}
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <p className="truncate text-base font-extrabold tracking-tight">
+              {name}
+            </p>
             {rating != null ? (
-              <>
-                <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-xs font-extrabold text-white shadow-sm shadow-rajlo-red/30">
-                  <Icon name="star" className="h-3 w-3" />
-                  {rating.toFixed(1)}
-                </span>
-                {typeof ratingCount === "number" && ratingCount > 0 && (
-                  <span className="text-[11px] font-semibold text-muted">
-                    {ratingCount} trip{ratingCount === 1 ? "" : "s"} rated
-                  </span>
-                )}
-              </>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-xs font-extrabold text-white shadow-sm shadow-rajlo-red/30">
+                <Icon name="star" className="h-3 w-3" />
+                {rating.toFixed(1)}
+              </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-rajlo-red/10 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-rajlo-red">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rajlo-red/10 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-rajlo-red">
                 <Icon name="shield-check" className="h-3 w-3" />
                 TA-verified
               </span>
             )}
           </div>
+          {typeof ratingCount === "number" && ratingCount > 0 && (
+            <p className="mt-1 text-[11px] font-semibold text-muted">
+              {ratingCount} trip{ratingCount === 1 ? "" : "s"} rated
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Action row — in-app call + chat launcher come in via
-         `extraAction` from the parent. Sits on its own line between
-         the identity block and the vehicle strip so the buttons
-         render at a comfortable touch-target size instead of being
-         crammed into the right edge of the name row. The legacy
-         `tel:` PSTN link was removed: rider/driver privacy means
-         phone numbers are never exposed in the UI, and the in-app
-         voice flow (LiveKit) handles all rider↔driver voice contact. */}
+      {/* Action row — Call + Message come in via `extraAction` from
+         the parent. Wrapper is plain block (no flex) so the parent
+         can lay them out however they want (e.g. side-by-side
+         full-width grid). The legacy `tel:` PSTN link was removed:
+         rider/driver privacy means phone numbers are never exposed
+         in the UI, and the in-app voice flow (LiveKit) handles all
+         rider↔driver voice contact. */}
       {extraAction && (
-        <div className="flex flex-wrap items-center gap-2 px-5 pb-4 -mt-1">
-          {extraAction}
-        </div>
+        <div className="px-5 pb-4 -mt-1">{extraAction}</div>
       )}
 
       {/* Vehicle strip — colour swatch + plate sit on a contrasting

@@ -35,6 +35,11 @@ type Props = {
   /** Single-line address shown to the right of the headline.
    *  Typically pickup address before arrival, dropoff address after. */
   addressLine: string | null;
+  /** Estimated fare for this trip — rendered as a high-visibility
+   *  pill on the right of the headline row so the driver can see
+   *  what they're earning at a glance while navigating. Optional;
+   *  hidden when null. */
+  priceLabel?: string | null;
   /** Action button label — e.g. "I've arrived", "Start trip",
    *  "Complete trip". Determined by the active-trip page. */
   actionLabel: string;
@@ -62,6 +67,7 @@ export function NavTripCard({
   snapshot,
   headline,
   addressLine,
+  priceLabel,
   actionLabel,
   actionVariant,
   actionDisabled,
@@ -102,11 +108,22 @@ export function NavTripCard({
         {/* Compact row — always visible. */}
         <div className="flex items-center gap-3 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="font-secondary text-xs font-bold uppercase tracking-wider text-muted">
-              {formatDuration(snapshot.totalRemainingS)} ·{" "}
-              {formatDistance(snapshot.totalRemainingM)} · ETA{" "}
-              {formatEta(snapshot.totalRemainingS)}
-            </p>
+            {/* Meta row + price pill side-by-side. Price is the
+               driver's earnings preview — pinning it here keeps it in
+               peripheral vision the whole drive without competing
+               with the maneuver banner up top. */}
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-secondary text-xs font-bold uppercase tracking-wider text-muted">
+                {formatDuration(snapshot.totalRemainingS)} ·{" "}
+                {formatDistance(snapshot.totalRemainingM)} · ETA{" "}
+                {formatEta(snapshot.totalRemainingS)}
+              </p>
+              {priceLabel && (
+                <span className="shrink-0 rounded-full bg-rajlo-red px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-white shadow-sm shadow-rajlo-red/30">
+                  {priceLabel}
+                </span>
+              )}
+            </div>
             <p className="mt-1 truncate text-sm font-bold text-foreground">
               {headline}
             </p>

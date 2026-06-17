@@ -34,10 +34,16 @@ export function ChatLauncher({
   peerAvatarUrl,
   peerPhone,
   rideActive,
-  /** Visual variant of the icon button — "dark" sits on the
-   *  rajlo-black hero card; "soft" sits on white surface cards. */
+  /** Visual variant.
+   *    "dark" → circular icon button for the dark hero card
+   *    "soft" → circular icon button for light surface cards
+   *    "pill" → full-width pill button matching CallButton's shape,
+   *             with "Message" label (or "Message (N)" when unread).
+   *             Use this when Call + Message sit side-by-side as
+   *             equal-weight CTAs on the rider/driver live-trip card. */
   variant = "dark",
-  /** Override the icon size if the surrounding row is unusual. */
+  /** Override the icon size if the surrounding row is unusual.
+   *  Ignored for the "pill" variant. */
   iconSize = 40,
 }: {
   rideId: string;
@@ -46,7 +52,7 @@ export function ChatLauncher({
   peerAvatarUrl?: string | null;
   peerPhone?: string | null;
   rideActive: boolean;
-  variant?: "dark" | "soft";
+  variant?: "dark" | "soft" | "pill";
   iconSize?: number;
 }) {
   const searchParams = useSearchParams();
@@ -97,12 +103,19 @@ export function ChatLauncher({
 
   return (
     <>
-      <ChatIconButton
-        unreadCount={unreadCount}
-        variant={variant}
-        size={iconSize}
-        onClick={() => setOpen(true)}
-      />
+      {variant === "pill" ? (
+        <ChatPillButton
+          unreadCount={unreadCount}
+          onClick={() => setOpen(true)}
+        />
+      ) : (
+        <ChatIconButton
+          unreadCount={unreadCount}
+          variant={variant}
+          size={iconSize}
+          onClick={() => setOpen(true)}
+        />
+      )}
 
       <NewMessageToast
         message={latestIncoming}
@@ -168,6 +181,50 @@ function ChatIconButton({
           {unreadCount > 9 ? "9+" : unreadCount}
         </span>
       )}
+    </button>
+  );
+}
+
+/* ─────────── Chat pill button (matches CallButton width) ─────────── */
+
+/**
+ * Wide pill variant of the chat trigger. Same dimensions as the
+ * CallButton primary pill so the two sit side-by-side as equal-weight
+ * CTAs on the rider/driver live-trip card. Label shows "Message"
+ * normally; when there are unread messages it becomes "Message (3)".
+ */
+function ChatPillButton({
+  unreadCount,
+  onClick,
+}: {
+  unreadCount: number;
+  onClick: () => void;
+}) {
+  const hasUnread = unreadCount > 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={
+        hasUnread
+          ? `Open chat — ${unreadCount} new message${unreadCount === 1 ? "" : "s"}`
+          : "Open chat"
+      }
+      className={`inline-flex w-full items-center justify-center gap-2 rounded-full border px-5 py-2.5 text-sm font-bold transition-all hover:-translate-y-0.5 active:translate-y-0 ${
+        hasUnread
+          ? "border-rajlo-red bg-rajlo-red text-white shadow-md shadow-rajlo-red/30 hover:bg-primary-hover"
+          : "border-line bg-surface text-foreground hover:border-rajlo-red/40 hover:text-rajlo-red"
+      }`}
+    >
+      <Icon name="mail" className="h-4 w-4" />
+      <span>
+        Message
+        {hasUnread && (
+          <span className="ml-1 tabular-nums">
+            ({unreadCount > 9 ? "9+" : unreadCount})
+          </span>
+        )}
+      </span>
     </button>
   );
 }

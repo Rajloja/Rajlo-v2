@@ -55,6 +55,20 @@ export type LiveRoute = { target: "pickup" | "dropoff" };
  *  would flicker as it redraws). */
 const LIVE_ROUTE_REFRESH_THRESHOLD_M = 120;
 
+/** How far (in metres, perpendicular from the polyline) the driver
+ *  must drift from the planned route before we treat them as off-route.
+ *  Picked at one suburban-block worth — far enough that GPS jitter on a
+ *  multi-lane road doesn't trip it, close enough that a one-street
+ *  parallel detour is caught and re-planned. */
+const OFF_ROUTE_REROUTE_THRESHOLD_M = 45;
+
+/** How long the driver must stay off-route before we actually fire a
+ *  re-fetch. Smooths out brief jitter (a corner cut, a parallel-road
+ *  GPS bounce, a stop at a junction) so we don't burn Directions
+ *  quota on transient blips. Tuned together with the 5s GPS cadence —
+ *  4s means we typically need TWO bad fixes in a row before triggering. */
+const OFF_ROUTE_REROUTE_SUSTAIN_MS = 4000;
+
 /** Initial compass bearing from p1 to p2 (0–360°, 0=north, clockwise). */
 function computeBearing(
   p1: { lat: number; lng: number },
@@ -330,6 +344,28 @@ function snapToPath(
     }
   }
   return closest;
+}
+
+/**
+ * Minimum perpendicular distance (in metres) from a GPS point to a
+ * polyline path. Used to decide whether the driver has drifted off the
+ * planned route and we need to re-fetch directions from their current
+ * position. Returns `Infinity` for an empty/degenerate path so callers
+ * can default to "definitely off-route" when there's no route to
+ * compare against (which usually means we haven't fetched yet anyway).
+ */
+function distanceFromPath(
+  p: { lat: number; lng: number },
+  path: Array<{ lat: number; lng: number }>,
+): number {
+  if (path.length < 2) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const proj = projectOnSegment(p, path[i], path[i + 1]);
+    const d = approxDistanceMeters(p, proj);
+    if (d < best) best = d;
+  }
+  return best;
 }
 
 /**
@@ -642,6 +678,18 @@ export function MapView({
    *  the middle of the road instead of drifting off into the kerb
    *  on bad GPS fixes. Empty array when no live route active. */
   const liveRoutePathRef = useRef<{ lat: number; lng: number }[]>([]);
+  // Timestamp (epoch ms) the driver first crossed the off-route
+  // distance threshold against the current polyline. Null when the
+  // driver is on-route. Sustained-off-route for OFF_ROUTE_REROUTE_SUSTAIN_MS
+  // triggers a fresh Directions fetch from the driver's CURRENT position
+  // so the turn-by-turn banner + voice prompts re-plan against where
+  // the driver actually IS — not the original planned route.
+  const offRouteStartedAtRef = useRef<number | null>(null);
+  // True while a re-route Directions fetch is in flight. Prevents the
+  // 5s GPS tick from firing a SECOND fetch before the first one's
+  // response has had a chance to update the polyline (the new polyline
+  // resets the off-route distance to ~0 once it lands).
+  const rerouteInFlightRef = useRef<boolean>(false);
   // Stable refs for the consumer-supplied nav callbacks. We can't read
   // the callback props directly from inside the map-init effect (it
   // runs once and would close over the stale value), so we mirror them
@@ -700,6 +748,19 @@ export function MapView({
   // can tell whether the user zoomed IN (no action) or OUT (debounce
   // the auto-restore). Initialised to the constructor zoom.
   const lastZoomRef = useRef<number>(9);
+  // Latest driver position the parent has streamed in. Mirrored into a
+  // ref so the idle-recenter timer can read it without re-registering
+  // every position tick (the timer is set up once at map-init time and
+  // re-arms itself on user gestures, not on data updates).
+  const lastDriverPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Pending idle auto-recenter timer. After a user drag/pinch, the
+  // map fires `idle` once they let go. We wait IDLE_RECENTER_MS more
+  // and then re-engage follow mode + pan to the latest driver
+  // position — so the driver gets free-look behaviour but never has
+  // to manually tap a "recenter" button to get back.
+  const idleRecenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   // Pending auto-restore timer. Fires 3s after the last user zoom-OUT
   // and snaps the camera back to the in-trip default. Cleared on every
   // new zoom event so consecutive pinch-outs reset the countdown.
@@ -711,6 +772,25 @@ export function MapView({
   useEffect(() => {
     navModeRef.current = navMode;
   }, [navMode]);
+
+  // Mirror the latest driver position into a ref. The map-init effect
+  // registers its idle listener exactly once, and that listener needs
+  // a "where to recenter to" value when the 5s timer fires. Going via
+  // a ref keeps the listener stable while still reading fresh data.
+  useEffect(() => {
+    if (driverPosition) {
+      lastDriverPosRef.current = {
+        lat: driverPosition.lat,
+        lng: driverPosition.lng,
+      };
+    }
+  }, [driverPosition]);
+
+  /** How long (ms) the camera waits after the user lets go of a
+   *  drag/pinch before snapping back to the live driver puck. Tuned
+   *  to give a comfortable "I'm looking around" beat without leaving
+   *  the driver stranded in a stale view. */
+  const IDLE_RECENTER_MS = 5000;
   // Internal "self GPS" state — populated when the user taps the
   // locate-me button on a page that doesn't otherwise feed riderPosition
   // (e.g. the rider booking screen). The puck renders from
@@ -1059,6 +1139,41 @@ export function MapView({
             mm.setZoom(navModeRef.current ? 18 : 16);
           }, 3000);
         });
+        // Idle auto-recenter. After any user gesture (drag, pinch,
+        // wheel, touchstart) flips followMode off, the map fires
+        // `idle` once they let go. We schedule a 5s timer; when it
+        // expires we re-arm follow + pan back to the latest driver
+        // puck position. This gives the driver the "free look, snap
+        // back" behaviour they used to need an external Google Maps
+        // tab for. Cancelled on every fresh gesture so a driver who
+        // keeps panning isn't yanked back mid-look.
+        mapRef.current.addListener("idle", () => {
+          // Programmatic panTo/setCenter calls also fire `idle`, but
+          // those keep followMode TRUE — so checking followMode here
+          // distinguishes user-driven idles from our own.
+          if (followModeRef.current) return;
+          if (idleRecenterTimerRef.current) {
+            clearTimeout(idleRecenterTimerRef.current);
+          }
+          idleRecenterTimerRef.current = setTimeout(() => {
+            idleRecenterTimerRef.current = null;
+            const mm = mapRef.current;
+            if (!mm) return;
+            const pos = lastDriverPosRef.current;
+            // Re-arm follow first, THEN pan — that order ensures the
+            // pan doesn't get classified as a "user gesture" by the
+            // dragstart listener (the listener guards on domEvent,
+            // but belt-and-braces).
+            followModeRef.current = true;
+            if (pos) {
+              mm.panTo(pos);
+              // Nav mode restores the close-in steering zoom too, so
+              // the snap-back actually looks like the driver's live
+              // view and not a stale wide view at random zoom.
+              mm.setZoom(navModeRef.current ? 18 : 16);
+            }
+          }, IDLE_RECENTER_MS);
+        });
         // Wake up any effects waiting for the map to exist (markers,
         // polyline, fleet dots, live-route).
         setMapReady(true);
@@ -1078,6 +1193,10 @@ export function MapView({
       if (zoomRestoreTimerRef.current) {
         clearTimeout(zoomRestoreTimerRef.current);
         zoomRestoreTimerRef.current = null;
+      }
+      if (idleRecenterTimerRef.current) {
+        clearTimeout(idleRecenterTimerRef.current);
+        idleRecenterTimerRef.current = null;
       }
     };
   }, []);
@@ -1402,6 +1521,8 @@ export function MapView({
       liveRouteTargetRef.current = null;
       liveRoutePathRef.current = [];
       livePolylineHashRef.current = "";
+      offRouteStartedAtRef.current = null;
+      rerouteInFlightRef.current = false;
       return;
     }
 
@@ -1418,12 +1539,63 @@ export function MapView({
       approxDistanceMeters(liveRouteOriginRef.current, driverLatLng) >
         LIVE_ROUTE_REFRESH_THRESHOLD_M;
 
-    if (!targetChanged && !movedFar && livePolylineRef.current.length > 0) {
-      // Driver moved but only slightly — leave the existing polyline in
-      // place. The car marker still updates via the driverPosition effect.
+    // ─── Off-route detection ─────────────────────────────────────────
+    // Measure how far the driver is from the existing polyline. If
+    // they've drifted past the threshold AND stayed there for the
+    // sustain window, the planned route no longer reflects reality —
+    // we re-fetch from where they ACTUALLY are. This is what fixes
+    // the "voice keeps saying Head west on Hope Road while the driver
+    // is correctly on the parallel side street" failure mode: once
+    // the new route arrives, useTurnByTurn resets stepIndex + clears
+    // its fired voice prompts, so prompts re-plan against the new path.
+    //
+    // We skip the check entirely while a fetch is already in flight
+    // (rerouteInFlight) — otherwise the next 5s tick would re-trigger
+    // before the new polyline has had a chance to land and drop the
+    // distance to ~0.
+    let sustainedOffRoute = false;
+    if (
+      !rerouteInFlightRef.current &&
+      livePolylineRef.current.length > 0 &&
+      liveRoutePathRef.current.length > 1
+    ) {
+      const offRouteDistM = distanceFromPath(
+        driverLatLng,
+        liveRoutePathRef.current,
+      );
+      if (offRouteDistM > OFF_ROUTE_REROUTE_THRESHOLD_M) {
+        if (offRouteStartedAtRef.current == null) {
+          offRouteStartedAtRef.current = Date.now();
+        } else if (
+          Date.now() - offRouteStartedAtRef.current >=
+          OFF_ROUTE_REROUTE_SUSTAIN_MS
+        ) {
+          sustainedOffRoute = true;
+        }
+      } else {
+        // Back on-route — clear any pending off-route timer so a fresh
+        // deviation has to accumulate the full sustain window again.
+        offRouteStartedAtRef.current = null;
+      }
+    }
+
+    if (
+      !targetChanged &&
+      !movedFar &&
+      !sustainedOffRoute &&
+      livePolylineRef.current.length > 0
+    ) {
+      // Driver moved but only slightly AND is still on the planned
+      // route — leave the existing polyline in place. The car marker
+      // still updates via the driverPosition effect.
       return;
     }
 
+    // We're committing to a fetch. Clear the off-route timer so the
+    // post-fetch "still off the OLD polyline" condition doesn't
+    // immediately re-trigger before the new polyline lands.
+    offRouteStartedAtRef.current = null;
+    rerouteInFlightRef.current = true;
     liveRouteOriginRef.current = driverLatLng;
     liveRouteTargetRef.current = liveRoute.target;
 
@@ -1449,6 +1621,7 @@ export function MapView({
       })
       .then((response) => {
         if (cancelled) return;
+        rerouteInFlightRef.current = false;
         const route = pickFastestRoute(response.routes ?? []);
         if (!route) return;
         const rawPath = fullRoutePath(route);
@@ -1511,6 +1684,7 @@ export function MapView({
         }
       })
       .catch((err) => {
+        rerouteInFlightRef.current = false;
         // eslint-disable-next-line no-console
         console.warn("[MapView] Live Directions request failed:", err);
       });

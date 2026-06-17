@@ -170,6 +170,12 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
     google.maps.places.AutocompleteSuggestion[]
   >([]);
   const [placesError, setPlacesError] = useState<string | null>(null);
+  // Per-input loading flags. Flipped on the moment a debounced fetch
+  // is scheduled; flipped off when the response lands (or fails).
+  // Rendered as a small spinner inside the input pill so the rider
+  // sees the system is working before the dropdown appears.
+  const [fromLoading, setFromLoading] = useState(false);
+  const [toLoading, setToLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -288,8 +294,13 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
   ): Promise<void> => {
     if (!placesLibRef.current) return;
     if (input.trim().length < 2) {
-      if (kind === "from") setFromSuggestions([]);
-      else setToSuggestions([]);
+      if (kind === "from") {
+        setFromSuggestions([]);
+        setFromLoading(false);
+      } else {
+        setToSuggestions([]);
+        setToLoading(false);
+      }
       return;
     }
     const seq = ++requestSeqRef.current;
@@ -314,15 +325,19 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
         setFromSuggestions(filtered);
         setFromOpen(true);
         setToOpen(false);
+        setFromLoading(false);
       } else {
         setToSuggestions(filtered);
         setToOpen(true);
         setFromOpen(false);
+        setToLoading(false);
       }
       setPlacesError(null);
     } catch (err) {
       if (seq !== requestSeqRef.current) return;
       setPlacesError(err instanceof Error ? err.message : "Search failed");
+      if (kind === "from") setFromLoading(false);
+      else setToLoading(false);
     }
   };
 
@@ -681,7 +696,7 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
           {/* TRIP FIELDS */}
           <form
             onSubmit={onSubmitForm}
-            className="mt-4 grid gap-2.5 md:grid-cols-2 md:gap-3 lg:grid-cols-[1fr_1.4fr_auto]"
+            className="mt-4 grid gap-2.5 md:grid-cols-[1fr_1.4fr] md:gap-3"
           >
             {/* ─── FROM ─── */}
             <label
@@ -703,6 +718,11 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                     setFromPlace(null);
                     if (fromDebounceRef.current)
                       clearTimeout(fromDebounceRef.current);
+                    // Show the spinner the moment the rider types past
+                    // the 2-char threshold so they see "we're working
+                    // on it" before the dropdown lands. Cleared inside
+                    // fetchSuggestions when the response arrives.
+                    setFromLoading(v.trim().length >= 2);
                     fromDebounceRef.current = setTimeout(
                       () => fetchSuggestions(v, "from"),
                       180,
@@ -719,6 +739,15 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                   className="min-w-0 flex-1 bg-transparent text-sm font-bold text-foreground placeholder:text-muted placeholder:font-medium focus:outline-none md:text-base"
                   aria-label="Pickup location"
                 />
+                {fromLoading && (
+                  <span
+                    aria-hidden
+                    className="grid h-8 w-8 shrink-0 place-items-center text-rajlo-red"
+                    title="Loading suggestions"
+                  >
+                    <span className="h-4 w-4 animate-spin rounded-full border-[2px] border-current border-t-transparent" />
+                  </span>
+                )}
                 {fromValue ? (
                   // Clear button — replaces the current-location pin
                   // once the field has any content. Tap to wipe the
@@ -831,6 +860,11 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                     if (toUsesGoogle) {
                       if (toDebounceRef.current)
                         clearTimeout(toDebounceRef.current);
+                      // Spinner on while the Google fetch is in flight;
+                      // cleared inside fetchSuggestions when the
+                      // response (or error) lands. Curated route-taxi
+                      // mode doesn't need it — no network call.
+                      setToLoading(v.trim().length >= 2);
                       toDebounceRef.current = setTimeout(
                         () => fetchSuggestions(v, "to"),
                         180,
@@ -860,6 +894,15 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                   className="min-w-0 flex-1 bg-transparent text-sm font-bold text-foreground placeholder:text-muted focus:outline-none md:text-base"
                   aria-label="Destination"
                 />
+                {toLoading && toUsesGoogle && (
+                  <span
+                    aria-hidden
+                    className="grid h-8 w-8 shrink-0 place-items-center text-rajlo-red"
+                    title="Loading suggestions"
+                  >
+                    <span className="h-4 w-4 animate-spin rounded-full border-[2px] border-current border-t-transparent" />
+                  </span>
+                )}
                 {toValue && (
                   // Clear button mirrors the FROM clear — wipes the
                   // text, the resolved Place, and the open popover.
@@ -981,36 +1024,12 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               </AnimatePresence>
             </label>
 
-            <m.div
-              whileHover={hoverLift}
-              whileTap={tapDown}
-              transition={hoverLiftTransition}
-              className="md:col-span-2 lg:col-span-1"
-            >
-              <button
-                type="submit"
-                className="group inline-flex h-full min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-rajlo-red px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-colors hover:bg-primary-hover hover:shadow-rajlo-red/50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rajlo-red lg:px-6"
-              >
-                {mode === "route_taxi" ? "Hail a ride" : "Find a ride"}
-                <Icon
-                  name="arrow-right"
-                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                />
-              </button>
-            </m.div>
           </form>
 
-          {placesError && (
-            <p className="mt-3 text-xs font-medium text-rajlo-red">
-              {placesError}
-            </p>
-          )}
-
-          {/* SEATS PICKER — appears in Private ride mode once the
-             rider has filled the destination. Route taxi hides it
-             entirely (corridor van capacity is the operative number,
-             not a rider choice). Same 1–4 range the rider request
-             page exposes. */}
+          {/* PASSENGERS ROW — sits between the FROM/TO grid and the
+             submit button so the rider can adjust seat count before
+             committing. Private-ride only; route taxi hides it (van
+             capacity is fixed by the corridor, not a rider choice). */}
           <AnimatePresence>
             {mode === "private" && (toValue.trim().length > 0 || toPlace) && (
               <m.div
@@ -1020,7 +1039,7 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                 animate={
                   reduce
                     ? undefined
-                    : { opacity: 1, height: "auto", marginTop: 16 }
+                    : { opacity: 1, height: "auto", marginTop: 12 }
                 }
                 exit={
                   reduce
@@ -1064,6 +1083,41 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               </m.div>
             )}
           </AnimatePresence>
+
+          {/* SUBMIT — full-width below the form + passengers row.
+             Lives outside the <form> so the grid above isn't forced
+             to reserve a third column when the passengers row toggles
+             on/off. Enter-to-submit still works from inside any input
+             because the inputs remain inside the <form> (its onSubmit
+             fires); this external button just routes click → handler. */}
+          <m.div
+            whileHover={hoverLift}
+            whileTap={tapDown}
+            transition={hoverLiftTransition}
+            className="mt-3"
+          >
+            <button
+              type="button"
+              onClick={() =>
+                onSubmitForm({
+                  preventDefault: () => undefined,
+                } as unknown as React.FormEvent)
+              }
+              className="group inline-flex h-full min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-rajlo-red px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-colors hover:bg-primary-hover hover:shadow-rajlo-red/50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rajlo-red lg:px-6"
+            >
+              {mode === "route_taxi" ? "Hail a ride" : "Find a ride"}
+              <Icon
+                name="arrow-right"
+                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+              />
+            </button>
+          </m.div>
+
+          {placesError && (
+            <p className="mt-3 text-xs font-medium text-rajlo-red">
+              {placesError}
+            </p>
+          )}
 
           {/* Secondary actions row */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3 text-xs text-muted md:text-sm">

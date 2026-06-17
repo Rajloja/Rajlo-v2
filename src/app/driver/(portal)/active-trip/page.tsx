@@ -108,6 +108,9 @@ type ActiveResponse = {
     name: string;
     avatarUrl: string | null;
     phone: string | null;
+    /** null = no ratings yet (UI shows "Verified rider" pill instead). */
+    rating: number | null;
+    ratingCount: number;
   } | null;
   carpool: { groupId: string; partner: CarpoolPartner } | null;
   /** Present only when there's no active ride but one ended very
@@ -899,6 +902,11 @@ export default function DriverActiveTripPage() {
                     ? ride.pickup.address
                     : ride.dropoff.address
                 }
+                priceLabel={
+                  ride.estimatedFareJMD
+                    ? formatJMD(ride.estimatedFareJMD)
+                    : null
+                }
                 actionLabel={stage.actionLabel}
                 actionVariant={
                   ride.status === "in_progress" ? "success" : "primary"
@@ -1108,52 +1116,74 @@ export default function DriverActiveTripPage() {
       {!navFullscreen && rider && (
         <FadeUp delay={0.1}>
           <div className="space-y-3">
-            <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5">
-              <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-full bg-primary-soft text-base font-extrabold text-rajlo-red ring-1 ring-rajlo-red/20">
-                {rider.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={rider.avatarUrl}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  initials
-                )}
+            <div className="rounded-2xl border border-line bg-surface p-5">
+              <div className="flex items-start gap-4">
+                <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-full bg-primary-soft text-base font-extrabold text-rajlo-red ring-1 ring-rajlo-red/20">
+                  {rider.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={rider.avatarUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    initials
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-muted">
+                    {carpool ? "Rider 1 (pickup first)" : "Rider"}
+                  </p>
+                  {/* Name + rating pill inline. Mirrors the rider-side
+                     driver card so both surfaces read identically. */}
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                    <p className="truncate text-base font-extrabold tracking-tight">
+                      {rider.name}
+                    </p>
+                    {rider.rating != null ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rajlo-red px-2 py-0.5 text-xs font-extrabold text-white shadow-sm shadow-rajlo-red/30">
+                        <Icon name="star" className="h-3 w-3" />
+                        {rider.rating.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rajlo-red/10 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-rajlo-red">
+                        <Icon name="shield-check" className="h-3 w-3" />
+                        Verified rider
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    {ride.seats} seat{ride.seats === 1 ? "" : "s"}
+                    {ride.estimatedFareJMD
+                      ? ` · ${formatJMD(ride.estimatedFareJMD)} estimated`
+                      : ""}
+                    {rider.ratingCount > 0 &&
+                      ` · ${rider.ratingCount} trip${rider.ratingCount === 1 ? "" : "s"} rated`}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-muted">
-                  {carpool ? "Rider 1 (pickup first)" : "Rider"}
-                </p>
-                <p className="mt-0.5 truncate text-base font-extrabold tracking-tight">
-                  {rider.name}
-                </p>
-                <p className="mt-0.5 text-xs text-muted">
-                  {ride.seats} seat{ride.seats === 1 ? "" : "s"}
-                  {ride.estimatedFareJMD
-                    ? ` · ${formatJMD(ride.estimatedFareJMD)} estimated`
-                    : ""}
-                </p>
+              {/* Full-width Call + Message grid. Same shape as the
+                 rider live-trip layout — equal-weight CTAs side by
+                 side. In-app voice via LiveKit; PSTN number is never
+                 exposed in the UI. */}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <CallButton
+                  rideId={ride.id}
+                  variant="primary"
+                  label="Call"
+                  className="w-full justify-center"
+                />
+                <ChatLauncher
+                  rideId={ride.id}
+                  myRole="driver"
+                  peerName={rider.name}
+                  peerAvatarUrl={rider.avatarUrl ?? null}
+                  peerPhone={rider.phone ?? null}
+                  rideActive
+                  variant="pill"
+                />
               </div>
-              {/* Tap-to-call sits next to the chat icon so drivers
-                 can reach the rider with one tap ("I'm at your
-                 gate"). In-app voice via LiveKit — the rider's
-                 PSTN number is never exposed. */}
-              <CallButton rideId={ride.id} variant="subtle" label="" />
-              {/* Chat icon — `soft` variant (NOT dark) because this
-                 card is on a white surface; the dark variant would be
-                 invisible white-on-white. */}
-              <ChatLauncher
-                rideId={ride.id}
-                myRole="driver"
-                peerName={rider.name}
-                peerAvatarUrl={rider.avatarUrl ?? null}
-                peerPhone={rider.phone ?? null}
-                rideActive
-                variant="soft"
-                iconSize={44}
-              />
             </div>
           </div>
         </FadeUp>
@@ -1262,27 +1292,13 @@ export default function DriverActiveTripPage() {
       {!navHasRoute && (
       <FadeUp delay={0.2}>
         <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex flex-col gap-2 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur md:relative md:mx-0 md:rounded-2xl md:border md:bg-surface md:px-5 md:py-4">
-          {/* Google Maps deep-link — stage-aware. Before pickup, route to
-              pickup with the driver's live position as origin (Google
-              Maps falls back to "current location" if origin omitted).
-              After arrival, route pickup → stops → dropoff so the driver
-              follows the ride's actual path. Opens in the Google Maps app
-              on mobile, or the Maps web UI on desktop. */}
-          <a
-            href={buildGoogleMapsDirectionsUrl(ride)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex w-full items-center justify-center gap-2 rounded-full border border-line bg-surface px-5 py-3 text-sm font-bold text-foreground transition-all hover:-translate-y-0.5 hover:border-rajlo-red hover:bg-primary-soft hover:text-rajlo-red"
-          >
-            <Icon name="navigation" className="h-4 w-4 text-rajlo-red" />
-            {ride.status === "accepted"
-              ? "Open Google Maps · drive to pickup"
-              : "Open Google Maps · drive to dropoff"}
-            <Icon
-              name="arrow-right"
-              className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
-            />
-          </a>
+          {/* The "Open Google Maps" external deep-link was removed —
+             the in-app turn-by-turn map below is the canonical
+             navigation surface and the driver shouldn't have a
+             second navigation context fighting for their attention
+             while driving. Free pan + 5s auto-recenter on the
+             in-app map gives them the freedom-to-look-around
+             behaviour they used to need Google Maps for. */}
 
           <button
             type="button"
@@ -1587,38 +1603,6 @@ function RateRiderInline({
   );
 }
 
-/**
- * Build a `https://www.google.com/maps/dir/?...` URL the driver can hand
- * off to. Stage-dependent:
- *
- * - status=accepted   → origin = current location (omitted, Google asks),
- *                       destination = pickup
- * - status=arrived    → same as in_progress (driver is at pickup, about
- *                       to start driving the rider somewhere)
- * - status=in_progress → origin = pickup, destination = dropoff,
- *                        waypoints = each intermediate stop in order
- */
-function buildGoogleMapsDirectionsUrl(ride: ActiveRide): string {
-  const params = new URLSearchParams();
-  params.set("api", "1");
-  params.set("travelmode", "driving");
-
-  if (ride.status === "accepted") {
-    // Drive to pickup — use device's current location as origin (omit it
-    // and Google Maps fills in "Your location").
-    params.set("destination", `${ride.pickup.lat},${ride.pickup.lng}`);
-    params.set("destination_place_id", ""); // ensures coords are honoured
-  } else {
-    // After arrival → route the actual ride: pickup → stops → dropoff.
-    params.set("origin", `${ride.pickup.lat},${ride.pickup.lng}`);
-    params.set("destination", `${ride.dropoff.lat},${ride.dropoff.lng}`);
-    if (ride.stops.length > 0) {
-      params.set(
-        "waypoints",
-        ride.stops.map((s) => `${s.lat},${s.lng}`).join("|"),
-      );
-    }
-  }
-
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
+// buildGoogleMapsDirectionsUrl(ride) was removed when the external
+// "Open Google Maps" button was retired — the in-app turn-by-turn nav
+// is the canonical surface and there's no remaining consumer.

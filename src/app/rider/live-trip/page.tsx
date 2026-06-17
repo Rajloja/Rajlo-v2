@@ -924,7 +924,18 @@ export default function RiderLiveTripPage() {
             vehicleColor={driver.vehicleColor}
             extraAction={
               isTerminal ? null : (
-                <div className="flex items-center gap-2">
+                // Two equal-weight CTAs side-by-side, each full-width
+                // in its grid column. Call uses the primary red pill;
+                // Message uses the same pill shape via the new `pill`
+                // variant on ChatLauncher and shows "Message (N)"
+                // when there are unread messages.
+                <div className="grid grid-cols-2 gap-2">
+                  <CallButton
+                    rideId={ride.id}
+                    variant="primary"
+                    label="Call"
+                    className="w-full justify-center"
+                  />
                   <ChatLauncher
                     rideId={ride.id}
                     myRole="rider"
@@ -932,9 +943,8 @@ export default function RiderLiveTripPage() {
                     peerAvatarUrl={driver.avatarUrl}
                     peerPhone={driver.phone}
                     rideActive
-                    variant="soft"
+                    variant="pill"
                   />
-                  <CallButton rideId={ride.id} variant="subtle" label="Call" />
                 </div>
               )
             }
