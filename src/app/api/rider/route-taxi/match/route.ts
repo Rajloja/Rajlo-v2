@@ -73,6 +73,30 @@ type RouteRow = {
  *  than being silently locked out. */
 const CORRIDOR_RADIUS_KM = 2.0;
 
+/** The corridor must actually CARRY the rider, not just sit near
+ *  them. Without this gate a trip whose pickup AND dropoff both sit
+ *  ≤2 km from the same end of a corridor falsely matches — the
+ *  endpoints "pass" the radius check but the rider would board and
+ *  immediately alight, so the route isn't really serving the trip.
+ *
+ *  Concrete bug this catches: School of Dance (Arthur Wint Drive) →
+ *  Half Way Tree was matching "Arnett Gardens → Cross Roads". Both
+ *  endpoints projected to t≈1.0 (clamped at the Cross Roads end), so
+ *  on-corridor travel was ~0.07 km out of a ~1.5 km trip. The rider
+ *  was being shown a corridor that runs the wrong direction and
+ *  doesn't even pass through their pickup.
+ *
+ *  Two gates, either failure rejects the corridor:
+ *    - On-corridor distance must be ≥ MIN_USEFUL_KM in absolute terms
+ *      (don't bother riding the corridor for 100 m).
+ *    - On-corridor distance must cover ≥ MIN_USEFUL_FRACTION of the
+ *      straight-line trip (don't show a corridor that takes the
+ *      rider a few hundred metres of a 5 km journey).
+ *
+ *  Skipped when the rider didn't send coords (name-only fallback). */
+const MIN_USEFUL_CORRIDOR_KM = 0.5;
+const MIN_USEFUL_CORRIDOR_FRACTION = 0.4;
+
 const STOPWORDS = new Set([
   "jamaica",
   "the",
@@ -187,6 +211,7 @@ export async function POST(request: Request) {
   let gatedOut = 0;
   let parishGated = 0;
   let geoGated = 0;
+  let utilizationGated = 0;
   for (const r of (routes ?? []) as RouteRow[]) {
     // Geographic sanity gate. A route taxi rider boards a segment of
     // the corridor, so the trip can't be meaningfully longer than the
@@ -223,6 +248,22 @@ export async function POST(request: Request) {
       ) {
         geoGated++;
         continue; // off-corridor — geography says no, whatever the names
+      }
+      // Utilization gate: the rider must actually travel ALONG the
+      // corridor, not just sit near one of its endpoints. tripKm is
+      // available here because the geocoded branch requires both
+      // pickupCoord and dropoffCoord, which is the same condition
+      // tripKm was computed under.
+      const onCorridorKm = Math.abs(segP.t - segD.t) * routeKm;
+      const minUseful = Math.max(
+        MIN_USEFUL_CORRIDOR_KM,
+        // tripKm is guaranteed non-null inside this branch — both
+        // coords were checked above before reaching this point.
+        (tripKm ?? 0) * MIN_USEFUL_CORRIDOR_FRACTION,
+      );
+      if (onCorridorKm < minUseful) {
+        utilizationGated++;
+        continue;
       }
       // Closer to the corridor → higher score. Geocoded matches sit
       // above any name-only score (base 3.0) so they always rank first.
@@ -305,6 +346,7 @@ export async function POST(request: Request) {
     `[route-match] pickupTokens=${pickupTokens.size} dropoffTokens=${dropoffTokens.size} ` +
       `routesScanned=${routes?.length ?? 0} distanceGated=${gatedOut} ` +
       `parishGated=${parishGated} geoGated=${geoGated} ` +
+      `utilizationGated=${utilizationGated} ` +
       `tripKm=${tripKm !== null ? tripKm.toFixed(1) : "n/a"} ` +
       `candidates=${candidates.length} returned=${top.length}` +
       (top.length > 0 ? ` topScore=${top[0].score.toFixed(2)}` : ""),
