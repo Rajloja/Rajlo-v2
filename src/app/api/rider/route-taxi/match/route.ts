@@ -6,36 +6,94 @@ import { haversineKm } from "@/lib/jamaica";
 /**
  * POST /api/rider/route-taxi/match
  *
- * Given a rider's pickup + dropoff (with names + parishes from Google
- * Places), find which TA-licensed corridors can serve the trip.
+ * THIS IS A TRUST-CRITICAL SURFACE. A rider books "A → B" and gets
+ * shown a corridor that doesn't actually serve that trip → trust gone,
+ * permanently, in a brand-new market. The cost model is asymmetric:
  *
- * Strategy: fuzzy token-overlap on the route's origin/destination names
- * vs the rider's pickup/dropoff names + addresses, in BOTH directions
- * (a route Half-Way-Tree → Papine also serves a rider going Papine →
- * Half-Way-Tree as the reverse leg).
+ *   - False positive (corridor shown that doesn't serve the trip) =
+ *     catastrophic. Rider tries it, finds the taxi doesn't go where
+ *     they need, never trusts route-taxi mode again.
+ *   - False negative (failing to surface a valid corridor) =
+ *     recoverable. Rider books a private ride or hails the road
+ *     directly (the Jamaican default behaviour).
  *
- * We don't have lat/lng on the routes (TA's PDF doesn't ship them),
- * so name matching is the spine for now. When parishes match too, we
- * boost the score; when they conflict, we filter the route out (a
- * "Hopewell" in Hanover is not the same as a "Hopewell" in St. James).
+ * Every gate below is calibrated to bias hard toward rejection.
+ * "No route taxi covers this trip yet" is a fine UX answer; a wrong
+ * corridor is not.
  *
- * GEOGRAPHIC SANITY GATE: name-token overlap alone false-matches
- * unrelated corridors that share a generic word ("Park", "Bay",
- * "Town") — e.g. a 240 km Kingston→Negril trip matching a 15 km
- * "Moore Park → Montego Bay" corridor on "park" + "bay". So when the
- * client sends pickup/dropoff coordinates we reject any corridor the
- * trip physically can't fit on (trip distance ≫ corridor length).
+ * REGRESSION GUARDS — two-tier:
+ *
+ *   `npm run test:matcher` (scripts/test-matcher-fixture.mjs) — a
+ *     hand-verified set of ~20 real Jamaica trips with their CORRECT
+ *     answer. Locks down specific bugs that have been reported.
+ *     Every matcher change must keep this green.
+ *
+ *   `npm run fuzz:matcher` (scripts/fuzz-matcher.mjs) — samples
+ *     thousands of random (pickup, dropoff) pairs across populated
+ *     Jamaica and asserts UNIVERSAL INVARIANTS on whatever corridors
+ *     come back (walk budget, perpendicular distance, on-corridor
+ *     utilization, direction alignment). Catches whole classes of
+ *     bug without needing to enumerate every Jamaican town. Run
+ *     this after any geocoder backfill or matcher gate tweak.
+ *
+ * ─── MATCHING CONTRACT ───────────────────────────────────────────
+ *
+ * Given a rider's pickup + dropoff (with names, parishes, and ideally
+ * coordinates from Google Places), surface up to 3 TA-licensed
+ * corridors that serve the trip, ranked by score (best first).
+ *
+ * A corridor IS A VALID MATCH when, in priority order:
+ *
+ *   1. Distance sanity. tripKm ≤ routeKm × 1.3 + 2.0. (A 5 km trip
+ *      can't fit on a 1 km corridor; a 240 km trip can't fit on a
+ *      15 km corridor.)
+ *
+ *   2. GEOMETRIC BRANCH — applies when both the rider sent coords
+ *      AND the corridor has geocoded endpoints. This is the path
+ *      99% of real bookings take. Projections use the corridor's
+ *      REAL ROAD GEOMETRY (path_polyline) — NOT the straight line
+ *      between endpoints. A straight-line midpoint can be 1 km off
+ *      the actual taxi road, which lies about every gate below.
+ *      Conditions, ALL required:
+ *
+ *      a. Both pickup and dropoff project to within
+ *         CORRIDOR_RADIUS_KM (2.0 km) perpendicular distance from
+ *         the corridor's actual road.
+ *      b. The rider actually rides the corridor for at least
+ *         MIN_USEFUL_CORRIDOR_KM (0.5 km) — projecting both
+ *         endpoints to the same t-value means zero on-corridor
+ *         travel, which means the corridor isn't doing anything.
+ *      c. On-corridor travel covers ≥ MIN_USEFUL_CORRIDOR_FRACTION
+ *         (40%) of the straight-line trip distance.
+ *      d. Combined walk-to-corridor distance (perpendicular at
+ *         pickup + perpendicular at dropoff) ≤
+ *         MAX_WALK_VS_TRIP_RATIO × tripKm. (60% — riders won't
+ *         walk most of their trip distance just to use a taxi.)
+ *
+ *   3. NAME-TOKEN BRANCH — fallback when (2) doesn't apply (route
+ *      missing coords, OR rider didn't send coords). Token overlap
+ *      between corridor names and rider place names + addresses, in
+ *      both forward and reverse direction. Parish hard-filter: a
+ *      corridor whose parish doesn't share a token with the rider's
+ *      parish is rejected outright. (No more "Hopewell in Hanover"
+ *      matching a "Hopewell in St. James" trip.)
+ *
+ *   4. RANKING. Geometric matches sit above name-only (base score
+ *      3.0 + closeness vs name-only's overlap score). The closer
+ *      both endpoints sit to the corridor line, the higher the
+ *      score. Top 3 returned.
+ *
+ *   5. EMPTY RESULT IS A VALID ANSWER. When no corridor passes the
+ *      gates, return `matches: []`. The rider UI then surfaces
+ *      "Private Ride only — no route taxi covers this trip yet".
+ *      Never fake a corridor to fill the response.
  *
  * Body:
  *   { pickup: { name, address?, parish?, lat?, lng? },
  *     dropoff: { name, address?, parish?, lat?, lng? } }
  *
  * Response:
- *   { matches: Array<{ route, direction, fareJmd, walkKm?, confidence }> }
- *
- * If `matches` is empty the rider gets a "Private Ride only — no route
- * taxi covers this trip yet" message. That's the honest answer; we
- * don't fake a corridor that doesn't exist.
+ *   { matches: Array<{ route, direction, fareJmd, confidence }> }
  */
 
 type RiderPlace = {
@@ -63,6 +121,11 @@ type RouteRow = {
   origin_lng: number | null;
   destination_lat: number | null;
   destination_lng: number | null;
+  /** The corridor's REAL road geometry, lazy-filled by the journey
+   *  quote on first use (Google Directions polyline). Critical for
+   *  matching accuracy: straight-line projection between endpoints
+   *  lies about distance whenever the road curves. */
+  path_polyline: Array<{ lat: number; lng: number }> | null;
 };
 
 /** How far (km) a rider's pickup/dropoff may sit from the corridor
@@ -73,36 +136,16 @@ type RouteRow = {
  *  than being silently locked out. */
 const CORRIDOR_RADIUS_KM = 2.0;
 
-/** The corridor must actually CARRY the rider, not just sit near
- *  them. Without these gates a trip whose pickup AND dropoff both
- *  sit ≤2 km from the same end of a corridor (or perpendicular to
- *  it) falsely matches — the endpoints "pass" the radius check but
- *  the rider would board and immediately alight, or walk further
- *  than they'd ride.
+/** Geometric-branch gates. See the MATCHING CONTRACT block at the
+ *  top of this file for what each gate means and why.
  *
- *  Concrete bugs these gates kill:
- *    - School of Dance → Half Way Tree matching "Arnett Gardens →
- *      Cross Roads" (both project to the Cross Roads end, on-corridor
- *      travel ≈ 0.3 km of a 2.4 km trip).
- *    - Half Way Tree → Maxfield Avenue ALSO matching "Arnett Gardens
- *      → Cross Roads" (on-corridor 0.79 km looks fine by the
- *      utilization gate alone — but the rider walks 1.77 + 1.84 =
- *      3.6 km combined for a 1.68 km trip, a walk-to-ride ratio of
- *      2:1 that no real rider would accept).
- *
- *  Three gates — any one failing rejects the corridor:
- *    - Absolute floor: on-corridor must be ≥ MIN_USEFUL_KM. Riding
- *      a corridor for under 500 m isn't worth the hail.
- *    - Utilization fraction: on-corridor must cover ≥
- *      MIN_USEFUL_FRACTION of the straight-line trip.
- *    - Walk budget: total combined walk to the corridor (perpendicular
- *      distance at both ends) must not exceed the trip distance. If
- *      you walk more than you ride, the corridor isn't helping.
- *
- *  Skipped when the rider didn't send coords (name-only fallback). */
+ *  Every value here is anchored by scripts/_matcher-fixture.mjs —
+ *  if you change one, re-run scripts/test-matcher-fixture.mjs and
+ *  expect at least one fixture entry to be wrong if your change
+ *  isn't intentional. */
 const MIN_USEFUL_CORRIDOR_KM = 0.5;
 const MIN_USEFUL_CORRIDOR_FRACTION = 0.4;
-const MAX_WALK_VS_TRIP_RATIO = 1.0;
+const MAX_WALK_VS_TRIP_RATIO = 0.6;
 
 const STOPWORDS = new Set([
   "jamaica",
@@ -197,7 +240,7 @@ export async function POST(request: Request) {
   const { data: routes, error } = await supabase
     .from("routes")
     .select(
-      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd, slug, origin_lat, origin_lng, destination_lat, destination_lng",
+      "id, origin_name, destination_name, origin_parish, destination_parish, distance_km, ta_fare_jmd, slug, origin_lat, origin_lng, destination_lat, destination_lng, path_polyline",
     )
     .eq("active", true)
     .limit(1000);
@@ -230,10 +273,18 @@ export async function POST(request: Request) {
       continue;
     }
 
-    // ── Coordinate proximity — preferred when the route is geocoded ──
+    // ── Geographic projection — preferred when the route is geocoded ──
     // A route with real endpoint coordinates is matched purely on
-    // geography: the rider's pickup AND dropoff must both sit close to
-    // the corridor line. Exact — no name-token guesswork at all.
+    // geography. We project the rider's pickup AND dropoff onto the
+    // corridor's ACTUAL ROAD GEOMETRY (path_polyline) when available,
+    // not the straight line between endpoints — a corridor following
+    // curving Jamaican roads can have a straight-line midpoint that's
+    // 1 km off the real road, which lies about distance.
+    //
+    // Falls back to straight-line projection when path_polyline is
+    // missing (shouldn't happen for active geocoded routes — the
+    // journey-quote lazy-fills it on first use, and survey-polyline-
+    // coverage.mjs confirmed 100% coverage at deploy time).
     if (
       pickupCoord &&
       dropoffCoord &&
@@ -242,13 +293,21 @@ export async function POST(request: Request) {
       r.destination_lat != null &&
       r.destination_lng != null
     ) {
-      const origin = { lat: Number(r.origin_lat), lng: Number(r.origin_lng) };
-      const dest = {
-        lat: Number(r.destination_lat),
-        lng: Number(r.destination_lng),
-      };
-      const segP = projectToSegment(pickupCoord, origin, dest);
-      const segD = projectToSegment(dropoffCoord, origin, dest);
+      const polyline = r.path_polyline;
+      let segP: { distKm: number; t: number };
+      let segD: { distKm: number; t: number };
+      if (Array.isArray(polyline) && polyline.length >= 2) {
+        segP = projectToPolyline(pickupCoord, polyline);
+        segD = projectToPolyline(dropoffCoord, polyline);
+      } else {
+        const origin = { lat: Number(r.origin_lat), lng: Number(r.origin_lng) };
+        const dest = {
+          lat: Number(r.destination_lat),
+          lng: Number(r.destination_lng),
+        };
+        segP = projectToSegment(pickupCoord, origin, dest);
+        segD = projectToSegment(dropoffCoord, origin, dest);
+      }
       if (
         segP.distKm > CORRIDOR_RADIUS_KM ||
         segD.distKm > CORRIDOR_RADIUS_KM
@@ -429,6 +488,58 @@ function projectToSegment(
     distKm: Math.hypot(px - t * bx, py - t * by),
     t,
   };
+}
+
+/**
+ * Project a point onto a POLYLINE (ordered list of {lat,lng} points
+ * tracing the corridor's real road). Returns the perpendicular
+ * distance to the nearest segment plus `t` ∈ [0,1] — the fraction
+ * along the polyline's total arc length where the projection lands.
+ *
+ * Critical for matcher correctness: a straight line between corridor
+ * endpoints lies about distance whenever the road curves. A rider
+ * 200 m off Spanish Town Road can be 1.5 km from the straight line
+ * between Arnett Gardens and Cross Roads. The polyline gives the
+ * truth.
+ *
+ * Algorithm: project onto every segment, pick the segment with the
+ * smallest perpendicular distance, convert within-segment t to a
+ * polyline-wide t using cumulative arc length.
+ */
+function projectToPolyline(
+  p: { lat: number; lng: number },
+  polyline: Array<{ lat: number; lng: number }>,
+): { distKm: number; t: number } {
+  if (polyline.length === 2) {
+    return projectToSegment(p, polyline[0], polyline[1]);
+  }
+  const KM_PER_DEG_LAT = 111;
+  const segLenKm: number[] = [];
+  let totalKm = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    const kmPerDegLng = 111 * Math.cos((a.lat * Math.PI) / 180);
+    const bx = (b.lng - a.lng) * kmPerDegLng;
+    const by = (b.lat - a.lat) * KM_PER_DEG_LAT;
+    const len = Math.hypot(bx, by);
+    segLenKm.push(len);
+    totalKm += len;
+  }
+  if (totalKm === 0) return { distKm: 0, t: 0 };
+
+  let bestDistKm = Infinity;
+  let bestT = 0;
+  let cumKm = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const proj = projectToSegment(p, polyline[i], polyline[i + 1]);
+    if (proj.distKm < bestDistKm) {
+      bestDistKm = proj.distKm;
+      bestT = (cumKm + proj.t * segLenKm[i]) / totalKm;
+    }
+    cumKm += segLenKm[i];
+  }
+  return { distKm: bestDistKm, t: bestT };
 }
 
 /**

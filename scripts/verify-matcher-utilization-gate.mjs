@@ -44,6 +44,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import {
+  CORRIDOR_RADIUS_KM,
+  TRIP_DISTANCE_SLACK,
+  TRIP_DISTANCE_PAD_KM,
+  MIN_USEFUL_CORRIDOR_KM,
+  MIN_USEFUL_CORRIDOR_FRACTION,
+  MAX_WALK_VS_TRIP_RATIO,
+  haversineKm,
+  projectToSegment,
+} from "./_matcher-gate-logic.mjs";
 
 const VERBOSE = process.argv.includes("--verbose");
 
@@ -71,39 +81,6 @@ if (!url || !key) {
 const supabase = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
-
-/* ─── Matcher constants (mirrored from match/route.ts) ─── */
-const CORRIDOR_RADIUS_KM = 2.0;
-const MIN_USEFUL_CORRIDOR_KM = 0.5;
-const MIN_USEFUL_CORRIDOR_FRACTION = 0.4;
-const MAX_WALK_VS_TRIP_RATIO = 1.0;
-
-/* ─── Geometry helpers (mirrored from match/route.ts) ─── */
-
-function haversineKm(a, b) {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const la1 = (a.lat * Math.PI) / 180;
-  const la2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function projectToSegment(p, a, b) {
-  const KM_PER_DEG_LAT = 111;
-  const kmPerDegLng = 111 * Math.cos((a.lat * Math.PI) / 180);
-  const bx = (b.lng - a.lng) * kmPerDegLng;
-  const by = (b.lat - a.lat) * KM_PER_DEG_LAT;
-  const px = (p.lng - a.lng) * kmPerDegLng;
-  const py = (p.lat - a.lat) * KM_PER_DEG_LAT;
-  const segLen2 = bx * bx + by * by;
-  let t = segLen2 > 0 ? (px * bx + py * by) / segLen2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return { distKm: Math.hypot(px - t * bx, py - t * by), t };
-}
 
 /* ─── Test trip patterns ─── */
 // Real Kingston-area locations sourced by dropping pins on Google
@@ -162,7 +139,8 @@ function evaluate(route, trip) {
   if (!Number.isFinite(routeKm) || routeKm <= 0) return null;
 
   // Distance gate — same on both sides of the fix.
-  if (trip.tripKm > routeKm * 1.3 + 2) return null;
+  if (trip.tripKm > routeKm * TRIP_DISTANCE_SLACK + TRIP_DISTANCE_PAD_KM)
+    return null;
 
   if (
     route.origin_lat == null ||
@@ -242,6 +220,7 @@ let totalPairs = 0;
 let oldAcceptCount = 0;
 let bothAcceptCount = 0;
 let flipped = [];
+let stillAccepted = [];
 
 for (const route of routes) {
   for (const trip of trips) {
@@ -249,7 +228,10 @@ for (const route of routes) {
     if (!r) continue;
     totalPairs++;
     if (r.oldAccept) oldAcceptCount++;
-    if (r.oldAccept && r.newAccept) bothAcceptCount++;
+    if (r.oldAccept && r.newAccept) {
+      bothAcceptCount++;
+      stillAccepted.push({ route, trip, ...r.diag });
+    }
     if (r.oldAccept && !r.newAccept) {
       flipped.push({ route, trip, ...r.diag });
     }
@@ -315,6 +297,23 @@ const corridorRanking = [...perCorridor.entries()].sort(
 console.log("\nCorridors that were over-matching the most (top 10):\n");
 for (const [corridor, count] of corridorRanking.slice(0, 10)) {
   console.log(`  ${count.toString().padStart(3)} × ${corridor}`);
+}
+
+// Show matches that still pass — sanity check these are all legitimate.
+stillAccepted.sort((a, b) => b.onCorridorKm - a.onCorridorKm);
+console.log("\nMatches the new gate still ACCEPTS (sanity-check these are real):\n");
+console.log(
+  "  trip                                          corridor                            tripKm  onCorr   walk",
+);
+console.log(
+  "  ────────────────────────────────────────────  ──────────────────────────────────  ──────  ──────  ─────",
+);
+for (const f of stillAccepted.slice(0, 25)) {
+  const tripLabel = `${f.trip.pickup.name} → ${f.trip.dropoff.name}`.padEnd(46);
+  const corridorLabel = `${f.route.origin_name} → ${f.route.destination_name}`.padEnd(34);
+  console.log(
+    `  ${tripLabel}  ${corridorLabel}  ${f.trip.tripKm.toFixed(2).padStart(6)}  ${f.onCorridorKm.toFixed(2).padStart(6)}  ${f.totalWalkKm.toFixed(2).padStart(5)}`,
+  );
 }
 
 if (VERBOSE) {
