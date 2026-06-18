@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { loadGoogleMaps } from "@/lib/google-maps";
 import { JAMAICA_CENTER, type Place } from "@/lib/jamaica";
 import { formatEta } from "@/lib/format-eta";
@@ -770,6 +771,27 @@ export function MapView({
   // higher (numerically larger zoom = closer view) is "zoomed in past
   // overview" and arms the restore timer.
   const overviewZoomRef = useRef<number | null>(null);
+
+  /**
+   * Record an "overview frame" — the bounds we just fitBounds'd to and
+   * the zoom that landed after the camera animation settles. Anchors
+   * the zoom-IN restore timer so subsequent rider pinch-in can snap
+   * back to this exact frame.
+   *
+   * Reads the resulting zoom via a one-shot `idle` listener because
+   * `fitBounds` animates and the final zoom isn't synchronously
+   * available immediately after the call returns.
+   */
+  const recordOverviewFrame = (
+    map: google.maps.Map,
+    bounds: google.maps.LatLngBounds,
+  ) => {
+    overviewBoundsRef.current = bounds;
+    overviewZoomRef.current = null;
+    google.maps.event.addListenerOnce(map, "idle", () => {
+      overviewZoomRef.current = map.getZoom() ?? null;
+    });
+  };
   // Mirror of the `navMode` prop into a ref so the zoom-changed
   // listener (declared once at init) reads the live value instead of
   // a stale closure capture.
@@ -1409,6 +1431,7 @@ export function MapView({
         bounds.extend({ lat: p.place.lat, lng: p.place.lng }),
       );
       map.fitBounds(bounds, { top: 56, right: 56, bottom: 56, left: 56 });
+      recordOverviewFrame(map, bounds);
     };
 
     const service = directionsServiceRef.current;
@@ -1475,6 +1498,7 @@ export function MapView({
             bottom: 56,
             left: 56,
           });
+          recordOverviewFrame(map, route.bounds);
         }
       })
       .catch((err) => {
@@ -1757,19 +1781,7 @@ export function MapView({
           bounds.extend(driverLatLng);
           bounds.extend({ lat: target.lat, lng: target.lng });
           map.fitBounds(bounds, { top: 80, right: 60, bottom: 80, left: 60 });
-          // Capture the overview frame for the zoom-IN restore timer.
-          // We re-read the zoom after fitBounds via a one-shot `idle`
-          // listener because fitBounds animates and the final zoom
-          // isn't available synchronously.
-          overviewBoundsRef.current = bounds;
-          const onceIdle = google.maps.event.addListenerOnce(
-            map,
-            "idle",
-            () => {
-              overviewZoomRef.current = map.getZoom() ?? null;
-            },
-          );
-          void onceIdle;
+          recordOverviewFrame(map, bounds);
         }
       })
       .catch((err) => {
@@ -1945,17 +1957,7 @@ export function MapView({
               bottom: 80,
               left: 60,
             });
-            // Refresh the overview anchor so a subsequent zoom-IN
-            // restore lands here, not on a stale earlier bounds.
-            overviewBoundsRef.current = bounds;
-            const onceIdle = google.maps.event.addListenerOnce(
-              map,
-              "idle",
-              () => {
-                overviewZoomRef.current = map.getZoom() ?? null;
-              },
-            );
-            void onceIdle;
+            recordOverviewFrame(map, bounds);
           }
         }
         // else: OVERVIEW mode already framed by the live-route
@@ -2602,40 +2604,44 @@ export function MapView({
           </svg>
         </button>
       )}
-      {fullscreen && (
-        <button
-          type="button"
-          onClick={() => setFullscreen(false)}
-          aria-label="Exit fullscreen"
-          // Inline style for the safe-area math + a high z so neither
-          // Google Maps' own internal controls nor any host overlay
-          // can hide the only escape hatch from fullscreen. The
-          // previous Tailwind arbitrary-value `top-[max(...,env(...))]`
-          // sometimes failed to emit a rule (comma-in-arbitrary
-          // parsing edge case), leaving the button effectively
-          // unpositioned and invisible on certain devices.
-          style={{
-            top: "max(0.75rem, env(safe-area-inset-top, 0px))",
-            left: "max(0.75rem, env(safe-area-inset-left, 0px))",
-          }}
-          className="absolute z-[80] inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-bold text-rajlo-black shadow-lg ring-1 ring-black/10 transition-transform hover:-translate-y-0.5 active:translate-y-0"
-        >
-          <svg
-            aria-hidden
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-3.5 w-3.5"
+      {fullscreen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          // Portalled to document.body so no parent's transform /
+          // filter / will-change can trap it in a stacking context
+          // and hide it. Position is fixed-viewport-anchored, with
+          // safe-area insets via inline style (Tailwind v4 arbitrary
+          // values with commas-in-functions emit unreliably for
+          // top-/left- properties, which was the original bug). z
+          // is huge so nothing in the host page can overlap it.
+          <button
+            type="button"
+            onClick={() => setFullscreen(false)}
+            aria-label="Exit fullscreen"
+            style={{
+              top: "max(0.75rem, env(safe-area-inset-top, 0px))",
+              left: "max(0.75rem, env(safe-area-inset-left, 0px))",
+              zIndex: 2147483647,
+            }}
+            className="fixed inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-bold text-rajlo-black shadow-lg ring-1 ring-black/10 transition-transform hover:-translate-y-0.5 active:translate-y-0"
           >
-            <path d="M18 6 6 18" />
-            <path d="M6 6l12 12" />
-          </svg>
-          Cancel
-        </button>
-      )}
+            <svg
+              aria-hidden
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-3.5 w-3.5"
+            >
+              <path d="M18 6 6 18" />
+              <path d="M6 6l12 12" />
+            </svg>
+            Cancel
+          </button>,
+          document.body,
+        )}
 
       {/* Locate-me button. Mirrors Google Maps' standard control —
          tap to recenter the map on the current device location and
