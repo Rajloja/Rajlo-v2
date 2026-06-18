@@ -252,13 +252,60 @@ export function evaluateMatch(route, pickup, dropoff) {
     return { verdict: "reject", reason: "walk-budget", score: null, diag };
   }
 
-  // All gates passed. Production scoring: 3.0 base + closeness ∈ [0,1].
+  // All gates passed. Production scoring: 3.0 base + closeness ∈
+  // [0,1] + name-match bonus. The name bonus boosts corridors whose
+  // named endpoints match the rider's labelled pickup/dropoff, so
+  // when Google Places returns slightly-off coords the matcher still
+  // ranks the obvious by-name match above coincidental geographic
+  // matches. See match/route.ts for the full reasoning.
   const closeness =
     1 - (segP.distKm + segD.distKm) / (2 * CORRIDOR_RADIUS_KM);
-  const score = 3 + closeness;
   const direction = segP.t <= segD.t ? "forward" : "reverse";
 
+  let nameBonus = 0;
+  if (route.origin_name && route.destination_name) {
+    const corridorPickupName =
+      direction === "forward" ? route.origin_name : route.destination_name;
+    const corridorDropoffName =
+      direction === "forward" ? route.destination_name : route.origin_name;
+    // Stop-aware token overlap mirroring tokenize() in production.
+    nameBonus =
+      tokenOverlap(corridorPickupName, pickup.name) +
+      tokenOverlap(corridorDropoffName, dropoff.name);
+  }
+
+  const score = 3 + closeness + nameBonus;
   return { verdict: "accept", reason: "passes-all", score, direction, diag };
+}
+
+const TOKENIZE_STOPWORDS = new Set([
+  "jamaica", "the", "and", "a", "an", "of", "to", "in", "at", "on", "by",
+  "road", "rd", "avenue", "ave", "street", "st", "drive", "dr", "lane", "ln",
+  "highway", "hwy", "parish", "boulevard", "blvd", "way", "place", "pl",
+  "court", "ct", "square", "sq",
+]);
+
+function tokenizeForBonus(s) {
+  if (typeof s !== "string") return new Set();
+  const out = new Set();
+  const lowered = s.toLowerCase().replace(/[.,/'’()\-–—_"`]/g, " ");
+  for (const w of lowered.split(/\s+/)) {
+    const t = w.trim();
+    if (t.length < 3) continue;
+    if (TOKENIZE_STOPWORDS.has(t)) continue;
+    out.add(t);
+  }
+  return out;
+}
+
+function tokenOverlap(routeName, riderName) {
+  if (!riderName) return 0;
+  const routeT = tokenizeForBonus(routeName);
+  const riderT = tokenizeForBonus(riderName);
+  if (routeT.size === 0 || riderT.size === 0) return 0;
+  let hits = 0;
+  for (const t of routeT) if (riderT.has(t)) hits++;
+  return hits / routeT.size;
 }
 
 /**

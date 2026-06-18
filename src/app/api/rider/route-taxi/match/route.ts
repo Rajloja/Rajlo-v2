@@ -344,10 +344,38 @@ export async function POST(request: Request) {
       // above any name-only score (base 3.0) so they always rank first.
       const closeness =
         1 - (segP.distKm + segD.distKm) / (2 * CORRIDOR_RADIUS_KM);
+
+      // NAME-MATCH BONUS — bias scoring toward the corridor whose
+      // named endpoints match the rider's labelled pickup/dropoff.
+      //
+      // Why this matters: Google Places autocomplete sometimes
+      // returns coords that don't match the place's "real" centre.
+      // Example seen in production: rider books "Half Way Tree →
+      // Maxfield Avenue" but Google's "Half Way Tree" coord lands
+      // 2 km east of the clock tower (in Liguanea). From there
+      // the matcher finds that Arnett Gardens → Cross Roads passes
+      // the gates with a slightly lower walk distance than HWT →
+      // Maxfield Avenue. Both are technically valid geographic
+      // matches, but the rider's intent is unambiguous — they
+      // labelled it HWT → Maxfield and there is a corridor with
+      // that exact name. Boost it to the top.
+      //
+      // The bonus is small enough that it never RESCUES a corridor
+      // that already failed the geographic gates — it only re-ranks
+      // among corridors that already passed.
+      const fOriginTokens = tokenize(r.origin_name);
+      const fDestTokens = tokenize(r.destination_name);
+      const isForward = segP.t <= segD.t;
+      const corridorPickupTokens = isForward ? fOriginTokens : fDestTokens;
+      const corridorDropoffTokens = isForward ? fDestTokens : fOriginTokens;
+      const nameMatchPickup = overlapScore(corridorPickupTokens, pickupTokens);
+      const nameMatchDropoff = overlapScore(corridorDropoffTokens, dropoffTokens);
+      const nameBonus = nameMatchPickup + nameMatchDropoff;
+
       candidates.push({
         route: r,
-        direction: segP.t <= segD.t ? "forward" : "reverse",
-        score: 3 + closeness,
+        direction: isForward ? "forward" : "reverse",
+        score: 3 + closeness + nameBonus,
         confidence: "high",
       });
       continue; // coordinates decided it — skip the name heuristics

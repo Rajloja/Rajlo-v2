@@ -117,6 +117,31 @@ export const FIXTURE = [
   },
 
   {
+    id: "hwt-maxfield-google-coords",
+    description: "Same trip as hwt-maxfield-direct, but using the ACTUAL coords Google Places returns for 'Half Way Tree' — which land 2 km east of the clock tower in Liguanea. From there Arnett→CR brushes closer than HWT→Maxfield geographically, so without a name-match bonus Arnett→CR wrongly outranks the labelled corridor. Locked in to verify the name-bonus stays effective.",
+    pickup: {
+      name: "Half Way Tree",
+      lat: 18.006319,
+      lng: -76.7789894,
+      parish: "St. Andrew",
+    },
+    dropoff: {
+      name: "Maxfield Avenue",
+      lat: 17.9980077,
+      lng: -76.8044291,
+      parish: "St. Andrew",
+    },
+    mustInclude: ["half-way-tree-to-maxfield-avenue"],
+    // Arnett→CR is a defensible geographic match for these coords,
+    // but it should never rank ABOVE HWT→Maxfield given the labels.
+    // The matcher's response sorts by score, top is matches[0], and
+    // the rider UI shows matches[0] as the route-taxi card. So the
+    // contract is "HWT→Maxfield is the top match" — encoded via
+    // mustBeTop instead of mustInclude.
+    mustBeTop: "half-way-tree-to-maxfield-avenue",
+  },
+
+  {
     id: "maxfield-hwt-reverse",
     description: "Reverse of above — corridor must still surface in reverse direction",
     pickup: MAXFIELD,

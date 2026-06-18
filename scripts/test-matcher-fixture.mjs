@@ -107,6 +107,14 @@ for (const entry of FIXTURE) {
     }
   }
 
+  if (entry.mustBeTop) {
+    if (topSlugs[0] !== entry.mustBeTop) {
+      errors.push(
+        `top slug must be "${entry.mustBeTop}" but was "${topSlugs[0] ?? "(empty)"}" — top results: [${topSlugs.join(", ") || "(empty)"}]`,
+      );
+    }
+  }
+
   for (const forbidden of entry.mustExclude ?? []) {
     if (topSlugs.includes(forbidden)) {
       const offender = top.find((r) => r.route.slug === forbidden);
