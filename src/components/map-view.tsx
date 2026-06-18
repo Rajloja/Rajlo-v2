@@ -1134,13 +1134,17 @@ export function MapView({
             const mm = mapRef.current;
             if (!mm) return;
             zoomRestoreTimerRef.current = null;
-            // Re-arm follow so the camera tracks the moving puck
-            // again — the existing driverPosition/riderPosition
-            // effects do the actual pan + zoom restore as soon as
-            // they see followMode flip back on. Nav mode runs
-            // tighter (~18) so the steering icon stays prominent.
+            // Re-arm follow so the next position tick re-centres the
+            // puck. ONLY force zoom on driver-side nav (the steering
+            // view needs to stay at 18 regardless of what the driver
+            // momentarily pinched to). On the rider side we respect
+            // the user's chosen zoom — they may have zoomed out
+            // deliberately to scan the route, and yanking them back
+            // to 16 every 3 seconds is the bug the user reported.
             followModeRef.current = true;
-            mm.setZoom(navModeRef.current ? 18 : 16);
+            if (navModeRef.current) {
+              mm.setZoom(18);
+            }
           }, 3000);
         });
         // Idle auto-recenter. After any user gesture (drag, pinch,
@@ -1171,10 +1175,14 @@ export function MapView({
             followModeRef.current = true;
             if (pos) {
               mm.panTo(pos);
-              // Nav mode restores the close-in steering zoom too, so
-              // the snap-back actually looks like the driver's live
-              // view and not a stale wide view at random zoom.
-              mm.setZoom(navModeRef.current ? 18 : 16);
+              // Driver-side nav restores the close-in 18× steering
+              // zoom so the snap-back actually looks like a driving
+              // view. Rider-side keeps whatever zoom the user had —
+              // they may have zoomed out deliberately and we don't
+              // override their intent.
+              if (navModeRef.current) {
+                mm.setZoom(18);
+              }
             }
           }, IDLE_RECENTER_MS);
         });
@@ -1833,9 +1841,14 @@ export function MapView({
         const isMoving = onTrip && recentlyMoved;
 
         if (isMoving) {
-          // FOLLOW — zoom in + pan to driver every tick.
+          // FOLLOW — pan to driver every tick. We only zoom-in on the
+          // TRANSITION from stationary → moving (a single, expected
+          // "we're following the trip now" gesture). Subsequent ticks
+          // pan but leave zoom alone so the rider's manual pinch-out
+          // sticks. Without this gate the setZoom would clobber the
+          // user's chosen zoom on every 5s GPS tick.
           map.panTo(pos);
-          if ((map.getZoom() ?? 9) < 15) {
+          if (!wasMovingRef.current && (map.getZoom() ?? 9) < 15) {
             map.setZoom(15);
           }
         } else if (wasMovingRef.current) {
@@ -2094,16 +2107,18 @@ export function MapView({
       return;
     }
 
-    // 1. Corridor lines — solid amber polylines distinct from the
-    //    main red route polyline. We pick amber so the rider's eye
-    //    reads it as "the taxi's road" not "your destination". One
-    //    polyline per leg.
+    // 1. Corridor lines — black underlay + yellow overlay sandwich,
+    //    the classic "taxi stripe" treatment. Visually distinct from
+    //    the private-ride red gradient so the rider instantly reads
+    //    "this is a route taxi corridor" without reading any text.
+    //    One pair (black + yellow) per leg, drawn as a single line
+    //    that follows boarding → every transfer point → alighting.
     //
-    //    Each segment draws an immediate straight-line fallback so
-    //    the corridor appears instantly, then upgrades to the actual
-    //    road-following polyline once DirectionsService responds.
-    //    The road polyline is cached module-scoped so subsequent
-    //    quotes through the same corridor hit zero Directions calls.
+    //    Each pair draws a straight-line fallback the moment the
+    //    leg renders so the corridor appears instantly, then upgrades
+    //    to the actual road-following polyline once DirectionsService
+    //    responds. Both polylines share the same path — we update
+    //    them in lockstep so the sandwich stays aligned.
     if (corridorLines && corridorLines.length > 0 && boarding && alighting) {
       // Polyline traces ONLY the rider's actual journey — from
       // where they BOARD to where they ALIGHT, through each transfer
@@ -2138,24 +2153,33 @@ export function MapView({
         ...corridorLines.slice(0, -1).map((seg) => seg.to),
         destination,
       ];
-      // Single corridor line — matches the private-ride polyline's
-      // dimensions exactly (strokeWeight 5, opacity 0.92) so the
-      // two modes feel visually consistent. Just a different colour
-      // (orange vs the private-ride red gradient) to signal "this
-      // is a route taxi corridor" without changing weight or style.
-      const line = new google.maps.Polyline({
+      // Yellow-on-black taxi sandwich. The black underlay is wider
+      // (weight 9) than the yellow overlay (weight 5), giving a 2px
+      // black trim on each side that reads as a distinctive "taxi"
+      // stripe across any map tile background — works on aerial,
+      // light, and dark themes. zIndex difference of 1 keeps the
+      // overlay reliably above the underlay even if Google's
+      // renderer reorders polylines added in the same frame.
+      const underlay = new google.maps.Polyline({
         map,
         path: initialPath,
-        strokeColor: "#f97316",
-        strokeOpacity: 0.92,
-        strokeWeight: 5,
+        strokeColor: "#0a0a0a",
+        strokeOpacity: 1,
+        strokeWeight: 9,
         zIndex: 100,
       });
-      corridorPolylineRef.current.push(line);
+      const overlay = new google.maps.Polyline({
+        map,
+        path: initialPath,
+        strokeColor: "#facc15",
+        strokeOpacity: 1,
+        strokeWeight: 5,
+        zIndex: 101,
+      });
+      corridorPolylineRef.current.push(underlay, overlay);
 
       const ds = directionsServiceRef.current;
       if (ds) {
-        const polyline = line;
         ds.route(
           {
             origin,
@@ -2201,8 +2225,13 @@ export function MapView({
                     lat: p.lat(),
                     lng: p.lng(),
                   }));
-            if (polyline.getMap()) {
-              polyline.setPath(finalPoints);
+            // Update both layers of the sandwich in lockstep so the
+            // black trim stays underneath the yellow stripe.
+            if (underlay.getMap()) {
+              underlay.setPath(finalPoints);
+            }
+            if (overlay.getMap()) {
+              overlay.setPath(finalPoints);
             }
           },
         );
@@ -2490,7 +2519,18 @@ export function MapView({
           type="button"
           onClick={() => setFullscreen(false)}
           aria-label="Exit fullscreen"
-          className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-30 inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-bold text-rajlo-black shadow-lg transition-transform hover:-translate-y-0.5 active:translate-y-0"
+          // Inline style for the safe-area math + a high z so neither
+          // Google Maps' own internal controls nor any host overlay
+          // can hide the only escape hatch from fullscreen. The
+          // previous Tailwind arbitrary-value `top-[max(...,env(...))]`
+          // sometimes failed to emit a rule (comma-in-arbitrary
+          // parsing edge case), leaving the button effectively
+          // unpositioned and invisible on certain devices.
+          style={{
+            top: "max(0.75rem, env(safe-area-inset-top, 0px))",
+            left: "max(0.75rem, env(safe-area-inset-left, 0px))",
+          }}
+          className="absolute z-[80] inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-bold text-rajlo-black shadow-lg ring-1 ring-black/10 transition-transform hover:-translate-y-0.5 active:translate-y-0"
         >
           <svg
             aria-hidden
