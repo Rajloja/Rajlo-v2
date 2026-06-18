@@ -774,7 +774,25 @@ export default function RiderRequestPage() {
         to: { lat: number; lng: number };
       }> | null,
     };
-    if (mode !== "route_taxi" || !journeyQuote) return empty;
+    if (mode !== "route_taxi") return empty;
+
+    // Direct corridor match (single-corridor hail — no multi-leg
+    // journey). Synthesise a single boarding→alighting corridor line
+    // straight from the rider's pickup to dropoff so the yellow+black
+    // taxi sandwich draws on the map. Without this branch the static
+    // red polyline would draw instead and the rider couldn't tell
+    // visually that they'd switched modes.
+    if (!journeyQuote && selectedMatch && pickup && dropoff) {
+      const boardingCoords = { lat: pickup.lat, lng: pickup.lng };
+      const alightingCoords = { lat: dropoff.lat, lng: dropoff.lng };
+      return {
+        boarding: { coords: boardingCoords, walkKm: 0 },
+        alighting: { coords: alightingCoords, walkKm: 0 },
+        corridorLines: [{ from: boardingCoords, to: alightingCoords }],
+      };
+    }
+
+    if (!journeyQuote) return empty;
 
     // Corridor polylines, one per leg whose endpoints have coords.
     // A leg with missing coords (an endpoint not yet geocoded in the
@@ -894,7 +912,10 @@ export default function RiderRequestPage() {
       });
     }
     return result;
-  }, [mode, journeyQuote]);
+    // `selectedMatch`, `pickup`, `dropoff` participate via the direct-
+    // corridor synthesis branch above. journeyQuote covers the
+    // multi-leg path. Mode gates everything.
+  }, [mode, journeyQuote, selectedMatch, pickup, dropoff]);
 
   if (bootstrapping) {
     // Hide the form while the active-ride check is in flight. Without

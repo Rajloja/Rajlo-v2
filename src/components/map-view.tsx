@@ -753,6 +753,23 @@ export function MapView({
   // and snaps the camera back to the in-trip default. Cleared on every
   // new zoom event so consecutive pinch-outs reset the countdown.
   const zoomRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending zoom-IN auto-restore timer. Fires 5s after the rider
+  // pinches past the route-overview zoom and snaps the camera back
+  // to the A→B fit so they don't get stuck staring at one corner
+  // of the map. Driver-side nav is exempt — drivers zoom in to read
+  // street signs and we leave them alone.
+  const zoomInRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  // Most recent bounds we fitBounds'd to (the route overview). Used
+  // by the zoom-IN restore timer to snap back to the same frame
+  // the rider had before they pinched in. Null when no overview has
+  // been established yet.
+  const overviewBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
+  // Zoom level immediately after the most recent fitBounds. Anything
+  // higher (numerically larger zoom = closer view) is "zoomed in past
+  // overview" and arms the restore timer.
+  const overviewZoomRef = useRef<number | null>(null);
   // Mirror of the `navMode` prop into a ref so the zoom-changed
   // listener (declared once at init) reads the live value instead of
   // a stale closure capture.
@@ -1094,6 +1111,12 @@ export function MapView({
             // can show a Recenter button. Guarded on domEvent so our own
             // programmatic panTo() calls don't fire this.
             onUserDragRef.current?.();
+            // A fresh drag also cancels any pending zoom-IN snap-back
+            // — the rider is actively exploring at this zoom level.
+            if (zoomInRestoreTimerRef.current) {
+              clearTimeout(zoomInRestoreTimerRef.current);
+              zoomInRestoreTimerRef.current = null;
+            }
           }
         });
         // Seed the zoom-tracking ref with whatever zoom the map
@@ -1108,6 +1131,12 @@ export function MapView({
         const el2 = mapRef.current.getDiv();
         const markUserGesture = () => {
           followModeRef.current = false;
+          // Any fresh gesture cancels a pending zoom-IN snap-back —
+          // the rider clearly wants to keep exploring at this zoom.
+          if (zoomInRestoreTimerRef.current) {
+            clearTimeout(zoomInRestoreTimerRef.current);
+            zoomInRestoreTimerRef.current = null;
+          }
         };
         el2.addEventListener("wheel", markUserGesture, { passive: true });
         el2.addEventListener("touchstart", markUserGesture, { passive: true });
@@ -1125,27 +1154,58 @@ export function MapView({
           const newZoom = m.getZoom() ?? 0;
           const prevZoom = lastZoomRef.current;
           lastZoomRef.current = newZoom;
-          if (newZoom >= prevZoom) return;       // zoomed in, no restore
-          if (followModeRef.current) return;     // programmatic
-          if (zoomRestoreTimerRef.current) {
-            clearTimeout(zoomRestoreTimerRef.current);
-          }
-          zoomRestoreTimerRef.current = setTimeout(() => {
-            const mm = mapRef.current;
-            if (!mm) return;
-            zoomRestoreTimerRef.current = null;
-            // Re-arm follow so the next position tick re-centres the
-            // puck. ONLY force zoom on driver-side nav (the steering
-            // view needs to stay at 18 regardless of what the driver
-            // momentarily pinched to). On the rider side we respect
-            // the user's chosen zoom — they may have zoomed out
-            // deliberately to scan the route, and yanking them back
-            // to 16 every 3 seconds is the bug the user reported.
-            followModeRef.current = true;
-            if (navModeRef.current) {
-              mm.setZoom(18);
+          if (followModeRef.current) return;     // programmatic, not user
+          if (newZoom < prevZoom) {
+            // Driver pinched OUT. Only the nav-mode steering zoom
+            // (driver side) gets force-restored after 3s — the rider
+            // side respects whatever zoom the rider chose. Without
+            // this gate, the rider's deliberate zoom-out got yanked
+            // back every 3s.
+            if (zoomRestoreTimerRef.current) {
+              clearTimeout(zoomRestoreTimerRef.current);
             }
-          }, 3000);
+            zoomRestoreTimerRef.current = setTimeout(() => {
+              const mm = mapRef.current;
+              if (!mm) return;
+              zoomRestoreTimerRef.current = null;
+              followModeRef.current = true;
+              if (navModeRef.current) {
+                mm.setZoom(18);
+              }
+            }, 3000);
+          } else if (newZoom > prevZoom) {
+            // Rider pinched IN past the route-overview zoom. After 5s
+            // of no further gestures, snap the camera back to the
+            // A→B bounds so they don't get stuck staring at one
+            // corner of the map. Driver-side nav is exempt — the
+            // close zoom is intentional and helpful for reading signs.
+            if (navModeRef.current) return;
+            const bounds = overviewBoundsRef.current;
+            const overviewZoom = overviewZoomRef.current;
+            // Only arm the timer when we actually have an overview
+            // to snap back to AND the new zoom is meaningfully closer
+            // than that overview (avoids restoring on micro pinch).
+            if (!bounds || overviewZoom == null) return;
+            if (newZoom <= overviewZoom + 0.5) return;
+            if (zoomInRestoreTimerRef.current) {
+              clearTimeout(zoomInRestoreTimerRef.current);
+            }
+            zoomInRestoreTimerRef.current = setTimeout(() => {
+              const mm = mapRef.current;
+              if (!mm) return;
+              zoomInRestoreTimerRef.current = null;
+              // Mark next idle as programmatic so the idle-recenter
+              // listener doesn't immediately fight us by treating the
+              // refit as a user gesture.
+              followModeRef.current = true;
+              mm.fitBounds(bounds, {
+                top: 80,
+                right: 60,
+                bottom: 80,
+                left: 60,
+              });
+            }, 5000);
+          }
         });
         // Idle auto-recenter. After any user gesture (drag, pinch,
         // wheel, touchstart) flips followMode off, the map fires
@@ -1209,6 +1269,10 @@ export function MapView({
       if (idleRecenterTimerRef.current) {
         clearTimeout(idleRecenterTimerRef.current);
         idleRecenterTimerRef.current = null;
+      }
+      if (zoomInRestoreTimerRef.current) {
+        clearTimeout(zoomInRestoreTimerRef.current);
+        zoomInRestoreTimerRef.current = null;
       }
     };
   }, []);
@@ -1693,6 +1757,19 @@ export function MapView({
           bounds.extend(driverLatLng);
           bounds.extend({ lat: target.lat, lng: target.lng });
           map.fitBounds(bounds, { top: 80, right: 60, bottom: 80, left: 60 });
+          // Capture the overview frame for the zoom-IN restore timer.
+          // We re-read the zoom after fitBounds via a one-shot `idle`
+          // listener because fitBounds animates and the final zoom
+          // isn't available synchronously.
+          overviewBoundsRef.current = bounds;
+          const onceIdle = google.maps.event.addListenerOnce(
+            map,
+            "idle",
+            () => {
+              overviewZoomRef.current = map.getZoom() ?? null;
+            },
+          );
+          void onceIdle;
         }
       })
       .catch((err) => {
@@ -1868,6 +1945,17 @@ export function MapView({
               bottom: 80,
               left: 60,
             });
+            // Refresh the overview anchor so a subsequent zoom-IN
+            // restore lands here, not on a stale earlier bounds.
+            overviewBoundsRef.current = bounds;
+            const onceIdle = google.maps.event.addListenerOnce(
+              map,
+              "idle",
+              () => {
+                overviewZoomRef.current = map.getZoom() ?? null;
+              },
+            );
+            void onceIdle;
           }
         }
         // else: OVERVIEW mode already framed by the live-route
