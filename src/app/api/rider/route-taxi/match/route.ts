@@ -74,28 +74,35 @@ type RouteRow = {
 const CORRIDOR_RADIUS_KM = 2.0;
 
 /** The corridor must actually CARRY the rider, not just sit near
- *  them. Without this gate a trip whose pickup AND dropoff both sit
- *  ≤2 km from the same end of a corridor falsely matches — the
- *  endpoints "pass" the radius check but the rider would board and
- *  immediately alight, so the route isn't really serving the trip.
+ *  them. Without these gates a trip whose pickup AND dropoff both
+ *  sit ≤2 km from the same end of a corridor (or perpendicular to
+ *  it) falsely matches — the endpoints "pass" the radius check but
+ *  the rider would board and immediately alight, or walk further
+ *  than they'd ride.
  *
- *  Concrete bug this catches: School of Dance (Arthur Wint Drive) →
- *  Half Way Tree was matching "Arnett Gardens → Cross Roads". Both
- *  endpoints projected to t≈1.0 (clamped at the Cross Roads end), so
- *  on-corridor travel was ~0.07 km out of a ~1.5 km trip. The rider
- *  was being shown a corridor that runs the wrong direction and
- *  doesn't even pass through their pickup.
+ *  Concrete bugs these gates kill:
+ *    - School of Dance → Half Way Tree matching "Arnett Gardens →
+ *      Cross Roads" (both project to the Cross Roads end, on-corridor
+ *      travel ≈ 0.3 km of a 2.4 km trip).
+ *    - Half Way Tree → Maxfield Avenue ALSO matching "Arnett Gardens
+ *      → Cross Roads" (on-corridor 0.79 km looks fine by the
+ *      utilization gate alone — but the rider walks 1.77 + 1.84 =
+ *      3.6 km combined for a 1.68 km trip, a walk-to-ride ratio of
+ *      2:1 that no real rider would accept).
  *
- *  Two gates, either failure rejects the corridor:
- *    - On-corridor distance must be ≥ MIN_USEFUL_KM in absolute terms
- *      (don't bother riding the corridor for 100 m).
- *    - On-corridor distance must cover ≥ MIN_USEFUL_FRACTION of the
- *      straight-line trip (don't show a corridor that takes the
- *      rider a few hundred metres of a 5 km journey).
+ *  Three gates — any one failing rejects the corridor:
+ *    - Absolute floor: on-corridor must be ≥ MIN_USEFUL_KM. Riding
+ *      a corridor for under 500 m isn't worth the hail.
+ *    - Utilization fraction: on-corridor must cover ≥
+ *      MIN_USEFUL_FRACTION of the straight-line trip.
+ *    - Walk budget: total combined walk to the corridor (perpendicular
+ *      distance at both ends) must not exceed the trip distance. If
+ *      you walk more than you ride, the corridor isn't helping.
  *
  *  Skipped when the rider didn't send coords (name-only fallback). */
 const MIN_USEFUL_CORRIDOR_KM = 0.5;
 const MIN_USEFUL_CORRIDOR_FRACTION = 0.4;
+const MAX_WALK_VS_TRIP_RATIO = 1.0;
 
 const STOPWORDS = new Set([
   "jamaica",
@@ -262,6 +269,15 @@ export async function POST(request: Request) {
         (tripKm ?? 0) * MIN_USEFUL_CORRIDOR_FRACTION,
       );
       if (onCorridorKm < minUseful) {
+        utilizationGated++;
+        continue;
+      }
+      // Walk-budget gate: total walking to/from the corridor must
+      // not exceed the trip distance. A rider walking 3.6 km combined
+      // to take a 1.7 km trip isn't being served by this corridor,
+      // even if utilization technically passes.
+      const totalWalkKm = segP.distKm + segD.distKm;
+      if (totalWalkKm > (tripKm ?? 0) * MAX_WALK_VS_TRIP_RATIO) {
         utilizationGated++;
         continue;
       }

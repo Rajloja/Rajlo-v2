@@ -76,6 +76,7 @@ const supabase = createClient(url, key, {
 const CORRIDOR_RADIUS_KM = 2.0;
 const MIN_USEFUL_CORRIDOR_KM = 0.5;
 const MIN_USEFUL_CORRIDOR_FRACTION = 0.4;
+const MAX_WALK_VS_TRIP_RATIO = 1.0;
 
 /* ─── Geometry helpers (mirrored from match/route.ts) ─── */
 
@@ -185,13 +186,16 @@ function evaluate(route, trip) {
 
   if (!oldAccept) return { oldAccept: false, newAccept: false };
 
-  // New gate: + utilization.
+  // New gates: utilization + walk-budget.
   const onCorridorKm = Math.abs(segP.t - segD.t) * routeKm;
   const minUseful = Math.max(
     MIN_USEFUL_CORRIDOR_KM,
     trip.tripKm * MIN_USEFUL_CORRIDOR_FRACTION,
   );
-  const newAccept = onCorridorKm >= minUseful;
+  const totalWalkKm = segP.distKm + segD.distKm;
+  const utilizationOK = onCorridorKm >= minUseful;
+  const walkBudgetOK = totalWalkKm <= trip.tripKm * MAX_WALK_VS_TRIP_RATIO;
+  const newAccept = utilizationOK && walkBudgetOK;
 
   return {
     oldAccept,
@@ -203,6 +207,7 @@ function evaluate(route, trip) {
       tD: segD.t,
       onCorridorKm,
       minUseful,
+      totalWalkKm,
       routeKm,
     },
   };
@@ -269,17 +274,17 @@ flipped.sort((a, b) => a.onCorridorKm - b.onCorridorKm);
 
 console.log("Top 20 worst false matches the fix now rejects:\n");
 console.log(
-  "  trip                                          corridor                            tripKm  onCorr  needed");
+  "  trip                                          corridor                            tripKm  onCorr  needed   walk");
 console.log(
-  "  ────────────────────────────────────────────  ──────────────────────────────────  ──────  ──────  ──────",
+  "  ────────────────────────────────────────────  ──────────────────────────────────  ──────  ──────  ──────  ─────",
 );
-for (const f of flipped.slice(0, 20)) {
+for (const f of flipped.slice(0, 25)) {
   const tripLabel = `${f.trip.pickup.name} → ${f.trip.dropoff.name}`.padEnd(46);
   const corridorLabel = `${f.route.origin_name} → ${f.route.destination_name}`.padEnd(
     34,
   );
   console.log(
-    `  ${tripLabel}  ${corridorLabel}  ${f.trip.tripKm.toFixed(2).padStart(6)}  ${f.onCorridorKm.toFixed(2).padStart(6)}  ${f.minUseful.toFixed(2).padStart(6)}`,
+    `  ${tripLabel}  ${corridorLabel}  ${f.trip.tripKm.toFixed(2).padStart(6)}  ${f.onCorridorKm.toFixed(2).padStart(6)}  ${f.minUseful.toFixed(2).padStart(6)}  ${f.totalWalkKm.toFixed(2).padStart(5)}`,
   );
 }
 
