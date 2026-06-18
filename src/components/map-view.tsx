@@ -2244,18 +2244,20 @@ export function MapView({
         destination,
       ];
       // Yellow-on-black taxi sandwich. The black underlay is wider
-      // (weight 9) than the yellow overlay (weight 5), giving a 2px
+      // (weight 7) than the yellow overlay (weight 4), giving a 1.5px
       // black trim on each side that reads as a distinctive "taxi"
       // stripe across any map tile background — works on aerial,
-      // light, and dark themes. zIndex difference of 1 keeps the
-      // overlay reliably above the underlay even if Google's
+      // light, and dark themes. Thinner than the private-ride red
+      // gradient (which uses 5) to keep the map readable when both
+      // lines could otherwise overlap. zIndex difference of 1 keeps
+      // the overlay reliably above the underlay even if Google's
       // renderer reorders polylines added in the same frame.
       const underlay = new google.maps.Polyline({
         map,
         path: initialPath,
         strokeColor: "#0a0a0a",
         strokeOpacity: 1,
-        strokeWeight: 9,
+        strokeWeight: 7,
         zIndex: 100,
       });
       const overlay = new google.maps.Polyline({
@@ -2263,7 +2265,7 @@ export function MapView({
         path: initialPath,
         strokeColor: "#facc15",
         strokeOpacity: 1,
-        strokeWeight: 5,
+        strokeWeight: 4,
         zIndex: 101,
       });
       corridorPolylineRef.current.push(underlay, overlay);
@@ -2482,6 +2484,10 @@ export function MapView({
     }
     if (extended) {
       map.fitBounds(bounds, { top: 64, right: 56, bottom: 64, left: 56 });
+      // Record the corridor overview so the rider's zoom-IN restore
+      // timer has a target to snap back to. Without this, pinching
+      // in on a route-taxi corridor view would never auto-restore.
+      recordOverviewFrame(map, bounds);
     }
   }, [
     boarding,
