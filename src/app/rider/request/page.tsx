@@ -1266,15 +1266,27 @@ export default function RiderRequestPage() {
                     <p className="text-base font-extrabold tracking-tight">
                       {formatJMD(displayMatch.fareJmd)}
                     </p>
+                    {/* Show the rider's actual trip endpoints first
+                       so they don't read the corridor's named
+                       endpoints below and think the route is wrong.
+                       Falls back to the corridor names if pickup/
+                       dropoff somehow aren't loaded. */}
                     <p className="text-[11px] leading-relaxed text-muted">
                       <span className="font-semibold text-foreground">
-                        {displayMatch.direction === "reverse"
-                          ? `${displayMatch.route.destination} → ${displayMatch.route.origin}`
-                          : `${displayMatch.route.origin} → ${displayMatch.route.destination}`}
+                        {pickup && dropoff
+                          ? `${pickup.name} → ${dropoff.name}`
+                          : displayMatch.direction === "reverse"
+                            ? `${displayMatch.route.destination} → ${displayMatch.route.origin}`
+                            : `${displayMatch.route.origin} → ${displayMatch.route.destination}`}
                       </span>
                       <br />
-                      {displayMatch.route.distanceKm.toFixed(1)} km ·
-                      TA-regulated · single seat
+                      Via{" "}
+                      <span className="font-medium">
+                        {displayMatch.route.origin} ↔{" "}
+                        {displayMatch.route.destination}
+                      </span>{" "}
+                      · {displayMatch.route.distanceKm.toFixed(1)} km ·
+                      TA-regulated
                     </p>
                   </button>
                 )}
@@ -1352,6 +1364,18 @@ export default function RiderRequestPage() {
                       <p className="mt-2 text-base font-extrabold tracking-tight">
                         {formatJMD(journeyQuote.totalFareJmd)}
                       </p>
+                      {/* Rider's own pickup → dropoff sits ABOVE the
+                         taxi-corridor breakdown so they see THEIR
+                         trip first, not the corridor names. Without
+                         this line riders read the corridor names in
+                         the legs-expanded view as "the route is
+                         wrong" — when in fact the corridor is just
+                         the named TA route-taxi line they hail. */}
+                      {pickup && dropoff && (
+                        <p className="relative z-[1] mt-1 truncate text-[11px] font-semibold leading-snug text-foreground">
+                          {pickup.name} → {dropoff.name}
+                        </p>
+                      )}
                       <p className="relative z-[1] max-w-[60%] text-[11px] leading-relaxed text-muted">
                         {journeyQuote.totalDistanceKm.toFixed(1)} km
                         {journeyQuote.legCount > 1
@@ -1381,24 +1405,52 @@ export default function RiderRequestPage() {
                       </button>
                       {legsExpanded && (
                         <ul className="space-y-1.5 border-t border-line/60 px-3 py-2.5">
-                          {journeyQuote.legs.map((l, i) => (
-                            <li
-                              key={`legs-${i}`}
-                              className="flex items-start gap-2 text-[11px] leading-tight"
-                            >
-                              <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rajlo-black text-[9px] font-extrabold text-white">
-                                {i + 1}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate font-semibold">
-                                  {l.origin} → {l.destination}
-                                </p>
-                                <p className="truncate text-muted">
-                                  {formatJMD(l.fareJmd)} · {l.distanceKm.toFixed(1)} km
-                                </p>
-                              </div>
-                            </li>
-                          ))}
+                          {journeyQuote.legs.map((l, i) => {
+                            // Leg rows describe what the rider does
+                            // (board where, get off where) using their
+                            // real boarding/alighting locations for
+                            // the first and last legs. The corridor's
+                            // named endpoints — "Arnett Gardens →
+                            // Cross Roads" etc. — are the NAME of the
+                            // TA-licensed route-taxi line the rider
+                            // hails, not where they're going, so we
+                            // demote it to a smaller "via" line.
+                            const isFirst = i === 0;
+                            const isLast = i === journeyQuote.legs.length - 1;
+                            const boardAt = isFirst
+                              ? pickup?.name ?? l.origin
+                              : l.origin;
+                            const alightAt = isLast
+                              ? dropoff?.name ?? l.destination
+                              : l.destination;
+                            return (
+                              <li
+                                key={`legs-${i}`}
+                                className="flex items-start gap-2 text-[11px] leading-tight"
+                              >
+                                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rajlo-black text-[9px] font-extrabold text-white">
+                                  {i + 1}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate font-semibold">
+                                    {isFirst ? "Board near " : "Transfer at "}
+                                    {boardAt}
+                                    {" · "}
+                                    {isLast ? "alight at " : "transfer at "}
+                                    {alightAt}
+                                  </p>
+                                  <p className="truncate text-[10px] text-muted">
+                                    Take the{" "}
+                                    <span className="font-semibold">
+                                      {l.origin} ↔ {l.destination}
+                                    </span>{" "}
+                                    taxi · {formatJMD(l.fareJmd)} ·{" "}
+                                    {l.distanceKm.toFixed(1)} km
+                                  </p>
+                                </div>
+                              </li>
+                            );
+                          })}
                           <li className="mt-1 flex items-center justify-between border-t border-line/60 pt-1.5 text-[11px] font-bold">
                             <span>Total</span>
                             <span className="text-rajlo-red">

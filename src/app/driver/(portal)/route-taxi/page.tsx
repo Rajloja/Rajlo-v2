@@ -937,6 +937,19 @@ function ActiveSessionMonitor({
     riderAvatarUrl: string | null;
   } | null>(null);
 
+  // Drop-off confirmation. Tapping the green "Drop off" button on an
+  // onboard hail arms this dialog instead of immediately settling the
+  // fare — settlement charges the rider's wallet and finalises the
+  // hail, both irreversible. Mirrors the private-ride "Complete trip"
+  // confirmation in /driver/active-trip so both modes ask before
+  // taking the rider's money.
+  const [dropOffConfirm, setDropOffConfirm] = useState<{
+    hailId: string;
+    fareJmd: number;
+    pickup: string;
+    dropoff: string;
+  } | null>(null);
+
   // One pickup-QR modal, opens for the accepted hail the driver is
   // about to board. Hold just the hail id; the modal reads the rest
   // (status, rider info) off the live `accepted`/`onboard` arrays so
@@ -1431,7 +1444,14 @@ function ActiveSessionMonitor({
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => onTransition(h.id, "completed")}
+                        onClick={() =>
+                          setDropOffConfirm({
+                            hailId: h.id,
+                            fareJmd: h.fareJmd,
+                            pickup: h.pickup,
+                            dropoff: h.dropoff,
+                          })
+                        }
                         disabled={isPending(h.id, "completed")}
                         className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-emerald-600/25 hover:-translate-y-0.5 hover:bg-emerald-700 disabled:opacity-50 sm:flex-none"
                       >
@@ -1455,6 +1475,66 @@ function ActiveSessionMonitor({
             </ul>
           </section>
         </FadeUp>
+      )}
+
+      {/* Drop-off confirmation — front-stops the irreversible
+         settlement so the driver gets one explicit "yes, charge the
+         rider" before the wallet debit fires. Mirrors the private-
+         ride Complete-trip dialog at /driver/active-trip so both
+         modes ask before taking money. Cancel just closes; Confirm
+         calls the same `onTransition(hailId, "completed")` the
+         button used to call directly. */}
+      {dropOffConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-rajlo-black/60 p-4 backdrop-blur-sm md:items-center">
+          <div className="w-full max-w-md space-y-4 rounded-3xl bg-surface p-5 shadow-2xl md:p-6">
+            <div>
+              <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                Drop off
+              </p>
+              <h2 className="mt-1 text-xl font-extrabold tracking-tight">
+                Confirm drop-off and settle?
+              </h2>
+              <p className="mt-2 text-sm text-muted">
+                Tapping confirm charges the rider{" "}
+                <span className="font-bold text-foreground">
+                  {formatJMD(dropOffConfirm.fareJmd)}
+                </span>{" "}
+                for{" "}
+                <span className="font-bold text-foreground">
+                  {dropOffConfirm.pickup} → {dropOffConfirm.dropoff}
+                </span>
+                . You can&apos;t undo it.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setDropOffConfirm(null)}
+                disabled={isPending(dropOffConfirm.hailId, "completed")}
+                className="inline-flex w-full items-center justify-center rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                Not yet
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const hailId = dropOffConfirm.hailId;
+                  setDropOffConfirm(null);
+                  void onTransition(hailId, "completed");
+                }}
+                disabled={isPending(dropOffConfirm.hailId, "completed")}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {isPending(dropOffConfirm.hailId, "completed") ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <Icon name="check-circle" className="h-4 w-4" />
+                )}
+                Yes, drop off
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Chat sheet — single instance, opens for whichever hail the
