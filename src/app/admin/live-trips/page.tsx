@@ -217,7 +217,6 @@ function TripCard({ trip }: { trip: LiveTrip }) {
           dropoff={dropoff}
           driverPosition={driverPos}
           riderPosition={riderPos}
-          lockable={false}
           className="h-72 w-full md:h-80"
         />
         {!driverPos && (

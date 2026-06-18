@@ -267,7 +267,6 @@ export default function DriverHistoryDetailPage({
             dropoff={dropoff}
             driverPosition={null}
             riderPosition={null}
-            lockable={false}
             className="h-[42vh] min-h-72 w-full rounded-3xl md:h-[50vh] md:max-h-130"
           />
         )}

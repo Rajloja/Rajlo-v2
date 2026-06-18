@@ -901,9 +901,6 @@ export default function RiderLiveTripPage() {
             // the countdown ring inside the overlay.
             searching={ride.status === "requested"}
             searchingUntil={ride.status === "requested" ? ride.expiresAt : null}
-            // Explicit so a future MapView default change doesn't
-            // accidentally let scrolls past the map pan it on phones.
-            lockable
             className="h-[55vh] min-h-80 w-full md:h-[60vh] md:max-h-160"
           />
         </div>

@@ -1937,7 +1937,17 @@ export default function RiderRequestPage() {
             boarding={journeyMapOverlays.boarding}
             alighting={journeyMapOverlays.alighting}
             corridorLines={journeyMapOverlays.corridorLines}
-            suppressStaticRoute={mode === "route_taxi"}
+            // Only suppress the standard pickup→dropoff polyline when
+            // amber corridor lines are about to render in its place
+            // (multi-leg journey). For a direct corridor match there
+            // are no corridor lines, so we want the static polyline
+            // to draw — otherwise the map would show nothing at all
+            // between A and B.
+            suppressStaticRoute={
+              mode === "route_taxi" &&
+              !!journeyMapOverlays.corridorLines &&
+              journeyMapOverlays.corridorLines.length > 0
+            }
             className="h-64 w-full"
           />
           {breadcrumb}
@@ -1974,7 +1984,17 @@ export default function RiderRequestPage() {
             boarding={journeyMapOverlays.boarding}
             alighting={journeyMapOverlays.alighting}
             corridorLines={journeyMapOverlays.corridorLines}
-            suppressStaticRoute={mode === "route_taxi"}
+            // Only suppress the standard pickup→dropoff polyline when
+            // amber corridor lines are about to render in its place
+            // (multi-leg journey). For a direct corridor match there
+            // are no corridor lines, so we want the static polyline
+            // to draw — otherwise the map would show nothing at all
+            // between A and B.
+            suppressStaticRoute={
+              mode === "route_taxi" &&
+              !!journeyMapOverlays.corridorLines &&
+              journeyMapOverlays.corridorLines.length > 0
+            }
             className="h-full w-full"
           />
           {breadcrumb}

@@ -472,7 +472,6 @@ export function MapView({
   dropoffEtaMinutes = null,
   searching = false,
   searchingUntil = null,
-  lockable = true,
   viewer = "rider",
   boarding = null,
   alighting = null,
@@ -514,14 +513,6 @@ export function MapView({
    *  + "X:XX left" label, so the rider knows how long they have
    *  before the request auto-cancels. */
   searchingUntil?: string | null;
-  /** When true (default), the map is "locked" on mount — gestures
-   *  pass through to the page so a finger-swipe past the map scrolls
-   *  the document instead of accidentally panning. The user must tap
-   *  the map once to enable interaction. After ~3 seconds of map
-   *  inactivity it re-locks so a later scroll-past doesn't pan again.
-   *  Set false on screens where the map IS the interaction (rare —
-   *  most Rajlo maps are informational). */
-  lockable?: boolean;
   /** Who's looking at the map. When `"driver"` we suppress:
    *    - The blue rider puck (the driver doesn't need to see their
    *      own car represented twice, and the rider's separate puck
@@ -718,13 +709,10 @@ export function MapView({
   // would beat the SDK load and return early, and the markers + route
   // would never get drawn (only the bare map tiles would render).
   const [mapReady, setMapReady] = useState(false);
-  // Click-to-activate lock. True (locked) by default — overlay swallows
-  // touches/wheel events so finger-swipes past the map don't pan it on
-  // mobile, and mouse-wheel doesn't accidentally zoom on desktop. Tap
-  // the overlay to unlock. Auto re-locks after `RELOCK_AFTER_MS` of
-  // map inactivity so a later scroll-past behaves the same way.
-  const [locked, setLocked] = useState(lockable);
-  const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // (Lock-to-interact feature retired — `gestureHandling: "greedy"`
+  // on the Google Map is the only handling left. Mobile users get
+  // direct pan/zoom; if a stray finger-swipe on a long page becomes
+  // a complaint we'll swap to "cooperative" two-finger pan instead.)
   // Pseudo-fullscreen — `position: fixed` over the viewport rather
   // than the browser Fullscreen API. The native API doesn't work on
   // iOS Safari for non-<video> elements, and the fixed-position
@@ -786,6 +774,26 @@ export function MapView({
     }
   }, [driverPosition]);
 
+  // ─── Movement detector (rider-side OVERVIEW ↔ FOLLOW mode) ─────────
+  // Tracks the most recent significant displacement (>5m) so we can
+  // tell whether the driver is actively moving on a trip. Used by the
+  // non-navMode pan logic below to decide between two camera modes:
+  //   OVERVIEW — A+B+route in view (stationary car, or no trip yet)
+  //   FOLLOW   — zoom in + pan to driver (car actively moving)
+  // Reset when the position effect detects movement that crosses the
+  // threshold; effectively decays to "not moving" after MOVEMENT_GRACE_MS
+  // of no >5m displacements. Distinct from `prevDriverPosRef` (which
+  // drives heading and gates on 10m) — we want a slightly tighter
+  // 5m gate here so brief crawls register as "moving".
+  const prevMoveCheckPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastMovementAtRef = useRef<number | null>(null);
+  // Tracks whether the LAST tick was treated as "moving" so we can
+  // detect the moving → stationary transition and snap the camera
+  // back to OVERVIEW exactly once instead of on every tick.
+  const wasMovingRef = useRef<boolean>(false);
+  const MOVEMENT_THRESHOLD_M = 5;
+  const MOVEMENT_GRACE_MS = 15000;
+
   /** How long (ms) the camera waits after the user lets go of a
    *  drag/pinch before snapping back to the live driver puck. Tuned
    *  to give a comfortable "I'm looking around" beat without leaving
@@ -829,9 +837,6 @@ export function MapView({
     if (streamed) {
       map.panTo({ lat: streamed.lat, lng: streamed.lng });
       map.setZoom(Math.max(map.getZoom() ?? 9, 16));
-      // Unlock interactions so the next pinch/drag doesn't have to
-      // dismiss the lock overlay first.
-      setLocked(false);
       return;
     }
 
@@ -859,7 +864,6 @@ export function MapView({
         selfFirstPanDoneRef.current = true;
         m.panTo(next);
         m.setZoom(Math.max(m.getZoom() ?? 9, 16));
-        setLocked(false);
         setLocating(false);
       }
     };
@@ -1788,41 +1792,78 @@ export function MapView({
       }
     }
 
-    // Follow-the-car: pan the map to keep the driver marker centered
-    // as the car moves, the way every native navigation app behaves.
-    // We don't touch zoom — the user's current zoom level is theirs to
-    // control. Skipped only when the user has manually dragged (the
-    // `dragstart` listener flips followModeRef.current=false) or while
-    // the searching radar overlay owns the map. Crucially we DON'T
-    // gate on `locked` — the lock overlay blocks user gestures (so a
-    // finger-swipe doesn't accidentally pan the map past the page),
-    // but our own programmatic panTo is exactly the thing the lock
-    // was supposed to leave alone. Earlier code gated on it and froze
-    // the map under the "Tap to interact" pill.
+    // ─── Camera follow logic ──────────────────────────────────────
+    // Skipped entirely when the user manually dragged (the
+    // `dragstart` listener flips followModeRef.current=false) or
+    // while the searching radar owns the map.
     if (followModeRef.current && !searching) {
       if (navMode) {
-        // Nav mode: rotate the camera so the driver's heading points
-        // "up" on screen, and place the driver marker in the lower
-        // third of the viewport so the road ahead fills the rest. The
-        // map.panBy after panTo is the standard Google Maps trick for
-        // offsetting the center without going through projection math.
+        // Driver-side nav mode: always follow with heading rotation
+        // + lower-third puck offset, the standard navigation feel.
         if (typeof heading === "number") {
           map.setHeading(heading);
         }
         map.panTo(pos);
-        // Shift the camera up so the driver sits ~25% from the bottom.
-        // The exact pixel value scales with the rendered map height —
-        // 0.25 * height works on phones (where the map fills the screen)
-        // and stays roughly correct on smaller embedded sizes too.
         const el = containerRef.current;
         if (el) {
           map.panBy(0, -Math.round(el.clientHeight * 0.25));
         }
       } else {
-        map.panTo(pos);
+        // Rider-side / non-nav surfaces: two camera modes.
+        //   FOLLOW   — pan + zoom into the driver. Engaged only while
+        //              the car is actively moving on a live trip.
+        //   OVERVIEW — A+B+route bounds. Engaged when stationary,
+        //              or whenever there's no live trip.
+        // Without this gating, the position-tick pan would drift the
+        // camera away from the A+B framing the live-route effect
+        // initially set, and the rider would lose sight of the pins.
+        const now = Date.now();
+        const prevPos = prevMoveCheckPosRef.current;
+        if (
+          prevPos &&
+          approxDistanceMeters(prevPos, pos) > MOVEMENT_THRESHOLD_M
+        ) {
+          lastMovementAtRef.current = now;
+        }
+        prevMoveCheckPosRef.current = pos;
+        const recentlyMoved =
+          lastMovementAtRef.current != null &&
+          now - lastMovementAtRef.current < MOVEMENT_GRACE_MS;
+        const onTrip = !!liveRoute;
+        const isMoving = onTrip && recentlyMoved;
+
+        if (isMoving) {
+          // FOLLOW — zoom in + pan to driver every tick.
+          map.panTo(pos);
+          if ((map.getZoom() ?? 9) < 15) {
+            map.setZoom(15);
+          }
+        } else if (wasMovingRef.current) {
+          // Just transitioned FOLLOW → OVERVIEW. Re-frame so the
+          // rider can see both pins + the route span again. Using the
+          // cached polyline path (set by the live-route effect)
+          // because it includes both the driver's current point and
+          // every waypoint along the route to the target.
+          const path = liveRoutePathRef.current;
+          if (path.length >= 2) {
+            const bounds = new google.maps.LatLngBounds();
+            path.forEach((p) => bounds.extend(p));
+            bounds.extend(pos);
+            map.fitBounds(bounds, {
+              top: 80,
+              right: 60,
+              bottom: 80,
+              left: 60,
+            });
+          }
+        }
+        // else: OVERVIEW mode already framed by the live-route
+        // effect's fitBounds. Nothing to do per tick — leaving the
+        // camera alone is the whole point of OVERVIEW mode.
+        wasMovingRef.current = isMoving;
       }
     }
-  }, [driverPosition, searching, navMode]);
+  }, [driverPosition, searching, navMode, liveRoute]);
 
   // Fleet markers (Phase 2A.4 — nearby online drivers on booking screen).
   // We diff against the previous set: existing driverIds get setPosition,
@@ -2372,43 +2413,6 @@ export function MapView({
     };
   }, [fullscreen]);
 
-  // Auto re-lock after a window of map inactivity. Listens to gestures
-  // INSIDE the map container so that watching/panning/zooming pushes
-  // the relock further out — once the user is genuinely done, the
-  // map relocks and the next scroll-past doesn't accidentally pan it.
-  // Disabled when not lockable or already locked.
-  useEffect(() => {
-    if (!lockable || locked) return;
-    const el = containerRef.current;
-    if (!el) return;
-
-    const RELOCK_AFTER_MS = 3500;
-    const arm = () => {
-      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
-      relockTimerRef.current = setTimeout(() => {
-        setLocked(true);
-      }, RELOCK_AFTER_MS);
-    };
-
-    arm();
-    el.addEventListener("touchstart", arm, { passive: true });
-    el.addEventListener("touchmove", arm, { passive: true });
-    el.addEventListener("mousedown", arm);
-    el.addEventListener("mousemove", arm);
-    el.addEventListener("wheel", arm, { passive: true });
-    return () => {
-      if (relockTimerRef.current) {
-        clearTimeout(relockTimerRef.current);
-        relockTimerRef.current = null;
-      }
-      el.removeEventListener("touchstart", arm);
-      el.removeEventListener("touchmove", arm);
-      el.removeEventListener("mousedown", arm);
-      el.removeEventListener("mousemove", arm);
-      el.removeEventListener("wheel", arm);
-    };
-  }, [locked, lockable]);
-
   return (
     // `min-h-[16rem]` is a belt-and-suspenders height floor in case a flex
     // ancestor on mobile collapses our height-class — Google Maps refuses
@@ -2450,40 +2454,6 @@ export function MapView({
       {searching && !loadError && (
         <SearchingOverlay searchingUntil={searchingUntil} />
       )}
-      {/* Lock overlay — sits above the map while `locked` is true and
-         catches all gestures so finger-swipes pan the page (not the
-         map) and mouse wheel scrolls the page (not the map). The
-         "Tap to interact" pill makes the affordance discoverable.
-         Skipped when search overlay is active (the matcher's radar
-         already prevents interaction during ride request) or while
-         fullscreen (the user explicitly opened the map for a closer
-         look — locking it would defeat the point). */}
-      {lockable && locked && !loadError && !searching && !fullscreen && (
-        <button
-          type="button"
-          onClick={() => setLocked(false)}
-          className="group absolute inset-0 z-20 flex cursor-pointer items-end justify-center bg-transparent"
-          aria-label="Tap to interact with the map"
-        >
-          <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-rajlo-black/80 px-3.5 py-1.5 text-[11px] font-bold text-white shadow-md backdrop-blur transition-opacity group-hover:bg-rajlo-black/90 group-active:bg-rajlo-black">
-            <svg
-              aria-hidden
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-3 w-3"
-            >
-              <path d="M9 11.24V7a3 3 0 0 1 6 0v4.24" />
-              <path d="M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" />
-            </svg>
-            Tap to interact
-          </span>
-        </button>
-      )}
-
       {/* Fullscreen control. Top-right "expand" button when inline,
          top-left "Close" pill when expanded. The expand button is
          hidden during the matcher search radar (no point opening
@@ -2494,8 +2464,6 @@ export function MapView({
           onClick={(e) => {
             e.stopPropagation();
             setFullscreen(true);
-            // Unlock so the user can pan/zoom immediately on enter.
-            setLocked(false);
           }}
           aria-label="Open map in fullscreen"
           className="absolute right-3 top-3 z-30 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-rajlo-black shadow-md backdrop-blur transition-all hover:-translate-y-0.5 hover:bg-white active:translate-y-0"

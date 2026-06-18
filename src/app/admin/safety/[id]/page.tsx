@@ -519,7 +519,6 @@ function LiveTripMap({
           dropoff={dropoff}
           driverPosition={driverMarker}
           riderPosition={riderMarker}
-          lockable={false}
           className="h-80 w-full md:h-96"
         />
         {!driverPosition && (
