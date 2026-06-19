@@ -1061,6 +1061,45 @@ export function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recenterToken, mapReady]);
 
+  // Auto-center on the device's current location once on first
+  // mount — only when no pickup/dropoff is set yet so we don't
+  // clobber a deep-linked trip preview. A blank Jamaica-wide
+  // overview on page load is useless to the rider; centering on
+  // their actual neighbourhood with city-level zoom makes the map
+  // immediately scannable. We use a ref-based "did once" guard so a
+  // later state change (rider clears their pickup, etc.) doesn't
+  // re-trigger the geolocation prompt.
+  const didAutoCenterRef = useRef(false);
+  useEffect(() => {
+    if (!mapReady) return;
+    if (didAutoCenterRef.current) return;
+    if (pickup || dropoff) {
+      // A point is already known — the dedicated marker-bounds
+      // effect will handle centering. Mark done so we don't fire
+      // later when those clear.
+      didAutoCenterRef.current = true;
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      didAutoCenterRef.current = true;
+      return;
+    }
+    didAutoCenterRef.current = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        map.setZoom(14);
+      },
+      () => {
+        // Permission denied / timeout — leave the Jamaica overview
+        // the map already booted into. Not worth re-asking.
+      },
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60_000 },
+    );
+  }, [mapReady, pickup, dropoff]);
+
   // Init map + DirectionsService once. We retry once on a small delay if
   // the container isn't sized yet — that happens on iOS Safari when the
   // map is rendered inside a sliding/transitioning ancestor.

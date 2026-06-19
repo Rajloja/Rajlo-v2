@@ -10,6 +10,7 @@ import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
 import { AnonymousBookingPrompt } from "@/components/anonymous-booking-prompt";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useIsMobile } from "@/lib/use-is-mobile";
+import { MapPinPicker } from "@/components/map-pin-picker";
 import { SavedPlaceChips } from "@/components/saved-place-chips";
 import { Skeleton } from "@/components/skeleton";
 import { InsufficientFundsDialog } from "@/components/insufficient-funds-dialog";
@@ -148,6 +149,14 @@ export default function RiderRequestPage() {
   // / PlacesAutocomplete ran in duplicate. That's also a class of bug
   // we want to avoid here (subscriptions, Google Places listeners).
   const { isMobile, mounted: viewportReady } = useIsMobile();
+
+  // Map-pin picker overlay state. When non-null we render the
+  // fullscreen `<MapPinPicker>` over the booking page, letting the
+  // rider drag the map under a fixed centre pin to set whichever
+  // endpoint they're picking. `null` = picker closed.
+  const [pinPickerTarget, setPinPickerTarget] = useState<
+    "pickup" | "dropoff" | null
+  >(null);
 
   // On mount: if the rider already has an in-flight trip — either a
   // private ride (Mode A) or a route taxi hail (Mode B) — skip the
@@ -1182,6 +1191,26 @@ export default function RiderRequestPage() {
         </div>
       </FadeUp>
 
+      {/* "Set on map" entry — opens the fullscreen MapPinPicker
+         pointed at whichever endpoint is empty (or pickup if both
+         are empty). Lets the rider drop a pin manually when they
+         don't know the address — esp. useful in rural Jamaica where
+         autocomplete coverage is patchy. */}
+      <FadeUp delay={0.12}>
+        <div className="mt-4 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => {
+              setPinPickerTarget(!pickup ? "pickup" : "dropoff");
+            }}
+            className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-xs font-bold text-muted transition-colors hover:border-rajlo-red/40 hover:text-rajlo-red"
+          >
+            <Icon name="map-pin" className="h-3.5 w-3.5" />
+            {!pickup ? "Set pickup on map" : "Set drop-off on map"}
+          </button>
+        </div>
+      </FadeUp>
+
       </>)}
       {/* ═════════════════ END STEP 1 ═════════════════ */}
 
@@ -2087,23 +2116,16 @@ export default function RiderRequestPage() {
               </span>
             </>
           }
-          // No sticky actionBar — the "Next" CTA scrolls with the
-          // form content instead of pinning to the viewport bottom.
-          // That keeps the price + Next button out of the rider's
-          // way while they're picking locations and stops it from
-          // clashing with Safari's URL bar.
+          // Sticky action bar with the price label on the left and
+          // Next button on the right — always visible at the bottom
+          // of the sheet whether collapsed or expanded. Sheet itself
+          // is draggable up-to-fullscreen via the handle, so the
+          // rider gets more form room when they need it without
+          // losing the primary CTA.
+          actionBar={barContent}
           sheetTop="50vh"
         >
-          <div className="mx-auto max-w-2xl">
-            {formSections}
-            {/* In-flow CTA row — replaces the previous sticky bottom
-                bar. Price stays left for context (the rider can see
-                what they're agreeing to before they tap), Next sits
-                on the right where the thumb naturally lands. */}
-            <div className="mt-6 flex items-center justify-between gap-3 border-t border-line pt-4">
-              {barContent}
-            </div>
-          </div>
+          <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>
       </div>
       )}
@@ -2196,6 +2218,36 @@ export default function RiderRequestPage() {
               ? formatJMD(fare.fareJMD)
               : null
           }
+        />
+      )}
+
+      {/* Map-pin location picker — fullscreen overlay. Mounted
+         conditionally so its Google Map only instantiates when the
+         rider actually opens the picker. Confirm sets the target
+         endpoint as if the rider had picked it from autocomplete. */}
+      {pinPickerTarget && (
+        <MapPinPicker
+          target={pinPickerTarget}
+          initialCoord={
+            pinPickerTarget === "pickup"
+              ? pickup
+                ? { lat: pickup.lat, lng: pickup.lng }
+                : null
+              : dropoff
+                ? { lat: dropoff.lat, lng: dropoff.lng }
+                : pickup
+                  ? { lat: pickup.lat, lng: pickup.lng }
+                  : null
+          }
+          onConfirm={(place) => {
+            if (pinPickerTarget === "pickup") {
+              setPickup(place);
+            } else {
+              setDropoff(place);
+            }
+            setPinPickerTarget(null);
+          }}
+          onCancel={() => setPinPickerTarget(null)}
         />
       )}
     </>
