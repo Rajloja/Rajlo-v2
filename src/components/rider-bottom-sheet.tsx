@@ -33,13 +33,11 @@ import { Drawer } from "vaul";
 export function RiderBottomSheet({
   map,
   children,
-  actionBar,
   /** Optional badge / pill anchored to the top-left of the map area. */
   mapBadge,
 }: {
   map: ReactNode;
   children: ReactNode;
-  actionBar?: ReactNode;
   mapBadge?: ReactNode;
 }) {
   // Two snap points: half-screen (default) and nearly-fullscreen.
@@ -47,38 +45,30 @@ export function RiderBottomSheet({
   const SNAP_POINTS = [0.5, 0.92] as const;
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
-  // Lock body + html scroll while this page is mounted. The rider
-  // portal's PortalLayout uses body scroll on mobile (see
-  // mobile-drawer.tsx), which meant any swipe on the bottom sheet
-  // ALSO scrolled the page underneath — pulling the map along with
-  // the sheet and making everything feel glitchy. The map is inside
-  // the page DOM, so the only way to keep it visually fixed is to
-  // stop the page from scrolling at all while we're on a sheet page.
-  // We do this with overscroll-behavior + overflow:hidden, restored
-  // on unmount so other pages (which DO need to scroll) still work.
+  // overscroll-behavior on body kills the iOS / Chrome pull-to-
+  // refresh gesture while still letting normal layout flow. We
+  // explicitly DON'T set overflow:hidden — that breaks the sticky
+  // navbar in MobileDrawer (which relies on body scroll being a
+  // possibility for `position: sticky` to evaluate correctly) and
+  // also messes up iOS Safari's input/keyboard handling.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevBodyOverscroll = document.body.style.overscrollBehavior;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    const prevHtmlOverscroll = document.documentElement.style.overscrollBehavior;
-    document.body.style.overflow = "hidden";
+    const prev = document.body.style.overscrollBehavior;
     document.body.style.overscrollBehavior = "contain";
-    document.documentElement.style.overflow = "hidden";
-    document.documentElement.style.overscrollBehavior = "contain";
     return () => {
-      document.body.style.overflow = prevBodyOverflow;
-      document.body.style.overscrollBehavior = prevBodyOverscroll;
-      document.documentElement.style.overflow = prevHtmlOverflow;
-      document.documentElement.style.overscrollBehavior = prevHtmlOverscroll;
+      document.body.style.overscrollBehavior = prev;
     };
   }, []);
 
   return (
-    <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
-      {/* Map fills the whole stage and stays mounted. The drawer
-       overlays it. The map's container DOES NOT resize during drag
-       — that was the source of the shaking. */}
+    // `fixed inset-0 top-14` pins this stage to the viewport BELOW
+    // the 56 px (3.5 rem) PortalLayout header, ignoring the parent
+    // page's flow entirely. That way the map / drawer don't slide
+    // around when the body grows past viewport height (e.g. bottom
+    // padding on `<main>`) and don't compete with body scroll.
+    <div className="fixed inset-0 top-14 overflow-hidden">
+      {/* Map fills the stage and stays mounted. The drawer overlays
+       it. The map's container DOES NOT resize during drag. */}
       <div className="absolute inset-0">{map}</div>
 
       {mapBadge && (
@@ -121,20 +111,13 @@ export function RiderBottomSheet({
              snap, this area's scroll is locked and gestures lift
              the drawer; once at the top snap, normal scroll
              behaves. */}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-2">
+            {/* Bottom padding leaves room for the page-level fixed
+             action bar (rendered by the caller as a sibling, NOT
+             inside this drawer) so the last line of scrollable
+             content isn't hidden behind it. */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-2">
               {children}
             </div>
-
-            {actionBar && (
-              <div
-                className="shrink-0 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
-                style={{
-                  paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
-                }}
-              >
-                {actionBar}
-              </div>
-            )}
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>

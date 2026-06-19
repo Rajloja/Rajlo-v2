@@ -2124,15 +2124,26 @@ export default function RiderRequestPage() {
               </span>
             </>
           }
-          // Sticky action bar with the price label on the left and
-          // Next button on the right — always visible at the bottom
-          // of the sheet whether collapsed or expanded. Sheet itself
-          // is scroll-to-expand (vaul drawer), so the rider gets more
-          // form room when they swipe up without losing the CTA.
-          actionBar={barContent}
         >
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>
+
+        {/* Fixed action bar — anchored to the VIEWPORT bottom (not
+         the sheet) so it stays visible at all times regardless of
+         which snap point the rider has dragged the sheet to.
+         safe-area-inset-bottom keeps the Next button above iOS
+         Safari's URL bar + the home indicator. z-30 sits above the
+         vaul drawer (z-20) so it's never hidden behind it. */}
+        <div
+          className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
+          style={{
+            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
+          }}
+        >
+          <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+            {barContent}
+          </div>
+        </div>
       </div>
       )}
 
