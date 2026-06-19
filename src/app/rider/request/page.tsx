@@ -1017,7 +1017,12 @@ export default function RiderRequestPage() {
         </FadeUp>
       )}
 
-      <FadeUp delay={0.04}>
+      {/* Page-title chrome (eyebrow + h1 + descriptive paragraph) is
+         desktop-only — on the mobile bottom-sheet it ate most of the
+         visible card, pushing the actual form below the fold. The
+         status badge floating on the map already communicates "you're
+         in the booking flow" on mobile. */}
+      <FadeUp delay={0.04} className="hidden md:block">
         <div className="mb-2 flex items-center gap-2">
           <span className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">
             {step === "locations"
@@ -2071,6 +2076,12 @@ export default function RiderRequestPage() {
             </>
           }
           actionBar={barContent}
+          // Sheet starts at 60vh so the map dominates the top 60% of
+          // the viewport (Uber-style). Combined with the mobile-only
+          // hidden title/paragraph chrome inside formSections, the
+          // pickup + dropoff inputs + Next button now all fit in the
+          // sheet's visible 40vh without scrolling on most phones.
+          sheetTop="60vh"
         >
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>

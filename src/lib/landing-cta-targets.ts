@@ -4,24 +4,30 @@ import { createSupabaseAuthServerClient } from "./supabase-auth-server";
  * Resolves the right destinations for the public landing-page CTAs
  * ("Book a ride" / "Drive with Rajlo") based on who's signed in.
  *
- * The principle: a returning user shouldn't have to re-traverse a
- * signup funnel to reach the dashboard they already have. So:
+ * The principle: a visitor — anonymous or signed in — should always
+ * land on a USEFUL page, never a barrier. Specifically:
  *
- *   "Book a ride"
+ *   "Book a ride" / "Find a ride" / "Start riding" (all rider CTAs)
  *     - signed in as rider  → /rider              (their dashboard)
- *     - everyone else       → /auth/rider/login   (sign-in first;
- *                                                  the login page
- *                                                  links to signup)
+ *     - everyone else       → /rider/request      (the booking page,
+ *                                                  which renders an
+ *                                                  AnonymousBookingPrompt
+ *                                                  for visitors who
+ *                                                  aren't signed in
+ *                                                  yet — they can see
+ *                                                  the trip preview +
+ *                                                  fare before being
+ *                                                  asked to sign in)
  *
  *   "Drive with Rajlo"
  *     - signed in as driver → /driver             (their dashboard)
  *     - everyone else       → /driver-join        (the marketing page)
  *
- * Why login instead of signup for the rider default: returning users
- * are the majority of taps once you've onboarded any cohort, and
- * forcing every tap through the signup form is friction for them.
- * New users still get there via the "Create account" link that lives
- * on the login page.
+ * Why this matters: before, anonymous rider CTAs bounced straight to
+ * the login form, which kills first-impression conversion. Showing
+ * the booking page first lets the visitor see what they're about to
+ * buy + a fare estimate, then nudges sign-in via a sticky prompt
+ * that round-trips the URL so they land back here after auth.
  *
  * We deliberately don't try to be clever for cross-role cases (e.g.
  * a driver tapping "Book a ride") — they fall through to the default
@@ -42,7 +48,10 @@ export type LandingCtaTargets = {
 };
 
 const DEFAULTS: LandingCtaTargets = {
-  riderHref: "/auth/rider/login",
+  // Anonymous default goes to /rider/request — the booking page
+  // gracefully handles unauthenticated visitors with a sticky sign-in
+  // prompt, so this is the right "default" landing for any rider CTA.
+  riderHref: "/rider/request",
   driverHref: "/driver-join",
   riderIsDashboard: false,
   driverIsDashboard: false,

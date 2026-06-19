@@ -1177,7 +1177,11 @@ export default function RiderLiveTripPage() {
          Map fills the viewport stage; the trip card slides up from the
          bottom with status badge floating on the map. */}
       <div className="md:hidden">
-        <RiderBottomSheet map={mapNode} mapBadge={mobileStatusBadge}>
+        <RiderBottomSheet
+          map={mapNode}
+          mapBadge={mobileStatusBadge}
+          sheetTop="58vh"
+        >
           <div className="space-y-4 pb-4">{bodyContent}</div>
         </RiderBottomSheet>
       </div>
