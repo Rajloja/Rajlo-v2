@@ -8,6 +8,8 @@ import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { MapView } from "@/components/map-view";
 import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
+import { useIsMobile } from "@/lib/use-is-mobile";
+import { RequestingProgressBar } from "@/components/requesting-progress-bar";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useRidePosition } from "@/lib/use-ride-position";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
@@ -212,6 +214,17 @@ export default function RiderLiveTripPage() {
   // no-op in either case.
   const [plannedPolyline, setPlannedPolyline] = useState<string | null>(null);
   const [completed, setCompleted] = useState<CompletedSnapshot | null>(null);
+
+  // Viewport-aware layout switch. We render the mobile bottom-sheet
+  // tree OR the desktop split-pane tree, NEVER BOTH. Tailwind's
+  // visibility classes (md:hidden/hidden md:block) leave both branches
+  // mounted in the DOM — which means duplicate MapView, duplicate
+  // CallButton, duplicate ChatLauncher all subscribing to the same
+  // realtime channels at once. That was the source of the client-side
+  // exception the rider was hitting when a driver accepted the trip:
+  // two ChatLauncher instances racing setState during the status
+  // transition.
+  const { isMobile, mounted: viewportReady } = useIsMobile();
 
   // Once the rider moves past a shown "trip ended" card — taps through
   // it or leaves the page — remember it so a later return lands on a
@@ -835,8 +848,13 @@ export default function RiderLiveTripPage() {
             ? { target: "dropoff" }
             : null
       }
-      searching={ride.status === "requested"}
-      searchingUntil={ride.status === "requested" ? ride.expiresAt : null}
+      // Radar orb retired in favor of the in-sheet horizontal
+      // progress bar (RequestingProgressBar). The orb floated over
+      // the map and was hard to read against street labels; the
+      // sheet bar shows the same "X:XX remaining" info next to the
+      // pickup/dropoff context, which reads cleanly.
+      searching={false}
+      searchingUntil={null}
       className="h-full w-full"
     />
   );
@@ -889,6 +907,13 @@ export default function RiderLiveTripPage() {
   // desktop shows the full hero card above the map.
   const bodyContent = (
     <>
+      {/* Active "Finding your driver" progress strip. Sits at the very
+         top of the sheet body while the matcher is scanning so the
+         rider sees both their countdown and the trip info underneath
+         at a glance, no map-overlay needed. */}
+      {ride.status === "requested" && (
+        <RequestingProgressBar searchingUntil={ride.expiresAt} />
+      )}
       {error && (
         <div className="rounded-xl border border-rajlo-red/30 bg-primary-soft px-4 py-3 text-sm font-semibold text-rajlo-red">
           {error}
@@ -1171,12 +1196,70 @@ export default function RiderLiveTripPage() {
     </>
   );
 
+  // Mobile XOR desktop, never both. The previous Tailwind-only switch
+  // (md:hidden / hidden md:block) left BOTH branches mounted in the
+  // DOM, doubling MapView/CallButton/ChatLauncher and racing their
+  // realtime subscriptions on status transitions. Now we pick one
+  // branch based on the actual viewport so each component instance
+  // exists exactly once. While viewportReady is false (SSR + first
+  // client paint) we render the mobile branch — it's the conservative
+  // default and a strict-subset render so desktop hydration mismatch
+  // is bounded.
+  const showDesktop = viewportReady && !isMobile;
+
   return (
     <>
-      {/* ═════════════ MOBILE LAYOUT (Uber-style bottom sheet) ═════════════
-         Map fills the viewport stage; the trip card slides up from the
-         bottom with status badge floating on the map. */}
-      <div className="md:hidden">
+      {showDesktop ? (
+        // ═════════════ DESKTOP LAYOUT ═════════════
+        <div className="mx-auto max-w-3xl space-y-4 px-2 py-6 md:px-3 md:py-8">
+          <FadeUp>
+            <div
+              className={`relative overflow-hidden rounded-3xl p-6 text-white shadow-xl md:p-8 ${
+                hero.tone === "emerald"
+                  ? "bg-emerald-600 shadow-emerald-600/30"
+                  : hero.tone === "amber"
+                    ? "bg-rajlo-black shadow-rajlo-black/30"
+                    : "bg-rajlo-red shadow-rajlo-red/30"
+              }`}
+            >
+              <ArcWatermark
+                size={360}
+                variant="white"
+                className="absolute -right-20 -bottom-24 opacity-[0.10]"
+              />
+              <div className="relative">
+                <p className="font-secondary text-xs font-bold uppercase tracking-wider text-white/85">
+                  {hero.eyebrow}
+                </p>
+                <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
+                  {hero.title}
+                </h1>
+                <p className="mt-2 max-w-lg text-sm text-white/85">
+                  {hero.description}
+                </p>
+                {ride.status === "accepted" && (
+                  <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                    </span>
+                    Live · driver heading to you
+                  </div>
+                )}
+              </div>
+            </div>
+          </FadeUp>
+
+          <FadeUp delay={0.05}>
+            <div className="overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/4">
+              <div className="h-[60vh] max-h-160 w-full">{mapNode}</div>
+            </div>
+          </FadeUp>
+
+          {bodyContent}
+        </div>
+      ) : (
+        // ═════════════ MOBILE LAYOUT (Uber-style bottom sheet) ═════════════
         <RiderBottomSheet
           map={mapNode}
           mapBadge={mobileStatusBadge}
@@ -1184,63 +1267,7 @@ export default function RiderLiveTripPage() {
         >
           <div className="space-y-4 pb-4">{bodyContent}</div>
         </RiderBottomSheet>
-      </div>
-
-      {/* ═════════════ DESKTOP LAYOUT (existing vertical stack) ═════════════ */}
-      <div className="mx-auto hidden max-w-3xl space-y-4 px-2 py-6 md:block md:px-3 md:py-8">
-      <FadeUp>
-        <div
-          className={`relative overflow-hidden rounded-3xl p-6 text-white shadow-xl md:p-8 ${
-            hero.tone === "emerald"
-              ? "bg-emerald-600 shadow-emerald-600/30"
-              : hero.tone === "amber"
-                ? "bg-rajlo-black shadow-rajlo-black/30"
-                : "bg-rajlo-red shadow-rajlo-red/30"
-          }`}
-        >
-          <ArcWatermark
-            size={360}
-            variant="white"
-            className="absolute -right-20 -bottom-24 opacity-[0.10]"
-          />
-          <div className="relative">
-            <p className="font-secondary text-xs font-bold uppercase tracking-wider text-white/85">
-              {hero.eyebrow}
-            </p>
-            <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
-              {hero.title}
-            </h1>
-            <p className="mt-2 max-w-lg text-sm text-white/85">
-              {hero.description}
-            </p>
-            {ride.status === "accepted" && (
-              <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-                </span>
-                Live · driver heading to you
-              </div>
-            )}
-          </div>
-        </div>
-      </FadeUp>
-
-      {/* Desktop map card — wraps the shared mapNode in the same
-         rounded-3xl container the page used before. Mobile renders
-         the same mapNode as a full-bleed background inside the
-         RiderBottomSheet up top. */}
-      <FadeUp delay={0.05}>
-        <div className="overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/4">
-          <div className="h-[60vh] max-h-160 w-full">{mapNode}</div>
-        </div>
-      </FadeUp>
-
-      {/* Everything below the map (errors, driver card, PIN, trip
-         details, action row) lives in bodyContent so mobile and
-         desktop render the exact same sections from one source. */}
-      {bodyContent}
-    </div>
+      )}
 
       {/* Top-layer overlays — modals + persistent safety-chat pill.
          Lifted out of both layout branches because they fixed/absolute

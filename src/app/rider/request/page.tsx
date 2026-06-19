@@ -9,6 +9,7 @@ import { MapView } from "@/components/map-view";
 import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
 import { AnonymousBookingPrompt } from "@/components/anonymous-booking-prompt";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { useIsMobile } from "@/lib/use-is-mobile";
 import { SavedPlaceChips } from "@/components/saved-place-chips";
 import { Skeleton } from "@/components/skeleton";
 import { InsufficientFundsDialog } from "@/components/insufficient-funds-dialog";
@@ -141,6 +142,12 @@ export default function RiderRequestPage() {
       cancelled = true;
     };
   }, []);
+
+  // Mobile XOR desktop. The previous Tailwind-only switch left BOTH
+  // layout trees mounted, so MapView, the form, and every WaypointSlot
+  // / PlacesAutocomplete ran in duplicate. That's also a class of bug
+  // we want to avoid here (subscriptions, Google Places listeners).
+  const { isMobile, mounted: viewportReady } = useIsMobile();
 
   // On mount: if the rider already has an in-flight trip — either a
   // private ride (Mode A) or a route taxi hail (Mode B) — skip the
@@ -2039,8 +2046,13 @@ export default function RiderRequestPage() {
          Uber-style bottom sheet: map fills the viewport stage, the
          booking card slides up from the bottom with its own scroll
          + sticky action bar. The map keeps the brand-red BOOKING
-         pill anchored to the top-left so context is never hidden. */}
-      <div className="md:hidden">
+         pill anchored to the top-left so context is never hidden.
+         Renders only when viewport is mobile so the desktop tree
+         doesn't also mount in parallel — that avoided the duplicate
+         MapView / form / PlacesAutocomplete instances that the
+         CSS-only switch was leaving behind. */}
+      {!(viewportReady && !isMobile) && (
+      <div>
         <RiderBottomSheet
           map={
             <MapView
@@ -2086,13 +2098,16 @@ export default function RiderRequestPage() {
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>
       </div>
+      )}
 
-      {/* ═════════════ DESKTOP LAYOUT ═════════════ */}
-      {/* Negative margins cancel PortalLayout's px-4 + md:py-6 wrapper padding
-          so the page occupies the full main column (100vh) edge-to-edge.
-          Combined with md:h-screen, the page fits exactly inside main → no
-          chance of overflow → main never shows a scrollbar on this page. */}
-      <div className="hidden md:-mx-4 md:-my-6 md:flex md:h-screen md:gap-5">
+      {/* ═════════════ DESKTOP LAYOUT ═════════════
+         Negative margins cancel PortalLayout's px-4 + md:py-6 wrapper padding
+         so the page occupies the full main column (100vh) edge-to-edge.
+         Combined with md:h-screen, the page fits exactly inside main → no
+         chance of overflow → main never shows a scrollbar on this page.
+         Renders only when viewport is desktop. */}
+      {viewportReady && !isMobile && (
+      <div className="-mx-4 -my-6 flex h-screen gap-5">
         {/* Map card on the left — 50% of the row */}
         <div className="relative min-w-0 flex-1 basis-0 overflow-hidden rounded-3xl shadow-xl shadow-rajlo-black/10">
           <MapView
@@ -2145,6 +2160,7 @@ export default function RiderRequestPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Insufficient-funds modal — fires when the booking API returns
          402. CTA inside the modal navigates to /rider/wallet?deposit=open

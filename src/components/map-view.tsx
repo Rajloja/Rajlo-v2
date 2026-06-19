@@ -110,6 +110,15 @@ function approxDistanceMeters(
 // or zoom. The SVG is an extra ~14px taller than the visual bubble so
 // the anchor (bottom-centre) puts the triangle tip a clean 4px above
 // the pin's top edge regardless of pin size.
+/** Trim a place name for the on-map label so the bubble stays a
+ *  readable width. Uber caps at roughly 18 chars before ellipsizing;
+ *  same target here. Honors word boundaries when convenient. */
+function truncateLabel(name: string, maxLen = 18): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return trimmed.slice(0, maxLen - 1).trimEnd() + "…";
+}
+
 function buildBubbleIcon(
   text: string,
   accent: "red" | "black",
@@ -1525,14 +1534,18 @@ export function MapView({
     const map = mapRef.current;
     if (!map || typeof window === "undefined" || !window.google) return;
 
-    // Pickup bubble — hidden once the trip is in progress (the rider
-    // has already been picked up so an "X min away" pickup hint is
-    // stale clutter at that point).
+    // Pickup bubble — Uber-style "From {place name}" floating label.
+    // Always renders when pickup is known (was: only with ETA). When
+    // a driver-ETA is also available, append "· N min" so the rider
+    // gets both pieces of context in one tag. Hidden once the trip
+    // is in progress (the rider's already been picked up — a "from"
+    // label is stale clutter at that point).
     const pickupHidden = liveRoute?.target === "dropoff";
-    const pickupText =
-      pickup && pickupEtaMinutes != null && !pickupHidden
-        ? formatEta(pickupEtaMinutes)
-        : null;
+    const pickupText = pickup && !pickupHidden
+      ? pickupEtaMinutes != null
+        ? `From ${truncateLabel(pickup.name)} · ${formatEta(pickupEtaMinutes)}`
+        : `From ${truncateLabel(pickup.name)}`
+      : null;
     if (pickupText && pickup) {
       if (!pickupBubbleRef.current) {
         pickupBubbleRef.current = new google.maps.Marker({
@@ -1565,11 +1578,14 @@ export function MapView({
       pickupBubblePosRef.current = null;
     }
 
-    // Dropoff bubble — always renders when we have a dropoff + ETA.
-    const dropoffText =
-      dropoff && dropoffEtaMinutes != null
-        ? `${formatEta(dropoffEtaMinutes)} · Drop off`
-        : null;
+    // Dropoff bubble — Uber-style "To {place name}" floating label.
+    // Always renders when dropoff is known; appends "· N min" when
+    // an ETA is also available.
+    const dropoffText = dropoff
+      ? dropoffEtaMinutes != null
+        ? `To ${truncateLabel(dropoff.name)} · ${formatEta(dropoffEtaMinutes)}`
+        : `To ${truncateLabel(dropoff.name)}`
+      : null;
     if (dropoffText && dropoff) {
       if (!dropoffBubbleRef.current) {
         dropoffBubbleRef.current = new google.maps.Marker({
