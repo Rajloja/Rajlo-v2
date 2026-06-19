@@ -6,7 +6,10 @@ import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { PlacesAutocomplete } from "@/components/places-autocomplete";
 import { MapView } from "@/components/map-view";
-import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
+import {
+  RiderBottomSheet,
+  useFloatingControlsOffset,
+} from "@/components/rider-bottom-sheet";
 import { AnonymousBookingPrompt } from "@/components/anonymous-booking-prompt";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useIsMobile } from "@/lib/use-is-mobile";
@@ -149,6 +152,10 @@ export default function RiderRequestPage() {
   // / PlacesAutocomplete ran in duplicate. That's also a class of bug
   // we want to avoid here (subscriptions, Google Places listeners).
   const { isMobile, mounted: viewportReady } = useIsMobile();
+
+  // Push MapView's floating controls (locate-me button) above the
+  // bottom sheet's collapsed snap so they stay visible behind it.
+  const floatingControlsOffset = useFloatingControlsOffset(0.5);
 
   // Map-pin picker overlay state. When non-null we render the
   // fullscreen `<MapPinPicker>` over the booking page, letting the
@@ -2094,6 +2101,7 @@ export default function RiderRequestPage() {
               boarding={journeyMapOverlays.boarding}
               alighting={journeyMapOverlays.alighting}
               corridorLines={journeyMapOverlays.corridorLines}
+              floatingControlsBottomPx={floatingControlsOffset}
               suppressStaticRoute={
                 mode === "route_taxi" &&
                 !!journeyMapOverlays.corridorLines &&
@@ -2119,11 +2127,9 @@ export default function RiderRequestPage() {
           // Sticky action bar with the price label on the left and
           // Next button on the right — always visible at the bottom
           // of the sheet whether collapsed or expanded. Sheet itself
-          // is draggable up-to-fullscreen via the handle, so the
-          // rider gets more form room when they need it without
-          // losing the primary CTA.
+          // is scroll-to-expand (vaul drawer), so the rider gets more
+          // form room when they swipe up without losing the CTA.
           actionBar={barContent}
-          sheetTop="50vh"
         >
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>

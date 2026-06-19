@@ -7,7 +7,10 @@ import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { MapView } from "@/components/map-view";
-import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
+import {
+  RiderBottomSheet,
+  useFloatingControlsOffset,
+} from "@/components/rider-bottom-sheet";
 import { useIsMobile } from "@/lib/use-is-mobile";
 import { RequestingProgressBar } from "@/components/requesting-progress-bar";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -225,6 +228,10 @@ export default function RiderLiveTripPage() {
   // two ChatLauncher instances racing setState during the status
   // transition.
   const { isMobile, mounted: viewportReady } = useIsMobile();
+
+  // Push MapView's floating controls (locate-me, etc.) above the
+  // bottom sheet's collapsed snap so they stay tappable.
+  const floatingControlsOffset = useFloatingControlsOffset(0.5);
 
   // Once the rider moves past a shown "trip ended" card — taps through
   // it or leaves the page — remember it so a later return lands on a
@@ -855,6 +862,7 @@ export default function RiderLiveTripPage() {
       // pickup/dropoff context, which reads cleanly.
       searching={false}
       searchingUntil={null}
+      floatingControlsBottomPx={floatingControlsOffset}
       className="h-full w-full"
     />
   );
@@ -1260,11 +1268,7 @@ export default function RiderLiveTripPage() {
         </div>
       ) : (
         // ═════════════ MOBILE LAYOUT (Uber-style bottom sheet) ═════════════
-        <RiderBottomSheet
-          map={mapNode}
-          mapBadge={mobileStatusBadge}
-          sheetTop="50vh"
-        >
+        <RiderBottomSheet map={mapNode} mapBadge={mobileStatusBadge}>
           <div className="space-y-4 pb-4">{bodyContent}</div>
         </RiderBottomSheet>
       )}
