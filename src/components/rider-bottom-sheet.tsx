@@ -47,10 +47,33 @@ export function RiderBottomSheet({
   const SNAP_POINTS = [0.5, 0.92] as const;
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
-  // Lock body scroll while the drawer is open is vaul's default — but
-  // we want the map underneath to stay scrollable/pannable, so we
-  // tell vaul to keep its hands off the body. Then re-enable our own
-  // scroll prevention only where it makes sense.
+  // Lock body + html scroll while this page is mounted. The rider
+  // portal's PortalLayout uses body scroll on mobile (see
+  // mobile-drawer.tsx), which meant any swipe on the bottom sheet
+  // ALSO scrolled the page underneath — pulling the map along with
+  // the sheet and making everything feel glitchy. The map is inside
+  // the page DOM, so the only way to keep it visually fixed is to
+  // stop the page from scrolling at all while we're on a sheet page.
+  // We do this with overscroll-behavior + overflow:hidden, restored
+  // on unmount so other pages (which DO need to scroll) still work.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevBodyOverscroll = document.body.style.overscrollBehavior;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+    document.documentElement.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehavior = "contain";
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.body.style.overscrollBehavior = prevBodyOverscroll;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.documentElement.style.overscrollBehavior = prevHtmlOverscroll;
+    };
+  }, []);
+
   return (
     <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
       {/* Map fills the whole stage and stays mounted. The drawer
@@ -71,8 +94,13 @@ export function RiderBottomSheet({
         snapPoints={[...SNAP_POINTS]}
         activeSnapPoint={snap}
         setActiveSnapPoint={setSnap}
-        // Disable body styling — we manage the page's scroll behavior
-        // ourselves (the parent page is already locked-height).
+        // Force snap transitions to step through points in order
+        // (collapsed ↔ expanded) — without this a fast flick can
+        // overshoot and land between points, which read as glitchy.
+        snapToSequentialPoint
+        // Vaul tries to manage body scroll itself; we already do
+        // that with the useEffect above and we have a non-modal
+        // persistent sheet, so tell vaul to stay out of body styles.
         noBodyStyles
       >
         <Drawer.Portal>
