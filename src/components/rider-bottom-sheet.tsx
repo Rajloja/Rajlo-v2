@@ -52,7 +52,14 @@ export function RiderBottomSheet({
   return (
     // Negative margins cancel PortalLayout's px-4/py-4 wrapper padding
     // so the sheet bleeds to the viewport edges on mobile.
-    <div className="-mx-4 -my-4 relative h-[calc(100vh-3.5rem)] overflow-hidden">
+    //
+    // `100dvh` instead of `100vh`: on iOS Safari (and modern Chrome),
+    // `100vh` counts the full viewport INCLUDING the area covered by
+    // the URL bar at the bottom, which means our sheet's bottom edge
+    // slips UNDER the URL bar and clips the action button. `100dvh`
+    // (dynamic viewport height) excludes browser chrome, so the sheet
+    // stays fully inside the visible area as the bar collapses.
+    <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
       {/* Map fills the entire stage. Sheet sits on top of it. */}
       <div className="absolute inset-0">{map}</div>
 
@@ -79,7 +86,17 @@ export function RiderBottomSheet({
         </div>
 
         {actionBar && (
-          <div className="shrink-0 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur">
+          // safe-area-inset-bottom adds extra padding so the primary
+          // button sits ABOVE the iOS home indicator / Safari URL
+          // bar instead of being half-covered. The CSS env() resolves
+          // to 0 on browsers without notches, so this is harmless on
+          // desktop and Android Chrome.
+          <div
+            className="shrink-0 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
+            style={{
+              paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
+            }}
+          >
             {actionBar}
           </div>
         )}
