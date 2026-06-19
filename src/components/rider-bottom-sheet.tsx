@@ -290,9 +290,13 @@ export function RiderBottomSheet({
           </div>
         )}
 
-        {/* Bottom sheet — `height` motion value drives its size. */}
+        {/* Bottom sheet — `height` motion value drives its size.
+         z-40 sits above MapView's floating controls (locate-me at
+         z-30) so the sheet always covers them when expanded. The
+         page-level fixed action bar uses z-50 to stay above the
+         sheet's bottom edge. */}
         <m.div
-          className="absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
+          className="absolute inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
           style={{ height }}
         >
           {/* Handle — the ONLY draggable area. Big touch target. */}

@@ -492,6 +492,7 @@ export function MapView({
   onUserDrag,
   recenterToken = 0,
   floatingControlsBottomPx = 0,
+  mapBottomInsetPx = 0,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -593,6 +594,13 @@ export function MapView({
    *  host (ResizeObserver) and passed through here — so when the
    *  card expands, the locate-me follows. Defaults to 0. */
   floatingControlsBottomPx?: number;
+  /** Pixels of map at the bottom that are occluded by an overlay
+   *  (typically a bottom sheet covering the lower portion of the
+   *  map container). When set, all camera operations (setCenter,
+   *  fitBounds, panTo) compensate by shifting the displayed center
+   *  upward so the focus point stays inside the VISIBLE map area
+   *  instead of being hidden behind the overlay. Defaults to 0. */
+  mapBottomInsetPx?: number;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1091,6 +1099,10 @@ export function MapView({
         if (!map) return;
         map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         map.setZoom(14);
+        // Shift up so the rider's location appears in the VISIBLE
+        // map area, not behind any bottom-sheet overlay covering
+        // the bottom half of the map container.
+        if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
       },
       () => {
         // Permission denied / timeout — leave the Jamaica overview
@@ -1098,6 +1110,10 @@ export function MapView({
       },
       { enableHighAccuracy: false, timeout: 5000, maximumAge: 60_000 },
     );
+    // mapBottomInsetPx intentionally NOT in deps — we only want this
+    // effect to fire on initial mount (didAutoCenterRef gate). Inset
+    // changes after mount are handled by the marker-bounds effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, pickup, dropoff]);
 
   // Init map + DirectionsService once. We retry once on a small delay if
@@ -1411,6 +1427,9 @@ export function MapView({
     if (points.length === 0) {
       map.setCenter(JAMAICA_CENTER);
       map.setZoom(9);
+      // Shift up so the Jamaica overview sits in the visible map area
+      // (not behind a bottom-sheet overlay).
+      if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
       return;
     }
 
@@ -1455,6 +1474,7 @@ export function MapView({
     if (points.length === 1) {
       map.setCenter({ lat: points[0].place.lat, lng: points[0].place.lng });
       map.setZoom(14);
+      if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
       return;
     }
 
@@ -1478,7 +1498,12 @@ export function MapView({
       points.forEach((p) =>
         bounds.extend({ lat: p.place.lat, lng: p.place.lng }),
       );
-      map.fitBounds(bounds, { top: 56, right: 56, bottom: 56, left: 56 });
+      map.fitBounds(bounds, {
+        top: 56,
+        right: 56,
+        bottom: 56 + mapBottomInsetPx,
+        left: 56,
+      });
       recordOverviewFrame(map, bounds);
     };
 
@@ -1543,7 +1568,7 @@ export function MapView({
           map.fitBounds(route.bounds, {
             top: 56,
             right: 56,
-            bottom: 56,
+            bottom: 56 + mapBottomInsetPx,
             left: 56,
           });
           recordOverviewFrame(map, route.bounds);
@@ -2009,7 +2034,7 @@ export function MapView({
             map.fitBounds(bounds, {
               top: 80,
               right: 60,
-              bottom: 80,
+              bottom: 80 + mapBottomInsetPx,
               left: 60,
             });
             recordOverviewFrame(map, bounds);
@@ -2538,7 +2563,12 @@ export function MapView({
       }
     }
     if (extended) {
-      map.fitBounds(bounds, { top: 64, right: 56, bottom: 64, left: 56 });
+      map.fitBounds(bounds, {
+        top: 64,
+        right: 56,
+        bottom: 64 + mapBottomInsetPx,
+        left: 56,
+      });
       // Record the corridor overview so the rider's zoom-IN restore
       // timer has a target to snap back to. Without this, pinching
       // in on a route-taxi corridor view would never auto-restore.

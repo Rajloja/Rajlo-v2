@@ -863,6 +863,7 @@ export default function RiderLiveTripPage() {
       searching={false}
       searchingUntil={null}
       floatingControlsBottomPx={floatingControlsOffset}
+      mapBottomInsetPx={floatingControlsOffset}
       className="h-full w-full"
     />
   );

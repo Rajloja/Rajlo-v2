@@ -2102,6 +2102,7 @@ export default function RiderRequestPage() {
               alighting={journeyMapOverlays.alighting}
               corridorLines={journeyMapOverlays.corridorLines}
               floatingControlsBottomPx={floatingControlsOffset}
+              mapBottomInsetPx={floatingControlsOffset}
               suppressStaticRoute={
                 mode === "route_taxi" &&
                 !!journeyMapOverlays.corridorLines &&
@@ -2132,10 +2133,10 @@ export default function RiderRequestPage() {
          the sheet) so it stays visible at all times regardless of
          which snap point the rider has dragged the sheet to.
          safe-area-inset-bottom keeps the Next button above iOS
-         Safari's URL bar + the home indicator. z-30 sits above the
-         vaul drawer (z-20) so it's never hidden behind it. */}
+         Safari's URL bar + the home indicator. z-50 sits above the
+         bottom sheet (z-40) so the CTA is never hidden behind it. */}
         <div
-          className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
           style={{
             paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
           }}
