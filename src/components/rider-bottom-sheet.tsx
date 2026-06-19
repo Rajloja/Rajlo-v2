@@ -60,8 +60,17 @@ export function RiderBottomSheet({
     // (dynamic viewport height) excludes browser chrome, so the sheet
     // stays fully inside the visible area as the bar collapses.
     <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
-      {/* Map fills the entire stage. Sheet sits on top of it. */}
-      <div className="absolute inset-0">{map}</div>
+      {/* Map fills the TOP half of the stage only — its bottom edge
+         lines up with the top of the sheet. This makes any floating
+         controls inside MapView (locate-me button, etc.) sit at the
+         bottom-right of the actually-visible map area instead of
+         hiding behind the sheet. */}
+      <div
+        className="absolute inset-x-0 top-0"
+        style={{ height: sheetTop }}
+      >
+        {map}
+      </div>
 
       {mapBadge && (
         <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex items-center gap-2">

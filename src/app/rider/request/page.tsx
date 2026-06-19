@@ -2087,15 +2087,23 @@ export default function RiderRequestPage() {
               </span>
             </>
           }
-          actionBar={barContent}
-          // 50/50 split of the viewport (sheet starts halfway down)
-          // so the map gets the full top half and the booking card
-          // gets the full bottom half. Sheet has internal scroll if
-          // content overflows. Matches the user's "half the screen"
-          // ask and stays consistent with the live-trip layout.
+          // No sticky actionBar — the "Next" CTA scrolls with the
+          // form content instead of pinning to the viewport bottom.
+          // That keeps the price + Next button out of the rider's
+          // way while they're picking locations and stops it from
+          // clashing with Safari's URL bar.
           sheetTop="50vh"
         >
-          <div className="mx-auto max-w-2xl">{formSections}</div>
+          <div className="mx-auto max-w-2xl">
+            {formSections}
+            {/* In-flow CTA row — replaces the previous sticky bottom
+                bar. Price stays left for context (the rider can see
+                what they're agreeing to before they tap), Next sits
+                on the right where the thumb naturally lands. */}
+            <div className="mt-6 flex items-center justify-between gap-3 border-t border-line pt-4">
+              {barContent}
+            </div>
+          </div>
         </RiderBottomSheet>
       </div>
       )}
