@@ -45,28 +45,34 @@ export function RiderBottomSheet({
   const SNAP_POINTS = [0.5, 0.92] as const;
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
-  // overscroll-behavior on body kills the iOS / Chrome pull-to-
-  // refresh gesture while still letting normal layout flow. We
-  // explicitly DON'T set overflow:hidden — that breaks the sticky
-  // navbar in MobileDrawer (which relies on body scroll being a
-  // possibility for `position: sticky` to evaluate correctly) and
-  // also messes up iOS Safari's input/keyboard handling.
+  // Stop iOS / Chrome pull-to-refresh AND stop the page from
+  // scrolling vertically (PortalLayout puts `pb-20` on `<main>` for
+  // the rider portal, which would otherwise let the body scroll by
+  // ~5 rem as the rider swipes the sheet — dragging the map along
+  // with it). We do BOTH on body:
+  //   - overscroll-behavior: contain → no pull-to-refresh
+  //   - overflow-y: hidden            → no page scroll
+  // Restored on unmount so other rider pages keep their natural
+  // scrollable layouts. Sticky navbar still works fine — it's
+  // already inside a flex column that doesn't depend on body scroll.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const prev = document.body.style.overscrollBehavior;
+    const prevOverflow = document.body.style.overflowY;
+    const prevOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflowY = "hidden";
     document.body.style.overscrollBehavior = "contain";
     return () => {
-      document.body.style.overscrollBehavior = prev;
+      document.body.style.overflowY = prevOverflow;
+      document.body.style.overscrollBehavior = prevOverscroll;
     };
   }, []);
 
   return (
-    // `fixed inset-0 top-14` pins this stage to the viewport BELOW
-    // the 56 px (3.5 rem) PortalLayout header, ignoring the parent
-    // page's flow entirely. That way the map / drawer don't slide
-    // around when the body grows past viewport height (e.g. bottom
-    // padding on `<main>`) and don't compete with body scroll.
-    <div className="fixed inset-0 top-14 overflow-hidden">
+    // Relative wrapper sized to the viewport-below-header. Negative
+    // margins cancel PortalLayout's `px-4 py-4` so we bleed to the
+    // viewport edges. `overflow-hidden` keeps the map clipped to
+    // this box while vaul's portal'd drawer overlays from below.
+    <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
       {/* Map fills the stage and stays mounted. The drawer overlays
        it. The map's container DOES NOT resize during drag. */}
       <div className="absolute inset-0">{map}</div>
