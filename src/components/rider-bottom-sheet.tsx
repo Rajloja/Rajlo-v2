@@ -1,34 +1,35 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Drawer } from "vaul";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+} from "react";
+import { LazyMotion, domAnimation, m, useMotionValue, animate } from "motion/react";
 
 /**
  * Mobile bottom-sheet layout for rider screens.
  *
- * Built on vaul, which handles the scroll-controlled snap-point logic
- * natively (the same library Linear / Vercel / Cal.com use for their
- * mobile drawers). What the rider gets:
+ * Hand-rolled implementation — vaul's portal-based architecture
+ * fought too many edge cases with our PortalLayout (sticky navbar,
+ * body scroll, iOS keyboard handling). This is the simpler model:
  *
- *   - Default state: drawer rests at the first snap point (0.5 → 50%
- *     of viewport). Map fills the upper half.
- *   - Swiping up anywhere on the drawer pulls it toward the second
- *     snap point (0.92 → nearly fullscreen). Vaul handles the
- *     scroll-to-expand handoff: pulling up first lifts the drawer,
- *     and only once it's at the top snap does normal content scroll
- *     kick in.
- *   - Swiping down at the top of the content collapses it back.
+ *   - Sheet is a normal `absolute bottom-0` element inside the
+ *     wrapper. No portal. No body scroll lock.
+ *   - Map is `absolute inset-0` filling the wrapper. Stays put.
+ *     The sheet overlays from below, the map never moves.
+ *   - Drag works by tracking the height directly via touch events
+ *     on the HANDLE ONLY. Content scrolling is normal browser scroll
+ *     — we don't compete with it.
+ *   - Two snap points: 50dvh (collapsed) and 92dvh (expanded). Snap
+ *     on release based on position + velocity.
  *
- * The map stays mounted full-viewport behind the drawer — we don't
- * resize its container during drag (that was the source of the
- * "shaking map" jitter in the previous custom implementation). The
- * locate-me button gets pushed above the drawer's collapsed snap
- * point via `floatingControlsBottomPx` on MapView, passed by the
- * caller.
- *
- * `modal={false}` keeps the page underneath fully interactive.
- * `dismissible={false}` stops the drawer from closing entirely —
- * this is a persistent sheet, not a modal.
+ * The wrapper is `overflow-hidden` so the sheet is clipped to the
+ * wrapper bounds, which is everything below the 3.5rem PortalLayout
+ * header. Nothing escapes.
  */
 export function RiderBottomSheet({
   map,
@@ -40,21 +41,13 @@ export function RiderBottomSheet({
   children: ReactNode;
   mapBadge?: ReactNode;
 }) {
-  // Two snap points: half-screen (default) and nearly-fullscreen.
-  // Vaul lets us pass percentages as decimals (0–1).
-  const SNAP_POINTS = [0.5, 0.92] as const;
-  const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
-
-  // Stop iOS / Chrome pull-to-refresh AND stop the page from
-  // scrolling vertically (PortalLayout puts `pb-20` on `<main>` for
-  // the rider portal, which would otherwise let the body scroll by
-  // ~5 rem as the rider swipes the sheet — dragging the map along
-  // with it). We do BOTH on body:
-  //   - overscroll-behavior: contain → no pull-to-refresh
-  //   - overflow-y: hidden            → no page scroll
-  // Restored on unmount so other rider pages keep their natural
-  // scrollable layouts. Sticky navbar still works fine — it's
-  // already inside a flex column that doesn't depend on body scroll.
+  // Lock body scroll while the sheet is mounted. PortalLayout's
+  // `<main>` has `pb-20` on the rider portal, which makes body
+  // taller than viewport and lets every swipe on the sheet ALSO
+  // scroll the body — which pulls the map along. `overflow-y:
+  // hidden` is more surgical than `overflow: hidden` and doesn't
+  // disturb the sticky navbar's positioning. `overscroll-behavior:
+  // contain` kills iOS / Chrome pull-to-refresh.
   useEffect(() => {
     if (typeof document === "undefined") return;
     const prevOverflow = document.body.style.overflowY;
@@ -67,85 +60,170 @@ export function RiderBottomSheet({
     };
   }, []);
 
+  // ─── Snap points in pixels (recomputed on resize) ───
+  // 50dvh and 92dvh of the WRAPPER height (which is 100dvh - 3.5rem).
+  const [snaps, setSnaps] = useState({ collapsed: 0, expanded: 0 });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const recompute = () => {
+      const wrapperHeight = window.innerHeight - 56; // 3.5rem in px
+      setSnaps({
+        collapsed: Math.round(wrapperHeight * 0.5),
+        expanded: Math.round(wrapperHeight * 0.92),
+      });
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    window.addEventListener("orientationchange", recompute);
+    return () => {
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("orientationchange", recompute);
+    };
+  }, []);
+
+  // Sheet height in px — drives the sheet's height directly.
+  const height = useMotionValue<number>(0);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Initial parking once snaps resolve.
+  useEffect(() => {
+    if (snaps.collapsed > 0 && height.get() === 0) {
+      height.set(snaps.collapsed);
+    }
+  }, [snaps.collapsed, height]);
+
+  const animateTo = useCallback(
+    (target: number, velocity = 0) => {
+      animate(height, target, {
+        type: "spring",
+        bounce: 0.2,
+        velocity,
+        duration: 0.35,
+      });
+    },
+    [height],
+  );
+
+  const snapTo = useCallback(
+    (expanded: boolean, velocity = 0) => {
+      setIsExpanded(expanded);
+      animateTo(expanded ? snaps.expanded : snaps.collapsed, velocity);
+    },
+    [animateTo, snaps.collapsed, snaps.expanded],
+  );
+
+  // ─── Drag tracking — handle-only ───
+  const dragStartYRef = useRef(0);
+  const dragStartHeightRef = useRef(0);
+  const lastMoveYRef = useRef(0);
+  const lastMoveTimeRef = useRef(0);
+  const velocityRef = useRef(0);
+
+  const onHandleTouchStart = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      dragStartYRef.current = y;
+      dragStartHeightRef.current = height.get();
+      lastMoveYRef.current = y;
+      lastMoveTimeRef.current = performance.now();
+      velocityRef.current = 0;
+    },
+    [height],
+  );
+
+  const onHandleTouchMove = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      const deltaY = dragStartYRef.current - y; // +ve = swipe UP, expand
+      const next = Math.max(
+        snaps.collapsed - 50, // small overshoot allowance
+        Math.min(snaps.expanded + 50, dragStartHeightRef.current + deltaY),
+      );
+      height.set(next);
+      // Track velocity for snap physics.
+      const now = performance.now();
+      const dt = now - lastMoveTimeRef.current;
+      if (dt > 0) {
+        velocityRef.current = ((lastMoveYRef.current - y) / dt) * 1000;
+      }
+      lastMoveYRef.current = y;
+      lastMoveTimeRef.current = now;
+    },
+    [height, snaps.collapsed, snaps.expanded],
+  );
+
+  const onHandleTouchEnd = useCallback(() => {
+    const v = velocityRef.current; // +ve = upward (expand), -ve = downward (collapse)
+    const current = height.get();
+    if (v > 400) {
+      snapTo(true, v);
+    } else if (v < -400) {
+      snapTo(false, v);
+    } else {
+      const midpoint = (snaps.collapsed + snaps.expanded) / 2;
+      snapTo(current > midpoint, v);
+    }
+  }, [snapTo, snaps.collapsed, snaps.expanded, height]);
+
+  const toggleSheet = useCallback(() => {
+    if (snaps.collapsed <= 0) return;
+    snapTo(!isExpanded);
+  }, [isExpanded, snapTo, snaps.collapsed]);
+
   return (
-    // Relative wrapper sized to the viewport-below-header. Negative
-    // margins cancel PortalLayout's `px-4 py-4` so we bleed to the
-    // viewport edges. `overflow-hidden` keeps the map clipped to
-    // this box while vaul's portal'd drawer overlays from below.
-    <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
-      {/* Map fills the stage and stays mounted. The drawer overlays
-       it. The map's container DOES NOT resize during drag. */}
-      <div className="absolute inset-0">{map}</div>
+    <LazyMotion features={domAnimation} strict>
+      <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
+        {/* Map — fills the wrapper and never moves. */}
+        <div className="absolute inset-0">{map}</div>
 
-      {mapBadge && (
-        <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex items-center gap-2">
-          {mapBadge}
-        </div>
-      )}
+        {mapBadge && (
+          <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex items-center gap-2">
+            {mapBadge}
+          </div>
+        )}
 
-      <Drawer.Root
-        open
-        modal={false}
-        dismissible={false}
-        snapPoints={[...SNAP_POINTS]}
-        activeSnapPoint={snap}
-        setActiveSnapPoint={setSnap}
-        // Force snap transitions to step through points in order
-        // (collapsed ↔ expanded) — without this a fast flick can
-        // overshoot and land between points, which read as glitchy.
-        snapToSequentialPoint
-        // Vaul tries to manage body scroll itself; we already do
-        // that with the useEffect above and we have a non-modal
-        // persistent sheet, so tell vaul to stay out of body styles.
-        noBodyStyles
-      >
-        <Drawer.Portal>
-          <Drawer.Content
-            // Vaul positions this fixed to the viewport; size + slide
-            // are driven by its internal transform. We layer in the
-            // Rajlo brand chrome (rounded top, border, shadow) on top.
-            className="fixed inset-x-0 bottom-0 z-20 flex h-[97dvh] flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)] outline-none"
+        {/* Bottom sheet — `height` motion value drives its size. */}
+        <m.div
+          className="absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
+          style={{ height }}
+        >
+          {/* Handle — the ONLY draggable area. Big touch target. */}
+          <button
+            type="button"
+            onClick={toggleSheet}
+            onTouchStart={onHandleTouchStart}
+            onTouchMove={onHandleTouchMove}
+            onTouchEnd={onHandleTouchEnd}
+            onTouchCancel={onHandleTouchEnd}
+            aria-label={isExpanded ? "Collapse sheet" : "Expand sheet"}
+            className="flex h-10 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing touch-none"
           >
-            {/* Drag handle — vaul renders the visual hint AND wires
-             it up to the drag controller. */}
-            <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-line" />
+            <span className="h-1.5 w-12 rounded-full bg-line" />
+          </button>
 
-            <Drawer.Title className="sr-only">Booking sheet</Drawer.Title>
-
-            {/* Scrollable content. Vaul handles the
-             scroll-vs-drag handoff: while drawer is below the top
-             snap, this area's scroll is locked and gestures lift
-             the drawer; once at the top snap, normal scroll
-             behaves. */}
-            {/* Bottom padding leaves room for the page-level fixed
-             action bar (rendered by the caller as a sibling, NOT
-             inside this drawer) so the last line of scrollable
-             content isn't hidden behind it. */}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-2">
-              {children}
-            </div>
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
-    </div>
+          {/* Scrollable content — native browser scroll, no
+          interception. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-1">
+            {children}
+          </div>
+        </m.div>
+      </div>
+    </LazyMotion>
   );
 }
 
 /**
- * Helper that callers can use to figure out roughly how far to push
- * floating map controls (locate-me button, etc.) above the drawer's
- * collapsed snap so they aren't hidden behind it. Pass the result
- * straight to MapView's `floatingControlsBottomPx`.
- *
- * Re-evaluates on resize so rotations + browser-chrome collapses
- * keep the button properly anchored.
+ * Helper that callers can use to figure out how far to push floating
+ * map controls above the drawer's collapsed snap so they aren't
+ * hidden behind it. Pass the result to MapView's
+ * `floatingControlsBottomPx`.
  */
 export function useFloatingControlsOffset(snapFraction = 0.5) {
   const [px, setPx] = useState(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const recompute = () =>
-      setPx(Math.round(window.innerHeight * snapFraction));
+      setPx(Math.round((window.innerHeight - 56) * snapFraction));
     recompute();
     window.addEventListener("resize", recompute);
     window.addEventListener("orientationchange", recompute);
