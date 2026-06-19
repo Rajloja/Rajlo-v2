@@ -170,6 +170,114 @@ export function RiderBottomSheet({
     snapTo(!isExpanded);
   }, [isExpanded, snapTo, snaps.collapsed]);
 
+  // ─── Scroll-to-expand on the content area ───
+  // The rider can swipe ANYWHERE on the sheet content. We decide
+  // per-gesture whether to drag the sheet or scroll the content:
+  //
+  //   Sheet COLLAPSED → drag the sheet (content can't meaningfully
+  //                     scroll when only the top of it is visible).
+  //   Sheet EXPANDED + content scrolled below top → native scroll.
+  //   Sheet EXPANDED + content at top + swipe DOWN → drag sheet to
+  //                     collapse (this is the "scroll back up to
+  //                     close" gesture).
+  //   Sheet EXPANDED + content at top + swipe UP → native scroll.
+  //
+  // Decision is locked per gesture. We attach the touch listeners
+  // imperatively with `passive: false` so preventDefault works on
+  // touchmove — React's synthetic events are passive by default.
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = contentScrollRef.current;
+    if (!el) return;
+    if (snaps.collapsed <= 0) return;
+
+    let startY = 0;
+    let startHeight = 0;
+    let startScrollTop = 0;
+    let mode: "sheet" | "content" | null = null;
+    let lastY = 0;
+    let lastTime = 0;
+    let velocity = 0;
+
+    const onStart = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      startY = y;
+      startHeight = height.get();
+      startScrollTop = el.scrollTop;
+      lastY = y;
+      lastTime = performance.now();
+      velocity = 0;
+      mode = null;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      const deltaY = y - startY; // +ve = swipe DOWN, -ve = swipe UP
+
+      if (mode === null) {
+        if (Math.abs(deltaY) < 4) return;
+        const isExpandedNow = startHeight >= snaps.expanded - 12;
+        if (!isExpandedNow) {
+          mode = "sheet";
+        } else if (startScrollTop > 0) {
+          mode = "content";
+        } else if (deltaY > 0) {
+          mode = "sheet";
+        } else {
+          mode = "content";
+        }
+      }
+
+      if (mode === "sheet") {
+        // Stop native scroll so the sheet drag is the only motion.
+        if (e.cancelable) e.preventDefault();
+        const next = Math.max(
+          snaps.collapsed - 40,
+          Math.min(snaps.expanded + 20, startHeight - deltaY),
+        );
+        height.set(next);
+        const now = performance.now();
+        const dt = now - lastTime;
+        if (dt > 0) {
+          velocity = ((lastY - y) / dt) * 1000; // +ve = upward (expand)
+        }
+        lastY = y;
+        lastTime = now;
+      }
+      // mode === "content": do nothing — native scroll handles it.
+    };
+
+    const onEnd = () => {
+      if (mode === "sheet") {
+        const v = velocity;
+        const current = height.get();
+        if (v > 400) {
+          snapTo(true, v);
+        } else if (v < -400) {
+          snapTo(false, v);
+        } else {
+          const midpoint = (snaps.collapsed + snaps.expanded) / 2;
+          snapTo(current > midpoint, v);
+        }
+      }
+      mode = null;
+    };
+
+    // passive: false on touchmove so preventDefault can stop native
+    // scroll while we're driving the sheet. touchstart can stay
+    // passive — we never preventDefault it.
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    el.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [height, snapTo, snaps.collapsed, snaps.expanded]);
+
   return (
     <LazyMotion features={domAnimation} strict>
       <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
@@ -201,9 +309,17 @@ export function RiderBottomSheet({
             <span className="h-1.5 w-12 rounded-full bg-line" />
           </button>
 
-          {/* Scrollable content — native browser scroll, no
-          interception. */}
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-1">
+          {/* Scrollable content. Touch listeners attached via
+          contentScrollRef decide per-gesture whether to drag the
+          sheet (when collapsed, or when expanded+at-top+swiping-down)
+          or scroll the content (when expanded+scrolled, or
+          expanded+at-top+swiping-up). `touch-action: pan-y` tells
+          the browser we want vertical pan but we'll intercept it
+          when needed. */}
+          <div
+            ref={contentScrollRef}
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-24 pt-1"
+          >
             {children}
           </div>
         </m.div>
