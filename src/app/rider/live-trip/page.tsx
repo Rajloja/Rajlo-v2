@@ -7,6 +7,7 @@ import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { MapView } from "@/components/map-view";
+import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useRidePosition } from "@/lib/use-ride-position";
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
@@ -814,51 +815,80 @@ export default function RiderLiveTripPage() {
   const isTerminal = ride.status === "completed" || ride.status === "cancelled";
   const canCancel = ["requested", "accepted", "arrived"].includes(ride.status);
 
-  return (
-    <div className="mx-auto max-w-3xl space-y-4 px-2 py-6 md:px-3 md:py-8">
-      <FadeUp>
-        <div
-          className={`relative overflow-hidden rounded-3xl p-6 text-white shadow-xl md:p-8 ${
-            hero.tone === "emerald"
-              ? "bg-emerald-600 shadow-emerald-600/30"
-              : hero.tone === "amber"
-                ? "bg-rajlo-black shadow-rajlo-black/30"
-                : "bg-rajlo-red shadow-rajlo-red/30"
-          }`}
-        >
-          <ArcWatermark
-            size={360}
-            variant="white"
-            className="absolute -right-20 -bottom-24 opacity-[0.10]"
-          />
-          <div className="relative">
-            <p className="font-secondary text-xs font-bold uppercase tracking-wider text-white/85">
-              {hero.eyebrow}
-            </p>
-            <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
-              {hero.title}
-            </h1>
-            <p className="mt-2 max-w-lg text-sm text-white/85">
-              {hero.description}
-            </p>
-            {ride.status === "accepted" && (
-              <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-                </span>
-                Live · driver heading to you
-              </div>
-            )}
-          </div>
-        </div>
-      </FadeUp>
+  // ─── Reusable JSX fragments shared by mobile bottom-sheet + desktop
+  //     vertical-stack layouts. Built up here so both layouts read
+  //     from the same data and we don't drift apart. ───
 
-      {/* Carpool badge intentionally hidden — backend may still return
-         a `carpool` field on existing trips, but the feature is no
-         longer offered through the UI. Block kept removed (not just
-         commented) so JSX bundle stays lean. */}
+  // The MapView call — extracted because mobile uses it as the
+  // bottom-sheet's background and desktop uses it inline as a card.
+  const mapNode = (
+    <MapView
+      pickup={mapPickup}
+      stops={mapStops}
+      dropoff={mapDropoff}
+      driverPosition={driverPosition}
+      riderPosition={riderPosition}
+      liveRoute={
+        ride.status === "accepted" || ride.status === "arrived"
+          ? { target: "pickup" }
+          : ride.status === "in_progress"
+            ? { target: "dropoff" }
+            : null
+      }
+      searching={ride.status === "requested"}
+      searchingUntil={ride.status === "requested" ? ride.expiresAt : null}
+      className="h-full w-full"
+    />
+  );
 
+  // Short status label for the mobile map overlay — Uber uses
+  // headline phrases like "Pick-up in 4 mins" / "Finding drivers
+  // nearby" instead of the longer marketing copy in the desktop hero.
+  // Keeping these short stops the pill from wrapping or covering the
+  // map needlessly.
+  const mobileShortTitle: Record<ActiveRide["status"], string> = {
+    requested: "Finding your driver",
+    accepted: "Driver on the way",
+    arrived: "Driver has arrived",
+    in_progress: "On your trip",
+    completed: "Trip complete",
+    cancelled: "Trip cancelled",
+  };
+
+  // States where there's an active background process the rider is
+  // waiting on — show the pulsing dot to communicate liveness.
+  const showLiveDot =
+    ride.status === "requested" ||
+    ride.status === "accepted" ||
+    ride.status === "in_progress";
+
+  const mobileStatusBadge = (
+    <div
+      className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-bold uppercase tracking-wider shadow-lg backdrop-blur ${
+        hero.tone === "emerald"
+          ? "bg-emerald-600/95 text-white shadow-emerald-600/25"
+          : hero.tone === "amber"
+            ? "bg-rajlo-black/95 text-white shadow-rajlo-black/25"
+            : "bg-rajlo-red/95 text-white shadow-rajlo-red/25"
+      }`}
+    >
+      {showLiveDot && (
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+        </span>
+      )}
+      <span>{mobileShortTitle[ride.status]}</span>
+    </div>
+  );
+
+  // Everything that lives below the map: error banners, driver card,
+  // PIN card, trip details, action row. Shared between mobile sheet
+  // body and desktop vertical flow. The hero banner is NOT part of
+  // this — mobile shows it as the compact status strip on the map,
+  // desktop shows the full hero card above the map.
+  const bodyContent = (
+    <>
       {error && (
         <div className="rounded-xl border border-rajlo-red/30 bg-primary-soft px-4 py-3 text-sm font-semibold text-rajlo-red">
           {error}
@@ -869,42 +899,6 @@ export default function RiderLiveTripPage() {
           {geoError} Sharing your live position helps your driver find you.
         </div>
       )}
-
-      <FadeUp delay={0.05}>
-        <div className="overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/4">
-          {/* Live-tracking is the primary task on this page, so let the
-             map dominate. `h-[55vh]` scales with the device — about half
-             the viewport on phones, comfortable on desktop.
-
-             Live-route mode flips the polyline from "preview the whole
-             trip" to "where the driver is going right now":
-              - accepted/arrived → driver→pickup line
-              - in_progress      → driver→dropoff line
-             Anything else (requested while waiting for a match,
-             completed, cancelled) falls back to the static preview. */}
-          <MapView
-            pickup={mapPickup}
-            stops={mapStops}
-            dropoff={mapDropoff}
-            driverPosition={driverPosition}
-            riderPosition={riderPosition}
-            liveRoute={
-              ride.status === "accepted" || ride.status === "arrived"
-                ? { target: "pickup" }
-                : ride.status === "in_progress"
-                  ? { target: "dropoff" }
-                  : null
-            }
-            // Radar overlay while the matcher is still scanning —
-            // turns off the moment a driver accepts and the
-            // status flips to "accepted". `searchingUntil` drives
-            // the countdown ring inside the overlay.
-            searching={ride.status === "requested"}
-            searchingUntil={ride.status === "requested" ? ride.expiresAt : null}
-            className="h-[55vh] min-h-80 w-full md:h-[60vh] md:max-h-160"
-          />
-        </div>
-      </FadeUp>
 
       {driver && (
         <FadeUp delay={0.1}>
@@ -921,11 +915,6 @@ export default function RiderLiveTripPage() {
             vehicleColor={driver.vehicleColor}
             extraAction={
               isTerminal ? null : (
-                // Two equal-weight CTAs side-by-side, each full-width
-                // in its grid column. Call uses the primary red pill;
-                // Message uses the same pill shape via the new `pill`
-                // variant on ChatLauncher and shows "Message (N)"
-                // when there are unread messages.
                 <div className="grid grid-cols-2 gap-2">
                   <CallButton
                     rideId={ride.id}
@@ -946,12 +935,6 @@ export default function RiderLiveTripPage() {
               )
             }
           />
-          {/* Live "X km · Y min" pill — only renders while the driver
-             is heading to pickup AND we actually have a fresh GPS fix
-             from them. Distance is haversine (straight-line) which
-             under-estimates road distance ~1.3×; we apply that fudge
-             factor + an avg city speed to reach a useful ETA without
-             a Directions API round-trip on every ping. */}
           {(ride.status === "accepted" || ride.status === "arrived") &&
             driverPosition && (
               <DriverEtaPill
@@ -964,11 +947,6 @@ export default function RiderLiveTripPage() {
         </FadeUp>
       )}
 
-      {/* Verify-Your-Ride PIN card. Most prominent when the driver
-         has arrived (rider's physically about to step in), but we
-         show it earlier in `accepted` too so the rider can have the
-         number ready. Hidden once the driver has entered it — the
-         visible state would just be noise after that. */}
       {ride.pin?.code && !ride.pin.verified && (
         <FadeUp delay={0.12}>
           <div
@@ -1023,7 +1001,6 @@ export default function RiderLiveTripPage() {
         </FadeUp>
       )}
 
-      {/* Trip details */}
       <FadeUp delay={0.15}>
         <div className="rounded-2xl border border-line bg-surface p-5">
           <div className="flex items-start gap-3">
@@ -1086,7 +1063,6 @@ export default function RiderLiveTripPage() {
         </div>
       </FadeUp>
 
-      {/* Action row — safety + cancel side-by-side while the trip is live. */}
       {!isTerminal && (
         <FadeUp delay={0.2}>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -1124,7 +1100,14 @@ export default function RiderLiveTripPage() {
           </Link>
         </FadeUp>
       )}
+    </>
+  );
 
+  // Top-layer modals + the persistent safety-chat pill. Shared by
+  // both layouts — they're absolute / fixed positioned so they live
+  // outside the mobile vs desktop branch.
+  const overlays = (
+    <>
       {safetyOpen && (
         <SafetySheet
           rideId={ride.id}
@@ -1136,11 +1119,6 @@ export default function RiderLiveTripPage() {
           onClose={() => setSafetyOpen(false)}
         />
       )}
-
-      {/* Auto-trigger safety-check modal — fires on unusual stops or
-         when the rider opens it manually. Always-mounted so the
-         component owns its own state transitions; `open` controls
-         visibility. */}
       <SafetyCheckModal
         open={safetyCheckOpen}
         rideId={ride.id}
@@ -1154,14 +1132,9 @@ export default function RiderLiveTripPage() {
         }
         onClose={() => {
           setSafetyCheckOpen(false);
-          // Intentionally keep `safetyCheckAlertId` so the persistent
-          // chat pill below can reopen the modal pointed at the same
-          // alert. The alertId is cleared by the active-alerts poll
-          // once the underlying alert flips to resolved.
           setSafetyCheckAuto(false);
         }}
       />
-
       <CancelReasonDialog
         open={cancelDialogOpen}
         role="rider"
@@ -1173,10 +1146,6 @@ export default function RiderLiveTripPage() {
           ride.timeline.requestedAt,
         )}
       />
-
-      {/* Persistent safety-chat pill — visible while any alert is
-          open or acknowledged on this ride. Tap to reopen the chat
-          thread without re-triggering the auto-escalation timer. */}
       {activeAlert && !safetyCheckOpen && (
         <button
           type="button"
@@ -1194,17 +1163,87 @@ export default function RiderLiveTripPage() {
           <span className="flex flex-col items-start leading-tight">
             <span>Rajlo Safety chat</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-white/85">
-              {activeAlert.acknowledged
-                ? "Officer is on it"
-                : "Open thread"}
+              {activeAlert.acknowledged ? "Officer is on it" : "Open thread"}
             </span>
           </span>
         </button>
       )}
+    </>
+  );
 
-      {/* The chat launcher (icon + sheet + toast) lives inside the
-         driver card above. Nothing more to mount here. */}
+  return (
+    <>
+      {/* ═════════════ MOBILE LAYOUT (Uber-style bottom sheet) ═════════════
+         Map fills the viewport stage; the trip card slides up from the
+         bottom with status badge floating on the map. */}
+      <div className="md:hidden">
+        <RiderBottomSheet map={mapNode} mapBadge={mobileStatusBadge}>
+          <div className="space-y-4 pb-4">{bodyContent}</div>
+        </RiderBottomSheet>
+      </div>
+
+      {/* ═════════════ DESKTOP LAYOUT (existing vertical stack) ═════════════ */}
+      <div className="mx-auto hidden max-w-3xl space-y-4 px-2 py-6 md:block md:px-3 md:py-8">
+      <FadeUp>
+        <div
+          className={`relative overflow-hidden rounded-3xl p-6 text-white shadow-xl md:p-8 ${
+            hero.tone === "emerald"
+              ? "bg-emerald-600 shadow-emerald-600/30"
+              : hero.tone === "amber"
+                ? "bg-rajlo-black shadow-rajlo-black/30"
+                : "bg-rajlo-red shadow-rajlo-red/30"
+          }`}
+        >
+          <ArcWatermark
+            size={360}
+            variant="white"
+            className="absolute -right-20 -bottom-24 opacity-[0.10]"
+          />
+          <div className="relative">
+            <p className="font-secondary text-xs font-bold uppercase tracking-wider text-white/85">
+              {hero.eyebrow}
+            </p>
+            <h1 className="mt-2 text-3xl font-extrabold leading-[1.1] tracking-tight md:text-4xl">
+              {hero.title}
+            </h1>
+            <p className="mt-2 max-w-lg text-sm text-white/85">
+              {hero.description}
+            </p>
+            {ride.status === "accepted" && (
+              <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                </span>
+                Live · driver heading to you
+              </div>
+            )}
+          </div>
+        </div>
+      </FadeUp>
+
+      {/* Desktop map card — wraps the shared mapNode in the same
+         rounded-3xl container the page used before. Mobile renders
+         the same mapNode as a full-bleed background inside the
+         RiderBottomSheet up top. */}
+      <FadeUp delay={0.05}>
+        <div className="overflow-hidden rounded-3xl border border-line bg-surface shadow-lg shadow-rajlo-red/4">
+          <div className="h-[60vh] max-h-160 w-full">{mapNode}</div>
+        </div>
+      </FadeUp>
+
+      {/* Everything below the map (errors, driver card, PIN, trip
+         details, action row) lives in bodyContent so mobile and
+         desktop render the exact same sections from one source. */}
+      {bodyContent}
     </div>
+
+      {/* Top-layer overlays — modals + persistent safety-chat pill.
+         Lifted out of both layout branches because they fixed/absolute
+         position themselves to the viewport and don't care which
+         layout is active underneath. */}
+      {overlays}
+    </>
   );
 }
 

@@ -45,11 +45,22 @@ export function AuthFetchGuard() {
       // Already on an auth surface? Don't ricochet the user away
       // from the form they're trying to submit. Specifically: sign-in
       // pages can legitimately receive 401 on wrong-credentials.
+      //
+      // /rider/request is also exempt: that page is deliberately
+      // visitable by anonymous users so they can see the trip
+      // preview (map + pickup + dropoff + fare estimate) before
+      // being asked to sign in. The page mounts an
+      // AnonymousBookingPrompt overlay to nudge sign-in instead of
+      // an auto-redirect. Any 401s its API calls return (active
+      // ride check, matcher, etc.) are silently swallowed by the
+      // page's own error handling.
       const path = pathname ?? "";
       if (
         path.startsWith("/auth/") ||
         path === "/403" ||
-        path === "/404"
+        path === "/404" ||
+        path === "/rider/request" ||
+        path.startsWith("/rider/request/")
       ) {
         return;
       }

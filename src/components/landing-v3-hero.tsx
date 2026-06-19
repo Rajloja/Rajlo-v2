@@ -467,12 +467,14 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
       tripParams.set("from_address", `${fromValue}, Jamaica`);
     }
 
-    const tripPath = `/rider/request?${tripParams.toString()}`;
-    if (cta.riderIsDashboard) {
-      router.push(tripPath);
-      return;
-    }
-    router.push(`/auth/rider/login?next=${encodeURIComponent(tripPath)}`);
+    // Always push to the request page — the rider sees the trip
+    // preview (map + pickup + dropoff + fare estimate) regardless of
+    // auth state. If they're not signed in, the request page shows a
+    // sticky "Sign in to book" bottom sheet on top of the preview
+    // rather than bouncing them straight to the login form. That's a
+    // much better intro experience for a first-time visitor — they
+    // see what they're about to buy before being asked to sign up.
+    router.push(`/rider/request?${tripParams.toString()}`);
   };
 
   const onSubmitForm = (e: React.FormEvent) => {
@@ -480,9 +482,19 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
     submit();
   };
 
-  // Whether the TO field is currently in Google-suggestions mode
-  // (Private ride) or popular-corridors mode (Route taxi).
-  const toUsesGoogle = mode === "private";
+  // The TO field uses Google Places autocomplete in BOTH modes.
+  //
+  // Before: Route Taxi mode forced the rider to pick a destination
+  // from a hand-curated list of "popular routes" (Papine, Cross
+  // Roads, Spanish Town, etc.). That made route-taxi feel like a
+  // separate, more restrictive product than private ride.
+  //
+  // Now: route taxi accepts any Google Place. The matcher runs on
+  // the request page and figures out which TA-licensed corridor(s)
+  // serve the trip, then surfaces them with fares. Riders get the
+  // same fluid input experience for both modes; the system handles
+  // the "which corridor?" question intelligently behind the scenes. */
+  const toUsesGoogle = true;
 
   return (
     <section className="relative isolate overflow-hidden bg-background text-foreground">

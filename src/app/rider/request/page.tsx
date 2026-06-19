@@ -6,6 +6,9 @@ import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { PlacesAutocomplete } from "@/components/places-autocomplete";
 import { MapView } from "@/components/map-view";
+import { RiderBottomSheet } from "@/components/rider-bottom-sheet";
+import { AnonymousBookingPrompt } from "@/components/anonymous-booking-prompt";
+import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { SavedPlaceChips } from "@/components/saved-place-chips";
 import { Skeleton } from "@/components/skeleton";
 import { InsufficientFundsDialog } from "@/components/insufficient-funds-dialog";
@@ -118,6 +121,26 @@ export default function RiderRequestPage() {
   // ride (and should be sent to the live-trip view instead of the booking
   // form), hide the form to avoid a flash of "book a ride" UI.
   const [bootstrapping, setBootstrapping] = useState(true);
+
+  // Anonymous-visitor support. /rider/request is reachable without a
+  // session so first-time visitors can see the trip preview (map +
+  // pickup + dropoff + fare estimate) before being asked to sign in.
+  //   null  = haven't checked auth yet (suppress overlay during first
+  //           paint to avoid flicker)
+  //   true  = visitor is signed out → show AnonymousBookingPrompt
+  //   false = signed in → normal booking flow
+  const [isAnonymous, setIsAnonymous] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createSupabaseBrowserClient();
+    void supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      setIsAnonymous(!data.user);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // On mount: if the rider already has an in-flight trip — either a
   // private ride (Mode A) or a route taxi hail (Mode B) — skip the
@@ -548,6 +571,17 @@ export default function RiderRequestPage() {
 
   const handleSubmit = async () => {
     if (!canSubmit || !pickup || !dropoff) return;
+    // Anonymous visitor — bounce them through the login flow with a
+    // `next` param so they land right back here after sign-in with
+    // the same trip preview pre-loaded. Done at the top of submit so
+    // we never POST to any booking endpoint without an authenticated
+    // session.
+    if (isAnonymous) {
+      const qs = new URLSearchParams(window.location.search).toString();
+      const next = qs ? `/rider/request?${qs}` : "/rider/request";
+      router.push(`/auth/rider/login?next=${encodeURIComponent(next)}`);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
 
@@ -1996,47 +2030,50 @@ export default function RiderRequestPage() {
 
   return (
     <>
-      {/* ═════════════ MOBILE LAYOUT ═════════════ */}
-      <div className="-mx-4 -my-4 flex min-h-[calc(100vh-3.5rem)] flex-col md:hidden">
-        {/* Map on top */}
-        <div className="relative">
-          <MapView
-            pickup={pickup}
-            stops={filledStops}
-            dropoff={dropoff}
-            nearbyDrivers={fleetDrivers}
-            pickupEtaMinutes={pickupEtaMinutes}
-            dropoffEtaMinutes={dropoff ? fare.etaMinutes : null}
-            boarding={journeyMapOverlays.boarding}
-            alighting={journeyMapOverlays.alighting}
-            corridorLines={journeyMapOverlays.corridorLines}
-            // Only suppress the standard pickup→dropoff polyline when
-            // amber corridor lines are about to render in its place
-            // (multi-leg journey). For a direct corridor match there
-            // are no corridor lines, so we want the static polyline
-            // to draw — otherwise the map would show nothing at all
-            // between A and B.
-            suppressStaticRoute={
-              mode === "route_taxi" &&
-              !!journeyMapOverlays.corridorLines &&
-              journeyMapOverlays.corridorLines.length > 0
-            }
-            className="h-64 w-full"
-          />
-          {breadcrumb}
-        </div>
-
-        {/* Form sheet sliding up under the map */}
-        <div className="relative -mt-6 flex-1 rounded-t-3xl border-t border-line bg-surface">
-          <div className="mx-auto max-w-2xl px-4 pb-32 pt-6">
-            {formSections}
-          </div>
-        </div>
-
-        {/* Fixed bottom action bar — full width of viewport on mobile only */}
-        <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur">
-          {barContent}
-        </div>
+      {/* ═════════════ MOBILE LAYOUT ═════════════
+         Uber-style bottom sheet: map fills the viewport stage, the
+         booking card slides up from the bottom with its own scroll
+         + sticky action bar. The map keeps the brand-red BOOKING
+         pill anchored to the top-left so context is never hidden. */}
+      <div className="md:hidden">
+        <RiderBottomSheet
+          map={
+            <MapView
+              pickup={pickup}
+              stops={filledStops}
+              dropoff={dropoff}
+              nearbyDrivers={fleetDrivers}
+              pickupEtaMinutes={pickupEtaMinutes}
+              dropoffEtaMinutes={dropoff ? fare.etaMinutes : null}
+              boarding={journeyMapOverlays.boarding}
+              alighting={journeyMapOverlays.alighting}
+              corridorLines={journeyMapOverlays.corridorLines}
+              suppressStaticRoute={
+                mode === "route_taxi" &&
+                !!journeyMapOverlays.corridorLines &&
+                journeyMapOverlays.corridorLines.length > 0
+              }
+              className="h-full w-full"
+            />
+          }
+          mapBadge={
+            <>
+              <span className="rounded-full bg-rajlo-red px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-rajlo-red/30">
+                Booking
+              </span>
+              <span className="rounded-full bg-surface/95 text-black px-3 py-1.5 text-[11px] font-bold shadow-md backdrop-blur">
+                {allPoints.length === 0
+                  ? "Where are we going?"
+                  : allPoints.length < 2
+                    ? "Add a destination"
+                    : `${stops.length + 2} stops planned`}
+              </span>
+            </>
+          }
+          actionBar={barContent}
+        >
+          <div className="mx-auto max-w-2xl">{formSections}</div>
+        </RiderBottomSheet>
       </div>
 
       {/* ═════════════ DESKTOP LAYOUT ═════════════ */}
@@ -2109,6 +2146,23 @@ export default function RiderRequestPage() {
         balanceJmd={insufficientFunds?.balanceJmd ?? 0}
         onClose={() => setInsufficientFunds(null)}
       />
+
+      {/* Anonymous-visitor login prompt. Renders only when we've
+         confirmed the visitor isn't signed in. The page stays
+         interactive underneath (map, pickup/dropoff inputs, fare
+         preview) — the prompt is just a sticky bottom card with a
+         "Sign in to book" CTA that round-trips the current URL
+         through the auth flow so the rider lands right back here
+         after sign-in with the same trip preloaded. */}
+      {isAnonymous === true && (
+        <AnonymousBookingPrompt
+          fareLabel={
+            pickup && dropoff && Number.isFinite(fare.fareJMD)
+              ? formatJMD(fare.fareJMD)
+              : null
+          }
+        />
+      )}
     </>
   );
 }
