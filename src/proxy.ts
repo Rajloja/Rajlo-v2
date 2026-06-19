@@ -45,6 +45,17 @@ const SHARED_PATH_PREFIXES = [
   "/trip/", // public trip-share link
 ];
 
+/** Rider-portal pages that anonymous visitors are allowed to load.
+ *  The booking page renders a sticky AnonymousBookingPrompt on top
+ *  of the trip preview (map + pickup + dropoff + fare estimate)
+ *  instead of demanding sign-in upfront — that's a much better
+ *  first-impression than bouncing every new visitor to a login form
+ *  before they've seen what they're buying. The page's own client
+ *  code handles the "sign in before booking" gate. */
+const ANONYMOUS_FRIENDLY_RIDER_PATHS = new Set<string>([
+  "/rider/request",
+]);
+
 const PORTAL_PATH_PREFIXES: Record<Portal, string[]> = {
   rider: ["/rider", "/auth/rider"],
   driver: ["/driver", "/auth/driver"],
@@ -195,6 +206,12 @@ export async function proxy(request: NextRequest) {
     // Admin API with no session → let the route's own auth return a
     // JSON 401 rather than redirecting an API client to an HTML page.
     if (isAdminApi) return response;
+    // Anonymous-friendly rider pages (the booking page) render their
+    // own in-page sign-in prompt instead of bouncing the visitor to a
+    // login form. Let the request through and let the page handle it.
+    if (isRiderRoute && ANONYMOUS_FRIENDLY_RIDER_PATHS.has(path)) {
+      return response;
+    }
     const loginPath = isAdminPage
       ? "/auth/admin/login"
       : isDriverRoute

@@ -1180,7 +1180,7 @@ export default function RiderLiveTripPage() {
         <RiderBottomSheet
           map={mapNode}
           mapBadge={mobileStatusBadge}
-          sheetTop="58vh"
+          sheetTop="50vh"
         >
           <div className="space-y-4 pb-4">{bodyContent}</div>
         </RiderBottomSheet>

@@ -2076,12 +2076,12 @@ export default function RiderRequestPage() {
             </>
           }
           actionBar={barContent}
-          // Sheet starts at 60vh so the map dominates the top 60% of
-          // the viewport (Uber-style). Combined with the mobile-only
-          // hidden title/paragraph chrome inside formSections, the
-          // pickup + dropoff inputs + Next button now all fit in the
-          // sheet's visible 40vh without scrolling on most phones.
-          sheetTop="60vh"
+          // 50/50 split of the viewport (sheet starts halfway down)
+          // so the map gets the full top half and the booking card
+          // gets the full bottom half. Sheet has internal scroll if
+          // content overflows. Matches the user's "half the screen"
+          // ask and stays consistent with the live-trip layout.
+          sheetTop="50vh"
         >
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>
