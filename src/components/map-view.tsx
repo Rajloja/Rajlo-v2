@@ -1097,18 +1097,11 @@ export function MapView({
       (pos) => {
         const map = mapRef.current;
         if (!map) return;
+        // Just setCenter — the host page positions the map container
+        // so its geometric center coincides with the visible map
+        // area's center. No panBy / inset adjustment needed.
         map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         map.setZoom(14);
-        // Use the map's own `idle` event to fire panBy AFTER the
-        // setCenter + setZoom transition has actually settled. iOS
-        // Safari's Google Maps build sometimes swallows panBy when
-        // it's wrapped in requestAnimationFrame because the camera
-        // is still animating. `idle` is the canonical signal.
-        if (mapBottomInsetPx > 0) {
-          google.maps.event.addListenerOnce(map, "idle", () => {
-            mapRef.current?.panBy(0, mapBottomInsetPx / 2);
-          });
-        }
       },
       () => {
         // Permission denied / timeout — leave the Jamaica overview
@@ -1433,14 +1426,6 @@ export function MapView({
     if (points.length === 0) {
       map.setCenter(JAMAICA_CENTER);
       map.setZoom(9);
-      // Use the map's `idle` event so panBy fires after the camera
-      // transition has settled — works consistently across iOS
-      // Safari + Chrome Android (rAF didn't on Safari).
-      if (mapBottomInsetPx > 0) {
-        google.maps.event.addListenerOnce(map, "idle", () => {
-          mapRef.current?.panBy(0, mapBottomInsetPx / 2);
-        });
-      }
       return;
     }
 
@@ -1485,11 +1470,6 @@ export function MapView({
     if (points.length === 1) {
       map.setCenter({ lat: points[0].place.lat, lng: points[0].place.lng });
       map.setZoom(14);
-      if (mapBottomInsetPx > 0) {
-        google.maps.event.addListenerOnce(map, "idle", () => {
-          mapRef.current?.panBy(0, mapBottomInsetPx / 2);
-        });
-      }
       return;
     }
 

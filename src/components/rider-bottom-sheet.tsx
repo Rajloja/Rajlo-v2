@@ -69,18 +69,12 @@ export function RiderBottomSheet({
   // area through every chrome show/hide cycle.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  const [snaps, setSnaps] = useState({ collapsed: 0, expanded: 0 });
   useEffect(() => {
     if (typeof window === "undefined") return;
     const vv = window.visualViewport;
     const recompute = () => {
       const vh = vv?.height ?? window.innerHeight;
-      const h = Math.max(0, Math.round(vh - 56)); // minus navbar
-      setWrapperHeight(h);
-      setSnaps({
-        collapsed: Math.round(h * 0.5),
-        expanded: Math.round(h * 0.92),
-      });
+      setWrapperHeight(Math.max(0, Math.round(vh - 56))); // minus navbar
     };
     recompute();
     if (vv) {
@@ -98,6 +92,40 @@ export function RiderBottomSheet({
       window.removeEventListener("orientationchange", recompute);
     };
   }, []);
+
+  // ─── Measure content height so collapsed snap fits exactly ───
+  // The collapsed snap was previously a fixed 50% of wrapper — but
+  // the form content is usually much shorter, leaving empty white
+  // space between the last input and the bottom of the sheet (the
+  // "padding above the action bar" the user kept seeing). Now we
+  // measure the actual rendered content height and set the snap to
+  // (content + handle + small breathing room), capped at 80% of
+  // wrapper so a very long form still leaves SOME map visible.
+  const contentInnerRef = useRef<HTMLDivElement | null>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  useEffect(() => {
+    const el = contentInnerRef.current;
+    if (!el) return;
+    const recompute = () => setContentHeight(el.scrollHeight);
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Final snap heights — collapsed fits content (with chrome), expanded is the deep dive.
+  const snaps = (() => {
+    if (wrapperHeight <= 0) return { collapsed: 0, expanded: 0 };
+    const handle = 24;
+    const padding = 8;
+    const desired = contentHeight + handle + padding;
+    const min = Math.round(wrapperHeight * 0.3);
+    const max = Math.round(wrapperHeight * 0.8);
+    return {
+      collapsed: Math.min(max, Math.max(min, desired)),
+      expanded: Math.round(wrapperHeight * 0.92),
+    };
+  })();
 
   // Sheet height in px — drives the sheet's height directly.
   const height = useMotionValue<number>(0);
@@ -309,8 +337,30 @@ export function RiderBottomSheet({
           height: wrapperHeight > 0 ? `${wrapperHeight}px` : "calc(100dvh - 3.5rem)",
         }}
       >
-        {/* Map — fills the wrapper and never moves. */}
-        <div className="absolute inset-0">{map}</div>
+        {/* Map container — OFFSET so its geometric center coincides
+         with the visible map area's center (NOT the wrapper's
+         geometric center, which is hidden behind the sheet).
+         Math: container top = -collapsedSheetHeight, height =
+         wrapperHeight + collapsedSheetHeight. The container extends
+         above the wrapper (clipped by overflow-hidden) and reaches
+         the wrapper bottom. Its midpoint lands at the center of
+         the visible map area. This means `map.setCenter(p)` puts
+         `p` in the visible center WITHOUT any panBy / idle-event
+         dance — works identically on iOS Safari + Chrome Android.
+         Falls back to inset-0 until snaps are measured. */}
+        {snaps.collapsed > 0 ? (
+          <div
+            className="absolute left-0 right-0"
+            style={{
+              top: `-${snaps.collapsed}px`,
+              height: `${wrapperHeight + snaps.collapsed}px`,
+            }}
+          >
+            {map}
+          </div>
+        ) : (
+          <div className="absolute inset-0">{map}</div>
+        )}
 
         {mapBadge && (
           <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex items-center gap-2">
@@ -348,15 +398,18 @@ export function RiderBottomSheet({
           expanded+at-top+swiping-up). `touch-action: pan-y` tells
           the browser we want vertical pan but we'll intercept it
           when needed. */}
-          {/* `pb-16` (64 px) is just enough to clear the fixed action
-          bar (height ≈ 56 px) underneath. The previous `pb-24` left
-          a visible empty strip between the last form input and the
-          action bar. */}
+          {/* Scrollable area. The INNER div is what we measure via
+          ResizeObserver to size the collapsed snap to fit content
+          exactly — no empty strip above the action bar. `pb-14`
+          gives the last form element just enough clearance from the
+          fixed action bar at the viewport bottom. */}
           <div
             ref={contentScrollRef}
-            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-16 pt-1"
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain"
           >
-            {children}
+            <div ref={contentInnerRef} className="px-4 pb-14 pt-1">
+              {children}
+            </div>
           </div>
         </m.div>
       </div>
