@@ -34,11 +34,19 @@ import { LazyMotion, domAnimation, m, useMotionValue, animate } from "motion/rea
 export function RiderBottomSheet({
   map,
   children,
+  /** Optional action bar pinned to the bottom of the sheet itself
+   *  (NOT a separate viewport-fixed element). This eliminates the
+   *  gap between the scrollable form content and the action bar —
+   *  they're flex siblings, touching directly. The action bar
+   *  stays visible at every snap point because the sheet's bottom
+   *  edge is always at the viewport bottom. */
+  actionBar,
   /** Optional badge / pill anchored to the top-left of the map area. */
   mapBadge,
 }: {
   map: ReactNode;
   children: ReactNode;
+  actionBar?: ReactNode;
   mapBadge?: ReactNode;
 }) {
   // Hard-lock the page so ONLY the sheet's content area scrolls.
@@ -142,11 +150,14 @@ export function RiderBottomSheet({
   //   - Long forms don't push the sheet past 50%, which would shove
   //     the locate-me button (positioned at the 50% mark) behind it
   //   - The map ALWAYS has at least the top half of the viewport
+  // Desired height includes content + handle (40 px) + action bar
+  // estimate (60 px). Real action bar height will vary slightly; the
+  // capped value keeps us in a sensible range regardless.
   const snaps = (() => {
     if (wrapperHeight <= 0) return { collapsed: 0, expanded: 0 };
-    const handle = 24;
-    const padding = 8;
-    const desired = contentHeight + handle + padding;
+    const handle = 40;
+    const actionBarEstimate = 60;
+    const desired = contentHeight + handle + actionBarEstimate;
     const cap = Math.round(wrapperHeight * 0.5);
     const floor = Math.round(wrapperHeight * 0.3);
     return {
@@ -438,21 +449,27 @@ export function RiderBottomSheet({
           expanded+at-top+swiping-up). `touch-action: pan-y` tells
           the browser we want vertical pan but we'll intercept it
           when needed. */}
-          {/* Scrollable area. The INNER div is what we measure via
-          ResizeObserver to size the collapsed snap to fit content.
-          `pb-12` (48 px) matches the fixed action bar's height
-          exactly — last form element clears the bar with no empty
-          strip between them, and when the rider taps an input the
-          keyboard pushes the input above the action bar instead of
-          padding it down. */}
+          {/* Scrollable area. No bottom padding — the action bar sits
+          directly below as a flex sibling, so there's zero empty
+          space between the last form element and the action bar. */}
           <div
             ref={contentScrollRef}
             className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain"
           >
-            <div ref={contentInnerRef} className="px-4 pb-12 pt-1">
+            <div ref={contentInnerRef} className="px-4 pt-1">
               {children}
             </div>
           </div>
+
+          {/* Action bar — pinned as the LAST flex child of the sheet.
+          Because the sheet's bottom edge is always at the viewport
+          bottom, this stays at the viewport bottom too — no separate
+          fixed element needed, no gap above it. */}
+          {actionBar && (
+            <div className="shrink-0 border-t border-line bg-surface px-4 py-3">
+              {actionBar}
+            </div>
+          )}
         </m.div>
       </div>
     </LazyMotion>

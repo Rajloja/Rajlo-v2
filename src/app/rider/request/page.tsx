@@ -2127,23 +2127,21 @@ export default function RiderRequestPage() {
               </span>
             </>
           }
+          // Action bar lives INSIDE the sheet as a sticky flex child
+          // (last item). This eliminates the visible gap that
+          // appeared when the bar was a separate fixed element
+          // overlapping the sheet — content + bar are now direct
+          // flex siblings, touching with zero space between them.
+          // Sheet's bottom edge is always at viewport bottom, so
+          // the bar stays at viewport bottom too.
+          actionBar={
+            <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+              {barContent}
+            </div>
+          }
         >
           <div className="mx-auto max-w-2xl">{formSections}</div>
         </RiderBottomSheet>
-
-        {/* Fixed action bar — anchored to the VIEWPORT bottom (not
-         the sheet) so it stays visible at all times regardless of
-         which snap point the rider has dragged the sheet to.
-         safe-area-inset-bottom keeps the Next button above iOS
-         Safari's URL bar + the home indicator. z-50 sits above the
-         bottom sheet (z-40) so the CTA is never hidden behind it. */}
-        <div
-          className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur"
-        >
-          <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
-            {barContent}
-          </div>
-        </div>
       </div>
       )}
 
