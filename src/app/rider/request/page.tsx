@@ -2138,7 +2138,13 @@ export default function RiderRequestPage() {
         <div
           className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface/95 px-4 pt-3 backdrop-blur"
           style={{
-            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
+            // `max()` so we use the bigger of 0.75rem OR the safe-area
+            // inset, NOT the sum. The previous `calc()` was adding
+            // 12 px + 34 px on iOS = 46 px extra padding below the
+            // button, which read as "wasted space" below the bar.
+            // max() gives the home indicator the room it needs on
+            // iOS (34 px) without piling extra padding on top.
+            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
           }}
         >
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">

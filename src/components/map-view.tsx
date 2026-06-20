@@ -1099,10 +1099,16 @@ export function MapView({
         if (!map) return;
         map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         map.setZoom(14);
-        // Shift up so the rider's location appears in the VISIBLE
-        // map area, not behind any bottom-sheet overlay covering
-        // the bottom half of the map container.
-        if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
+        // Shift up so the rider's location appears in the CENTER
+        // of the VISIBLE map area, not behind the bottom sheet.
+        // Wrapped in requestAnimationFrame so panBy fires AFTER
+        // setCenter + setZoom commit — otherwise Google Maps'
+        // internal animations can swallow the pan.
+        if (mapBottomInsetPx > 0) {
+          requestAnimationFrame(() => {
+            mapRef.current?.panBy(0, mapBottomInsetPx / 2);
+          });
+        }
       },
       () => {
         // Permission denied / timeout — leave the Jamaica overview
@@ -1428,8 +1434,13 @@ export function MapView({
       map.setCenter(JAMAICA_CENTER);
       map.setZoom(9);
       // Shift up so the Jamaica overview sits in the visible map area
-      // (not behind a bottom-sheet overlay).
-      if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
+      // (not behind a bottom-sheet overlay). rAF defers the pan so
+      // Google Maps' setCenter + setZoom commit first.
+      if (mapBottomInsetPx > 0) {
+        requestAnimationFrame(() => {
+          mapRef.current?.panBy(0, mapBottomInsetPx / 2);
+        });
+      }
       return;
     }
 
@@ -1474,7 +1485,11 @@ export function MapView({
     if (points.length === 1) {
       map.setCenter({ lat: points[0].place.lat, lng: points[0].place.lng });
       map.setZoom(14);
-      if (mapBottomInsetPx > 0) map.panBy(0, mapBottomInsetPx / 2);
+      if (mapBottomInsetPx > 0) {
+        requestAnimationFrame(() => {
+          mapRef.current?.panBy(0, mapBottomInsetPx / 2);
+        });
+      }
       return;
     }
 

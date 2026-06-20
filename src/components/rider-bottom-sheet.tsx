@@ -60,25 +60,31 @@ export function RiderBottomSheet({
     };
   }, []);
 
-  // ─── Snap points in pixels (recomputed on resize) ───
-  // 50dvh and 92dvh of the WRAPPER height (which is 100dvh - 3.5rem).
+  // ─── Snap points based on MEASURED wrapper height ───
+  // We use ResizeObserver on the wrapper rather than reading
+  // window.innerHeight so the snap math always matches the
+  // actual rendered height. Chrome Android, iOS Safari, and
+  // desktop browsers all interpret `100dvh` slightly differently,
+  // and computing snaps from window.innerHeight while the wrapper
+  // is sized by 100dvh CSS leaves a gap (Chrome shows the sheet
+  // shorter than the wrapper → blank strip below the sheet).
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [snaps, setSnaps] = useState({ collapsed: 0, expanded: 0 });
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    const el = wrapperRef.current;
+    if (!el) return;
     const recompute = () => {
-      const wrapperHeight = window.innerHeight - 56; // 3.5rem in px
+      const h = el.clientHeight;
+      if (h <= 0) return;
       setSnaps({
-        collapsed: Math.round(wrapperHeight * 0.5),
-        expanded: Math.round(wrapperHeight * 0.92),
+        collapsed: Math.round(h * 0.5),
+        expanded: Math.round(h * 0.92),
       });
     };
     recompute();
-    window.addEventListener("resize", recompute);
-    window.addEventListener("orientationchange", recompute);
-    return () => {
-      window.removeEventListener("resize", recompute);
-      window.removeEventListener("orientationchange", recompute);
-    };
+    const ro = new ResizeObserver(recompute);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // Sheet height in px — drives the sheet's height directly.
@@ -280,7 +286,10 @@ export function RiderBottomSheet({
 
   return (
     <LazyMotion features={domAnimation} strict>
-      <div className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden">
+      <div
+        ref={wrapperRef}
+        className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden"
+      >
         {/* Map — fills the wrapper and never moves. */}
         <div className="absolute inset-0">{map}</div>
 
