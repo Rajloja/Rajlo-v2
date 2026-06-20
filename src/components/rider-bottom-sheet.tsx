@@ -60,31 +60,43 @@ export function RiderBottomSheet({
     };
   }, []);
 
-  // ─── Snap points based on MEASURED wrapper height ───
-  // We use ResizeObserver on the wrapper rather than reading
-  // window.innerHeight so the snap math always matches the
-  // actual rendered height. Chrome Android, iOS Safari, and
-  // desktop browsers all interpret `100dvh` slightly differently,
-  // and computing snaps from window.innerHeight while the wrapper
-  // is sized by 100dvh CSS leaves a gap (Chrome shows the sheet
-  // shorter than the wrapper → blank strip below the sheet).
+  // ─── Wrapper height tracked from visualViewport ───
+  // `100dvh` CSS resolves to the "small viewport" (with browser
+  // chrome at its tallest) and DOESN'T update when Chrome's bottom
+  // toolbar auto-hides on scroll. That leaves the wrapper shorter
+  // than the actual visible viewport → empty strip below the sheet.
+  // visualViewport.height is the truth — it tracks the live visible
+  // area through every chrome show/hide cycle.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [wrapperHeight, setWrapperHeight] = useState(0);
   const [snaps, setSnaps] = useState({ collapsed: 0, expanded: 0 });
   useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el) return;
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
     const recompute = () => {
-      const h = el.clientHeight;
-      if (h <= 0) return;
+      const vh = vv?.height ?? window.innerHeight;
+      const h = Math.max(0, Math.round(vh - 56)); // minus navbar
+      setWrapperHeight(h);
       setSnaps({
         collapsed: Math.round(h * 0.5),
         expanded: Math.round(h * 0.92),
       });
     };
     recompute();
-    const ro = new ResizeObserver(recompute);
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (vv) {
+      vv.addEventListener("resize", recompute);
+      vv.addEventListener("scroll", recompute);
+    }
+    window.addEventListener("resize", recompute);
+    window.addEventListener("orientationchange", recompute);
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", recompute);
+        vv.removeEventListener("scroll", recompute);
+      }
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("orientationchange", recompute);
+    };
   }, []);
 
   // Sheet height in px — drives the sheet's height directly.
@@ -288,7 +300,14 @@ export function RiderBottomSheet({
     <LazyMotion features={domAnimation} strict>
       <div
         ref={wrapperRef}
-        className="-mx-4 -my-4 relative h-[calc(100dvh-3.5rem)] overflow-hidden"
+        className="-mx-4 -my-4 relative overflow-hidden"
+        style={{
+          // Live visible-viewport height minus navbar. Tracks Chrome
+          // toolbar auto-hide cycles via visualViewport above. We
+          // fall back to a `100dvh-3.5rem` CSS calc until JS measures
+          // on first paint so there's no zero-height flash.
+          height: wrapperHeight > 0 ? `${wrapperHeight}px` : "calc(100dvh - 3.5rem)",
+        }}
       >
         {/* Map — fills the wrapper and never moves. */}
         <div className="absolute inset-0">{map}</div>
@@ -351,12 +370,23 @@ export function useFloatingControlsOffset(snapFraction = 0.5) {
   const [px, setPx] = useState(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const recompute = () =>
-      setPx(Math.round((window.innerHeight - 56) * snapFraction));
+    const vv = window.visualViewport;
+    const recompute = () => {
+      const vh = vv?.height ?? window.innerHeight;
+      setPx(Math.round((vh - 56) * snapFraction));
+    };
     recompute();
+    if (vv) {
+      vv.addEventListener("resize", recompute);
+      vv.addEventListener("scroll", recompute);
+    }
     window.addEventListener("resize", recompute);
     window.addEventListener("orientationchange", recompute);
     return () => {
+      if (vv) {
+        vv.removeEventListener("resize", recompute);
+        vv.removeEventListener("scroll", recompute);
+      }
       window.removeEventListener("resize", recompute);
       window.removeEventListener("orientationchange", recompute);
     };
