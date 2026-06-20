@@ -127,47 +127,21 @@ export function RiderBottomSheet({
     };
   }, [enabled]);
 
-  // ─── Wrapper height + sheet bottom-inset tracked from visualViewport ───
-  //
-  // Two pieces of geometry both come from window.visualViewport:
-  //
-  //   wrapperHeight = vv.height - 56 (navbar)
-  //     - drives the map container's CSS height so the map fills the
-  //       area between navbar bottom and visualViewport bottom.
-  //
-  //   bottomInsetPx = window.innerHeight - vv.height - vv.offsetTop
-  //     - the pixel gap between the LAYOUT viewport's bottom and the
-  //       VISUAL viewport's bottom, accounting for iOS pan-to-input
-  //       (vv.offsetTop). Drives the SHEET's `position: fixed; bottom`.
-  //     - With keyboard CLOSED: 0 → sheet bottom flush with viewport.
-  //     - With keyboard OPEN: keyboard height → sheet lifts above.
-  //     - With iOS panning: vv.offsetTop subtracts so the sheet
-  //       follows the visual viewport even when iOS shifts content
-  //       within the layout viewport.
-  //
-  // The sheet is `position: fixed` (NOT absolute inside wrapper)
-  // BECAUSE: with `position: absolute` inside the wrapper, the sheet
-  // bottom = wrapper bottom = somewhere relative to the body's flow.
-  // On iOS Safari with body locked, the wrapper bottom often falls
-  // ~120px short of visualViewport bottom (Safari's bottom URL chrome
-  // is treated as outside visualViewport, but the wrapper's body-flow
-  // position doesn't account for that). Anchoring via visualViewport
-  // directly bypasses all of those layout-stack ambiguities.
+  // ─── Wrapper height tracked from visualViewport ───
+  // `100dvh` CSS resolves to the "small viewport" (with browser
+  // chrome at its tallest) and DOESN'T update when Chrome's bottom
+  // toolbar auto-hides on scroll. That leaves the wrapper shorter
+  // than the actual visible viewport → empty strip below the sheet.
+  // visualViewport.height is the truth — it tracks the live visible
+  // area through every chrome show/hide cycle.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  const [bottomInsetPx, setBottomInsetPx] = useState(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const vv = window.visualViewport;
     const recompute = () => {
       const vh = vv?.height ?? window.innerHeight;
       setWrapperHeight(Math.max(0, Math.round(vh - 56))); // minus navbar
-      if (vv) {
-        const inset = window.innerHeight - vv.height - vv.offsetTop;
-        setBottomInsetPx(Math.max(0, Math.round(inset)));
-      } else {
-        setBottomInsetPx(0);
-      }
     };
     recompute();
     if (vv) {
@@ -601,79 +575,57 @@ export function RiderBottomSheet({
             {mapBadge}
           </div>
         )}
+
+        {/* Bottom sheet — absolute inset-x-0 bottom-0 inside the
+         wrapper. The wrapper's bottom is at visualViewport bottom
+         (in body flow), so the sheet's bottom lands at the
+         visualViewport bottom too. Sheet height is animated via
+         the `height` motion value. */}
+        <m.div
+          className="absolute inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
+          style={{ height }}
+        >
+          {/* Handle — the ONLY draggable area. Big touch target. */}
+          <button
+            type="button"
+            onClick={toggleSheet}
+            onTouchStart={onHandleTouchStart}
+            onTouchMove={onHandleTouchMove}
+            onTouchEnd={onHandleTouchEnd}
+            onTouchCancel={onHandleTouchEnd}
+            aria-label={isExpanded ? "Collapse sheet" : "Expand sheet"}
+            className="flex h-10 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing touch-none"
+          >
+            <span className="h-1.5 w-12 rounded-full bg-line" />
+          </button>
+
+          {/* Scrollable content. Touch listeners attached via
+          contentScrollRef decide per-gesture whether to drag the
+          sheet (when collapsed, or when expanded+at-top+swiping-down)
+          or scroll the content (when expanded+scrolled, or
+          expanded+at-top+swiping-up). `touch-action: pan-y` tells
+          the browser we want vertical pan but we'll intercept it
+          when needed. No bottom padding — action bar sits directly
+          below as a flex sibling, zero space between. */}
+          <div
+            ref={contentScrollRef}
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain"
+          >
+            <div ref={contentInnerRef} className="px-4 pt-1">
+              {children}
+            </div>
+          </div>
+
+          {/* Action bar — pinned as the LAST flex child of the sheet,
+          so it stays at the sheet's bottom (= visualViewport bottom)
+          regardless of snap state. */}
+          {actionBar && (
+            <div className="shrink-0 border-t border-line bg-surface px-4 py-3">
+              {actionBar}
+            </div>
+          )}
+        </m.div>
       </div>
-
-      {/* Bottom sheet — LIFTED OUT of the wrapper into `position: fixed`
-       anchored to the VISUAL viewport bottom via the `bottom`
-       inset. This is critical: when the wrapper sat in body flow
-       with the sheet `absolute bottom-0` inside it, the sheet's
-       bottom landed at the wrapper's flow-position bottom — which
-       on iOS Safari with body locked falls ~120px short of the
-       visual viewport bottom (Safari treats its bottom URL chrome
-       as outside visualViewport but the wrapper's flow position
-       doesn't account for that). The result was a strip of body
-       background visible BELOW the action bar but above the
-       keyboard.
-
-       With `position: fixed` + `bottom: bottomInsetPx`, the sheet
-       bottom is always at the visualViewport's bottom in layout
-       viewport coordinates — accounting for iOS pan-to-input
-       (which shifts the visual viewport WITHIN the layout viewport
-       and previously left the sheet stranded mid-screen). */}
-      <m.div
-        className="fixed inset-x-0 z-40 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
-        style={{
-          height,
-          // When the keyboard is OPEN, bottomInsetPx is the keyboard
-          // height (or keyboard+iOS-pan delta) — lift the sheet above
-          // it. When CLOSED, bottomInsetPx is 0 and we fall back to
-          // the iPhone home-indicator safe-area so the action bar
-          // sits above the gesture bar, not behind it. CSS max()
-          // picks whichever inset is bigger.
-          bottom: `max(${bottomInsetPx}px, env(safe-area-inset-bottom, 0px))`,
-        }}
-      >
-        {/* Handle — the ONLY draggable area. Big touch target. */}
-        <button
-          type="button"
-          onClick={toggleSheet}
-          onTouchStart={onHandleTouchStart}
-          onTouchMove={onHandleTouchMove}
-          onTouchEnd={onHandleTouchEnd}
-          onTouchCancel={onHandleTouchEnd}
-          aria-label={isExpanded ? "Collapse sheet" : "Expand sheet"}
-          className="flex h-10 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing touch-none"
-        >
-          <span className="h-1.5 w-12 rounded-full bg-line" />
-        </button>
-
-        {/* Scrollable content. Touch listeners attached via
-        contentScrollRef decide per-gesture whether to drag the
-        sheet (when collapsed, or when expanded+at-top+swiping-down)
-        or scroll the content (when expanded+scrolled, or
-        expanded+at-top+swiping-up). `touch-action: pan-y` tells
-        the browser we want vertical pan but we'll intercept it
-        when needed. No bottom padding — action bar sits directly
-        below as a flex sibling, zero space between. */}
-        <div
-          ref={contentScrollRef}
-          className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain"
-        >
-          <div ref={contentInnerRef} className="px-4 pt-1">
-            {children}
-          </div>
-        </div>
-
-        {/* Action bar — pinned as the LAST flex child of the sheet.
-        Sheet bottom is anchored to visualViewport bottom via the
-        `position: fixed` + bottom inset above, so this stays right
-        above the keyboard with zero gap above OR below it. */}
-        {actionBar && (
-          <div className="shrink-0 border-t border-line bg-surface px-4 py-3">
-            {actionBar}
-          </div>
-        )}
-      </m.div>
     </LazyMotion>
   );
 }
