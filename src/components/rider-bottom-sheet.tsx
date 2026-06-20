@@ -43,11 +43,20 @@ export function RiderBottomSheet({
   actionBar,
   /** Optional badge / pill anchored to the top-left of the map area. */
   mapBadge,
+  /** Whether body-scroll-lock + keyboard auto-expand are active.
+   *  Parent pages render this component during SSR + first client
+   *  paint (before the viewport check resolves) and then unmount it
+   *  on desktop. If the body lock fires during that brief mount, the
+   *  cleanup's window.scrollTo causes a visible jump on desktop. Pass
+   *  the parent's resolved `viewportReady && isMobile` here so the
+   *  lock only engages when the sheet will actually stick around. */
+  enabled = true,
 }: {
   map: ReactNode;
   children: ReactNode;
   actionBar?: ReactNode;
   mapBadge?: ReactNode;
+  enabled?: boolean;
 }) {
   // Lock body scroll — the proven `position: fixed` pattern.
   //
@@ -71,6 +80,7 @@ export function RiderBottomSheet({
   // scrollable ancestor — the sheet's contentScrollRef container —
   // which is exactly what we want.
   useEffect(() => {
+    if (!enabled) return;
     if (typeof document === "undefined") return;
     const html = document.documentElement;
     const body = document.body;
@@ -107,7 +117,7 @@ export function RiderBottomSheet({
       body.style.overscrollBehavior = prev.bodyOverscroll;
       window.scrollTo(0, scrollY);
     };
-  }, []);
+  }, [enabled]);
 
   // ─── Wrapper height tracked from visualViewport ───
   // `100dvh` CSS resolves to the "small viewport" (with browser
@@ -201,13 +211,21 @@ export function RiderBottomSheet({
   // Clamp the sheet to never exceed the wrapper. An uncapped sheet
   // taller than wrapper would have its top clipped by overflow-hidden,
   // pushing the form content out of view above the wrapper's top edge.
-  // The clamp guarantees the sheet always fits in the visible area.
+  // Ease to the correct snap point instead of snapping instantly —
+  // an instant height.set on every visualViewport change (e.g. Chrome
+  // address bar sliding back in shrinking the viewport ~60px) caused
+  // a visible 10–20px sheet jerk that read as the sheet glitching.
   useEffect(() => {
     if (wrapperHeight <= 0) return;
     if (height.get() > wrapperHeight) {
-      height.set(wrapperHeight);
+      const target = isExpanded ? snaps.expanded : snaps.collapsed;
+      animate(height, target, {
+        type: "spring",
+        bounce: 0.2,
+        duration: 0.25,
+      });
     }
-  }, [wrapperHeight, height]);
+  }, [wrapperHeight, snaps.expanded, snaps.collapsed, isExpanded, height]);
 
   const animateTo = useCallback(
     (target: number, velocity = 0) => {
@@ -219,14 +237,6 @@ export function RiderBottomSheet({
       });
     },
     [height],
-  );
-
-  const snapTo = useCallback(
-    (expanded: boolean, velocity = 0) => {
-      setIsExpanded(expanded);
-      animateTo(expanded ? snaps.expanded : snaps.collapsed, velocity);
-    },
-    [animateTo, snaps.collapsed, snaps.expanded],
   );
 
   // ─── Keyboard-aware auto-expand ───
@@ -241,7 +251,12 @@ export function RiderBottomSheet({
   // Chrome's address-bar collapse/reveal is ~60px — well under the
   // 150px threshold — so it doesn't trigger the auto-expand.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  // Mirror in a ref so snapTo can read the current value without
+  // taking keyboardOpen as a useCallback dep (which would re-create
+  // snapTo on every keyboard transition, churning the drag handlers).
+  const keyboardOpenRef = useRef(false);
   useEffect(() => {
+    if (!enabled) return;
     if (typeof window === "undefined") return;
     const vv = window.visualViewport;
     if (!vv) return;
@@ -251,46 +266,75 @@ export function RiderBottomSheet({
       // visualViewport.height tracks the visible area excluding
       // the keyboard. The delta = keyboard height.
       const delta = window.innerHeight - vv.height;
-      setKeyboardOpen(delta > 150);
+      const open = delta > 150;
+      keyboardOpenRef.current = open;
+      setKeyboardOpen(open);
     };
     check();
     vv.addEventListener("resize", check);
     return () => vv.removeEventListener("resize", check);
-  }, []);
+  }, [enabled]);
 
-  // Auto-resnap on keyboard transitions. Remember whether the user
-  // had the sheet expanded BEFORE the keyboard opened — when the
-  // keyboard closes we restore that state so we don't override their
-  // preference.
-  const prevKeyboardOpenRef = useRef(false);
+  // Track whether the user had the sheet expanded BEFORE the keyboard
+  // opened. Refreshed by snapTo while the keyboard is open so a
+  // manual collapse mid-keyboard isn't undone when the keyboard
+  // dismisses. Declared above snapTo so the callback can close over it.
   const userExpandedBeforeKeyboardRef = useRef(false);
+
+  const snapTo = useCallback(
+    (expanded: boolean, velocity = 0) => {
+      setIsExpanded(expanded);
+      // While the keyboard is open, also update the "restore-to" target
+      // so a manual drag-collapse isn't overwritten by the keyboard's
+      // close handler later. Without this the rider would manually
+      // collapse the sheet, dismiss the keyboard, and watch it spring
+      // back to expanded against their will.
+      if (keyboardOpenRef.current) {
+        userExpandedBeforeKeyboardRef.current = expanded;
+      }
+      animateTo(expanded ? snaps.expanded : snaps.collapsed, velocity);
+    },
+    [animateTo, snaps.collapsed, snaps.expanded],
+  );
+
+  // Auto-resnap ONLY on keyboard transitions (open↔close edges) —
+  // NOT on intermediate visualViewport ticks while the keyboard is
+  // animating in/out. The keyboard's slide-in fires multiple resize
+  // events, snaps.expanded recomputes each time as wrapperHeight
+  // shrinks, and re-running animate on every tick was restarting
+  // the spring mid-flight = visible jitter. The wrapper-clamp effect
+  // above handles mid-keyboard viewport shifts via an eased spring
+  // to the new correct snap, so we don't need to re-fire here.
+  const prevKeyboardOpenRef = useRef(false);
   useEffect(() => {
+    if (!enabled) return;
     if (snaps.expanded <= 0) return;
     const wasOpen = prevKeyboardOpenRef.current;
+    if (keyboardOpen === wasOpen) return; // edge-only — no thrashing
     prevKeyboardOpenRef.current = keyboardOpen;
 
-    if (keyboardOpen && !wasOpen) {
+    if (keyboardOpen) {
       // Keyboard just opened — remember state, then expand to fill
-      // the visible area above the keyboard.
+      // the visible area above the keyboard. Skip if already close
+      // enough to expanded (defense against redundant springs).
       userExpandedBeforeKeyboardRef.current = isExpanded;
       setIsExpanded(true);
-      animateTo(snaps.expanded);
-    } else if (!keyboardOpen && wasOpen) {
+      if (Math.abs(height.get() - snaps.expanded) > 8) {
+        animateTo(snaps.expanded);
+      }
+    } else {
       // Keyboard just closed — restore the rider's prior snap.
       const wasExpanded = userExpandedBeforeKeyboardRef.current;
       setIsExpanded(wasExpanded);
-      animateTo(wasExpanded ? snaps.expanded : snaps.collapsed);
-    } else if (keyboardOpen) {
-      // Already open, but viewport changed (e.g. switching between
-      // inputs that summon different keyboards / autocomplete
-      // suggestions). Keep the sheet pinned to the new expanded
-      // height so the form stays fully visible.
-      animateTo(snaps.expanded);
+      const target = wasExpanded ? snaps.expanded : snaps.collapsed;
+      if (Math.abs(height.get() - target) > 8) {
+        animateTo(target);
+      }
     }
     // Intentionally not depending on `isExpanded` — that would refire
     // on every drag and overwrite the user's drag mid-gesture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyboardOpen, snaps.expanded, snaps.collapsed]);
+  }, [enabled, keyboardOpen, snaps.expanded, snaps.collapsed]);
 
   // ─── Drag tracking — handle-only ───
   const dragStartYRef = useRef(0);

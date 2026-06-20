@@ -1270,7 +1270,11 @@ export default function RiderLiveTripPage() {
         </div>
       ) : (
         // ═════════════ MOBILE LAYOUT (Uber-style bottom sheet) ═════════════
-        <RiderBottomSheet map={mapNode} mapBadge={mobileStatusBadge}>
+        <RiderBottomSheet
+          enabled={viewportReady && isMobile}
+          map={mapNode}
+          mapBadge={mobileStatusBadge}
+        >
           <div className="space-y-4 pb-4">{bodyContent}</div>
         </RiderBottomSheet>
       )}

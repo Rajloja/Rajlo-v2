@@ -2092,6 +2092,7 @@ export default function RiderRequestPage() {
       {!(viewportReady && !isMobile) && (
       <div>
         <RiderBottomSheet
+          enabled={viewportReady && isMobile}
           map={
             <MapView
               pickup={pickup}
