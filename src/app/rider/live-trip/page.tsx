@@ -864,7 +864,11 @@ export default function RiderLiveTripPage() {
       searching={false}
       searchingUntil={null}
       floatingControlsBottomPx={floatingControlsOffset}
-      mapBottomInsetPx={floatingControlsOffset}
+      // Map container in RiderBottomSheet already offsets to center
+      // the visible map area — fitBounds doesn't need extra bottom
+      // padding for the sheet (would double-compensate). See request
+      // page comment for details.
+      mapBottomInsetPx={0}
       className="h-full w-full"
     />
   );

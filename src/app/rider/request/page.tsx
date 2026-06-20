@@ -159,6 +159,25 @@ export default function RiderRequestPage() {
   // the sheet edge, not flush with it (where it'd be half-hidden).
   const floatingControlsOffset = useFloatingControlsOffset(0.55);
 
+  // Imperative collapse signal for the bottom sheet. Bumped after
+  // the rider picks a dropoff (with pickup already set) so the sheet
+  // shrinks back to its collapsed snap and the map gets a wider view
+  // of the full A→B route. Counter, not boolean, because the SHEET
+  // listens for CHANGES — re-collapsing after a route edit means
+  // bumping again.
+  const [collapseSheetSignal, setCollapseSheetSignal] = useState(0);
+  const collapseSheetForRouteView = () => {
+    setCollapseSheetSignal((c) => c + 1);
+    // Dismiss the mobile keyboard so the sheet doesn't have to fight
+    // it on the way down. Without this, the keyboard stays up and our
+    // keyboard-auto-expand effect would spring the sheet back open
+    // the moment it sees keyboardOpen is still true on the next tick.
+    if (typeof document !== "undefined") {
+      const active = document.activeElement as HTMLElement | null;
+      active?.blur();
+    }
+  };
+
   // Map-pin picker overlay state. When non-null we render the
   // fullscreen `<MapPinPicker>` over the booking page, letting the
   // rider drag the map under a fixed centre pin to set whichever
@@ -1147,15 +1166,17 @@ export default function RiderRequestPage() {
             place={pickup}
             onSelect={(p) => {
               setPickup(p);
-              // Auto-focus the dropoff input the moment a pickup is
-              // picked from the dropdown — saves a tap on the
-              // typical "Pickup → Where to?" flow. queueMicrotask
-              // lets React commit the pickup-selected state first so
-              // the dropoff input is mounted + visible.
               if (!dropoff) {
+                // Auto-focus the dropoff input — saves a tap on the
+                // typical "Pickup → Where to?" flow. queueMicrotask
+                // lets React commit pickup-selected state first.
                 queueMicrotask(() => {
                   document.getElementById("waypoint-dropoff")?.focus();
                 });
+              } else {
+                // Dropoff was already set — both endpoints exist, so
+                // collapse the sheet to show the now-complete route.
+                collapseSheetForRouteView();
               }
             }}
             onClear={() => setPickup(null)}
@@ -1193,7 +1214,14 @@ export default function RiderRequestPage() {
             kind="dropoff"
             label={String.fromCharCode(66 + stops.length)}
             place={dropoff}
-            onSelect={setDropoff}
+            onSelect={(p) => {
+              setDropoff(p);
+              if (pickup) {
+                // Both endpoints set — collapse the sheet so the
+                // rider sees the full route on the map.
+                collapseSheetForRouteView();
+              }
+            }}
             onClear={() => setDropoff(null)}
             inputId="waypoint-dropoff"
           />
@@ -2093,6 +2121,7 @@ export default function RiderRequestPage() {
       <div>
         <RiderBottomSheet
           enabled={viewportReady && isMobile}
+          collapseSignal={collapseSheetSignal}
           map={
             <MapView
               pickup={pickup}
@@ -2105,7 +2134,13 @@ export default function RiderRequestPage() {
               alighting={journeyMapOverlays.alighting}
               corridorLines={journeyMapOverlays.corridorLines}
               floatingControlsBottomPx={floatingControlsOffset}
-              mapBottomInsetPx={floatingControlsOffset}
+              // No fitBounds inset — the RiderBottomSheet's map
+              // container is positioned with a `top: -snaps.collapsed`
+              // offset so the map's geometric center already coincides
+              // with the visible map area's center. Adding bottom
+              // padding here would double-compensate and push the
+              // route's fitBounds center off the visible area entirely.
+              mapBottomInsetPx={0}
               suppressStaticRoute={
                 mode === "route_taxi" &&
                 !!journeyMapOverlays.corridorLines &&

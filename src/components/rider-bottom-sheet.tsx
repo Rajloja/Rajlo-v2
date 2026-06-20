@@ -51,12 +51,20 @@ export function RiderBottomSheet({
    *  the parent's resolved `viewportReady && isMobile` here so the
    *  lock only engages when the sheet will actually stick around. */
   enabled = true,
+  /** Token to imperatively collapse the sheet. Any CHANGE to this
+   *  value (from one render to the next) triggers `snapTo(false)`.
+   *  Used by the request page to auto-collapse after a dropoff is
+   *  picked so the rider gets a wider map view of the full route.
+   *  The first observed value is ignored so initial mount doesn't
+   *  fire the collapse. */
+  collapseSignal,
 }: {
   map: ReactNode;
   children: ReactNode;
   actionBar?: ReactNode;
   mapBadge?: ReactNode;
   enabled?: boolean;
+  collapseSignal?: number;
 }) {
   // Lock body scroll — the proven `position: fixed` pattern.
   //
@@ -322,6 +330,28 @@ export function RiderBottomSheet({
     },
     [animateTo, snaps.collapsed, snaps.expanded],
   );
+
+  // Imperative collapse on parent signal. Parent bumps `collapseSignal`
+  // (typically after the rider picks a dropoff from Places autocomplete)
+  // and we animate down to snaps.collapsed. We also refresh the
+  // pre-keyboard restore ref so the keyboard-close handler doesn't
+  // spring the sheet back to expanded if the keyboard happens to
+  // still be open when this fires.
+  const prevCollapseSignalRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled) return;
+    if (collapseSignal === undefined) return;
+    if (prevCollapseSignalRef.current === undefined) {
+      // Seed on first observation — initial mount must not trigger.
+      prevCollapseSignalRef.current = collapseSignal;
+      return;
+    }
+    if (collapseSignal !== prevCollapseSignalRef.current) {
+      prevCollapseSignalRef.current = collapseSignal;
+      userExpandedBeforeKeyboardRef.current = false;
+      snapTo(false);
+    }
+  }, [collapseSignal, enabled, snapTo]);
 
   // Auto-resnap ONLY on keyboard transitions (open↔close edges) —
   // NOT on intermediate visualViewport ticks while the keyboard is
