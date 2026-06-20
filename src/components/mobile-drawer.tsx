@@ -361,7 +361,7 @@ export function MobileDrawer({
         className={
           onDriverRoute
             ? "z-40 flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 md:hidden"
-            : "sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 md:hidden"
+            : "sticky top-0 z-50 flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 md:hidden"
         }
       >
         <div className="flex min-w-0 items-center gap-2">
