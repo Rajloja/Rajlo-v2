@@ -49,45 +49,20 @@ export function RiderBottomSheet({
   actionBar?: ReactNode;
   mapBadge?: ReactNode;
 }) {
-  // Hard-lock the page so ONLY the sheet's content area scrolls.
-  // Without this, touching the navbar or anywhere outside the sheet
-  // scrolls the body (PortalLayout's `<main>` has `pb-20` on the
-  // rider portal, which makes body taller than viewport and gives
-  // it scrollable height). We:
-  //   - overflow: hidden on body AND html (kills body scroll on
-  //     every browser, including iOS Safari which sometimes ignores
-  //     body-only locks)
-  //   - touch-action: none on body to refuse touch-based panning,
-  //     so a swipe on the navbar can't trigger a body scroll
-  //   - overscroll-behavior: contain kills pull-to-refresh
-  //
-  // The sheet's content area opts back in with `touch-action: pan-y`,
-  // so its internal scroll still works.
+  // Lock body scroll (but leave touch-action alone so iOS Safari can
+  // still scroll inputs into view when the keyboard opens). Just
+  // overflow + overscroll-behavior, no aggressive touch-action: none
+  // — that was preventing iOS's input-focus-scroll, which is what
+  // made the page render weirdly above the keyboard.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const html = document.documentElement;
-    const body = document.body;
-    const prev = {
-      htmlOverflow: html.style.overflow,
-      htmlHeight: html.style.height,
-      bodyOverflow: body.style.overflow,
-      bodyHeight: body.style.height,
-      bodyOverscroll: body.style.overscrollBehavior,
-      bodyTouch: body.style.touchAction,
-    };
-    html.style.overflow = "hidden";
-    html.style.height = "100dvh";
-    body.style.overflow = "hidden";
-    body.style.height = "100dvh";
-    body.style.overscrollBehavior = "contain";
-    body.style.touchAction = "none";
+    const prevBodyOverflow = document.body.style.overflowY;
+    const prevBodyOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflowY = "hidden";
+    document.body.style.overscrollBehavior = "contain";
     return () => {
-      html.style.overflow = prev.htmlOverflow;
-      html.style.height = prev.htmlHeight;
-      body.style.overflow = prev.bodyOverflow;
-      body.style.height = prev.bodyHeight;
-      body.style.overscrollBehavior = prev.bodyOverscroll;
-      body.style.touchAction = prev.bodyTouch;
+      document.body.style.overflowY = prevBodyOverflow;
+      document.body.style.overscrollBehavior = prevBodyOverscroll;
     };
   }, []);
 
@@ -170,24 +145,18 @@ export function RiderBottomSheet({
   const height = useMotionValue<number>(0);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Sync sheet height to the current snap target whenever the snap
-  // values change. This handles:
-  //   1. Initial mount (height starts at 0 → snap to collapsed)
-  //   2. Viewport resizes (keyboard open/close, browser chrome
-  //      show/hide, orientation change) → snap shrinks/grows, sheet
-  //      follows
-  //   3. Content height changes (form expands) → snap re-fits
+  // Initial parking — set the sheet to collapsed once snaps resolve.
+  // We deliberately do NOT update on every snap change: when the
+  // keyboard opens visualViewport shrinks, snap.collapsed shrinks,
+  // and re-fitting would collapse the sheet to a sliver. iOS Safari
+  // handles keyboard-driven layout by adjusting visualViewport, NOT
+  // by reflowing the sheet — so we leave the sheet's height alone
+  // and let iOS scroll the focused input into view inside it.
   useEffect(() => {
-    if (snaps.collapsed <= 0) return;
-    const target = isExpanded ? snaps.expanded : snaps.collapsed;
-    if (Math.abs(height.get() - target) > 1) {
-      height.set(target);
+    if (snaps.collapsed > 0 && height.get() === 0) {
+      height.set(snaps.collapsed);
     }
-    // We deliberately exclude `isExpanded` from deps — that's handled
-    // by the explicit snapTo() animation. This effect only reacts to
-    // snap VALUE changes from the viewport/content side.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snaps.collapsed, snaps.expanded]);
+  }, [snaps.collapsed, height]);
 
   const animateTo = useCallback(
     (target: number, velocity = 0) => {
