@@ -113,16 +113,21 @@ export function RiderBottomSheet({
     return () => ro.disconnect();
   }, []);
 
-  // Final snap heights — collapsed fits content (with chrome), expanded is the deep dive.
+  // Final snap heights — collapsed fits content but CAPPED AT 50% of
+  // the wrapper so:
+  //   - Short forms don't get a giant white sheet with empty space
+  //   - Long forms don't push the sheet past 50%, which would shove
+  //     the locate-me button (positioned at the 50% mark) behind it
+  //   - The map ALWAYS has at least the top half of the viewport
   const snaps = (() => {
     if (wrapperHeight <= 0) return { collapsed: 0, expanded: 0 };
     const handle = 24;
     const padding = 8;
     const desired = contentHeight + handle + padding;
-    const min = Math.round(wrapperHeight * 0.3);
-    const max = Math.round(wrapperHeight * 0.8);
+    const cap = Math.round(wrapperHeight * 0.5);
+    const floor = Math.round(wrapperHeight * 0.3);
     return {
-      collapsed: Math.min(max, Math.max(min, desired)),
+      collapsed: Math.min(cap, Math.max(floor, desired)),
       expanded: Math.round(wrapperHeight * 0.92),
     };
   })();

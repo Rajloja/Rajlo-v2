@@ -154,8 +154,10 @@ export default function RiderRequestPage() {
   const { isMobile, mounted: viewportReady } = useIsMobile();
 
   // Push MapView's floating controls (locate-me button) above the
-  // bottom sheet's collapsed snap so they stay visible behind it.
-  const floatingControlsOffset = useFloatingControlsOffset(0.5);
+  // bottom sheet's collapsed snap so they stay visible. 0.55 not
+  // 0.5 — the 5% extra is the small gap so the button sits ABOVE
+  // the sheet edge, not flush with it (where it'd be half-hidden).
+  const floatingControlsOffset = useFloatingControlsOffset(0.55);
 
   // Map-pin picker overlay state. When non-null we render the
   // fullscreen `<MapPinPicker>` over the booking page, letting the

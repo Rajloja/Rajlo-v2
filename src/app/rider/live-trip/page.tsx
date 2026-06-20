@@ -229,9 +229,10 @@ export default function RiderLiveTripPage() {
   // transition.
   const { isMobile, mounted: viewportReady } = useIsMobile();
 
-  // Push MapView's floating controls (locate-me, etc.) above the
-  // bottom sheet's collapsed snap so they stay tappable.
-  const floatingControlsOffset = useFloatingControlsOffset(0.5);
+  // Push MapView's floating controls above the bottom sheet's
+  // collapsed snap with a small gap so they're not flush against
+  // the sheet edge.
+  const floatingControlsOffset = useFloatingControlsOffset(0.55);
 
   // Once the rider moves past a shown "trip ended" card — taps through
   // it or leaves the page — remember it so a later return lands on a
