@@ -41,22 +41,45 @@ export function RiderBottomSheet({
   children: ReactNode;
   mapBadge?: ReactNode;
 }) {
-  // Lock body scroll while the sheet is mounted. PortalLayout's
-  // `<main>` has `pb-20` on the rider portal, which makes body
-  // taller than viewport and lets every swipe on the sheet ALSO
-  // scroll the body — which pulls the map along. `overflow-y:
-  // hidden` is more surgical than `overflow: hidden` and doesn't
-  // disturb the sticky navbar's positioning. `overscroll-behavior:
-  // contain` kills iOS / Chrome pull-to-refresh.
+  // Hard-lock the page so ONLY the sheet's content area scrolls.
+  // Without this, touching the navbar or anywhere outside the sheet
+  // scrolls the body (PortalLayout's `<main>` has `pb-20` on the
+  // rider portal, which makes body taller than viewport and gives
+  // it scrollable height). We:
+  //   - overflow: hidden on body AND html (kills body scroll on
+  //     every browser, including iOS Safari which sometimes ignores
+  //     body-only locks)
+  //   - touch-action: none on body to refuse touch-based panning,
+  //     so a swipe on the navbar can't trigger a body scroll
+  //   - overscroll-behavior: contain kills pull-to-refresh
+  //
+  // The sheet's content area opts back in with `touch-action: pan-y`,
+  // so its internal scroll still works.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const prevOverflow = document.body.style.overflowY;
-    const prevOverscroll = document.body.style.overscrollBehavior;
-    document.body.style.overflowY = "hidden";
-    document.body.style.overscrollBehavior = "contain";
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlHeight: html.style.height,
+      bodyOverflow: body.style.overflow,
+      bodyHeight: body.style.height,
+      bodyOverscroll: body.style.overscrollBehavior,
+      bodyTouch: body.style.touchAction,
+    };
+    html.style.overflow = "hidden";
+    html.style.height = "100dvh";
+    body.style.overflow = "hidden";
+    body.style.height = "100dvh";
+    body.style.overscrollBehavior = "contain";
+    body.style.touchAction = "none";
     return () => {
-      document.body.style.overflowY = prevOverflow;
-      document.body.style.overscrollBehavior = prevOverscroll;
+      html.style.overflow = prev.htmlOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.height = prev.bodyHeight;
+      body.style.overscrollBehavior = prev.bodyOverscroll;
+      body.style.touchAction = prev.bodyTouch;
     };
   }, []);
 
@@ -136,12 +159,24 @@ export function RiderBottomSheet({
   const height = useMotionValue<number>(0);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Initial parking once snaps resolve.
+  // Sync sheet height to the current snap target whenever the snap
+  // values change. This handles:
+  //   1. Initial mount (height starts at 0 → snap to collapsed)
+  //   2. Viewport resizes (keyboard open/close, browser chrome
+  //      show/hide, orientation change) → snap shrinks/grows, sheet
+  //      follows
+  //   3. Content height changes (form expands) → snap re-fits
   useEffect(() => {
-    if (snaps.collapsed > 0 && height.get() === 0) {
-      height.set(snaps.collapsed);
+    if (snaps.collapsed <= 0) return;
+    const target = isExpanded ? snaps.expanded : snaps.collapsed;
+    if (Math.abs(height.get() - target) > 1) {
+      height.set(target);
     }
-  }, [snaps.collapsed, height]);
+    // We deliberately exclude `isExpanded` from deps — that's handled
+    // by the explicit snapTo() animation. This effect only reacts to
+    // snap VALUE changes from the viewport/content side.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snaps.collapsed, snaps.expanded]);
 
   const animateTo = useCallback(
     (target: number, velocity = 0) => {
@@ -404,15 +439,17 @@ export function RiderBottomSheet({
           the browser we want vertical pan but we'll intercept it
           when needed. */}
           {/* Scrollable area. The INNER div is what we measure via
-          ResizeObserver to size the collapsed snap to fit content
-          exactly — no empty strip above the action bar. `pb-14`
-          gives the last form element just enough clearance from the
-          fixed action bar at the viewport bottom. */}
+          ResizeObserver to size the collapsed snap to fit content.
+          `pb-12` (48 px) matches the fixed action bar's height
+          exactly — last form element clears the bar with no empty
+          strip between them, and when the rider taps an input the
+          keyboard pushes the input above the action bar instead of
+          padding it down. */}
           <div
             ref={contentScrollRef}
             className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain"
           >
-            <div ref={contentInnerRef} className="px-4 pb-14 pt-1">
+            <div ref={contentInnerRef} className="px-4 pb-12 pt-1">
               {children}
             </div>
           </div>
