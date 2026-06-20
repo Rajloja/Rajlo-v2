@@ -49,20 +49,63 @@ export function RiderBottomSheet({
   actionBar?: ReactNode;
   mapBadge?: ReactNode;
 }) {
-  // Lock body scroll (but leave touch-action alone so iOS Safari can
-  // still scroll inputs into view when the keyboard opens). Just
-  // overflow + overscroll-behavior, no aggressive touch-action: none
-  // — that was preventing iOS's input-focus-scroll, which is what
-  // made the page render weirdly above the keyboard.
+  // Lock body scroll — the proven `position: fixed` pattern.
+  //
+  // `overflow-y: hidden` ALONE is not enough on iOS Safari or
+  // Chrome Android: when the page content overflows the viewport
+  // (rider portal's <main> has pb-20 reserving 80px for non-existent
+  // bottom nav, plus min-h-screen on the layout), touch-based scroll
+  // still works regardless of overflow. iOS in particular ignores
+  // overflow:hidden on body for touch.
+  //
+  // `position: fixed` actually severs the body from the scroll
+  // viewport — it cannot scroll because there's nothing to scroll
+  // (body is detached from page flow). This is the same pattern
+  // body-scroll-lock and react-scroll-lock have settled on after
+  // years of cross-browser pain.
+  //
+  // Side effect benefit: with body fixed, iOS Safari can NO LONGER
+  // scroll the body to bring a focused input into view (which was
+  // pushing our navbar off-screen and revealing dead space where
+  // the action bar should be). Instead, iOS scrolls the nearest
+  // scrollable ancestor — the sheet's contentScrollRef container —
+  // which is exactly what we want.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const prevBodyOverflow = document.body.style.overflowY;
-    const prevBodyOverscroll = document.body.style.overscrollBehavior;
-    document.body.style.overflowY = "hidden";
-    document.body.style.overscrollBehavior = "contain";
+    const html = document.documentElement;
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlOverscroll: html.style.overscrollBehavior,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyRight: body.style.right,
+      bodyWidth: body.style.width,
+      bodyOverflow: body.style.overflow,
+      bodyOverscroll: body.style.overscrollBehavior,
+    };
+    html.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
     return () => {
-      document.body.style.overflowY = prevBodyOverflow;
-      document.body.style.overscrollBehavior = prevBodyOverscroll;
+      html.style.overflow = prev.htmlOverflow;
+      html.style.overscrollBehavior = prev.htmlOverscroll;
+      body.style.position = prev.bodyPosition;
+      body.style.top = prev.bodyTop;
+      body.style.left = prev.bodyLeft;
+      body.style.right = prev.bodyRight;
+      body.style.width = prev.bodyWidth;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.overscrollBehavior = prev.bodyOverscroll;
+      window.scrollTo(0, scrollY);
     };
   }, []);
 
@@ -146,17 +189,25 @@ export function RiderBottomSheet({
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Initial parking — set the sheet to collapsed once snaps resolve.
-  // We deliberately do NOT update on every snap change: when the
-  // keyboard opens visualViewport shrinks, snap.collapsed shrinks,
-  // and re-fitting would collapse the sheet to a sliver. iOS Safari
-  // handles keyboard-driven layout by adjusting visualViewport, NOT
-  // by reflowing the sheet — so we leave the sheet's height alone
-  // and let iOS scroll the focused input into view inside it.
+  // We deliberately do NOT update on every snap change: the keyboard
+  // handler below owns viewport-driven resnaps; this effect only
+  // seeds the initial value on first paint.
   useEffect(() => {
     if (snaps.collapsed > 0 && height.get() === 0) {
       height.set(snaps.collapsed);
     }
   }, [snaps.collapsed, height]);
+
+  // Clamp the sheet to never exceed the wrapper. An uncapped sheet
+  // taller than wrapper would have its top clipped by overflow-hidden,
+  // pushing the form content out of view above the wrapper's top edge.
+  // The clamp guarantees the sheet always fits in the visible area.
+  useEffect(() => {
+    if (wrapperHeight <= 0) return;
+    if (height.get() > wrapperHeight) {
+      height.set(wrapperHeight);
+    }
+  }, [wrapperHeight, height]);
 
   const animateTo = useCallback(
     (target: number, velocity = 0) => {
@@ -177,6 +228,69 @@ export function RiderBottomSheet({
     },
     [animateTo, snaps.collapsed, snaps.expanded],
   );
+
+  // ─── Keyboard-aware auto-expand ───
+  // When the mobile keyboard slides up, visualViewport.height shrinks
+  // by a chunky amount (typically 250–350px on iOS, 200–300px on
+  // Chrome Android). We detect that via a threshold against
+  // window.innerHeight (which DOESN'T change when the keyboard opens),
+  // and auto-expand the sheet to fill the visible area above the
+  // keyboard. This keeps the active input + action bar visible no
+  // matter where in the form the rider taps.
+  //
+  // Chrome's address-bar collapse/reveal is ~60px — well under the
+  // 150px threshold — so it doesn't trigger the auto-expand.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const check = () => {
+      // Use a stable baseline: window.innerHeight on iOS/Android
+      // tracks the full viewport including keyboard area, while
+      // visualViewport.height tracks the visible area excluding
+      // the keyboard. The delta = keyboard height.
+      const delta = window.innerHeight - vv.height;
+      setKeyboardOpen(delta > 150);
+    };
+    check();
+    vv.addEventListener("resize", check);
+    return () => vv.removeEventListener("resize", check);
+  }, []);
+
+  // Auto-resnap on keyboard transitions. Remember whether the user
+  // had the sheet expanded BEFORE the keyboard opened — when the
+  // keyboard closes we restore that state so we don't override their
+  // preference.
+  const prevKeyboardOpenRef = useRef(false);
+  const userExpandedBeforeKeyboardRef = useRef(false);
+  useEffect(() => {
+    if (snaps.expanded <= 0) return;
+    const wasOpen = prevKeyboardOpenRef.current;
+    prevKeyboardOpenRef.current = keyboardOpen;
+
+    if (keyboardOpen && !wasOpen) {
+      // Keyboard just opened — remember state, then expand to fill
+      // the visible area above the keyboard.
+      userExpandedBeforeKeyboardRef.current = isExpanded;
+      setIsExpanded(true);
+      animateTo(snaps.expanded);
+    } else if (!keyboardOpen && wasOpen) {
+      // Keyboard just closed — restore the rider's prior snap.
+      const wasExpanded = userExpandedBeforeKeyboardRef.current;
+      setIsExpanded(wasExpanded);
+      animateTo(wasExpanded ? snaps.expanded : snaps.collapsed);
+    } else if (keyboardOpen) {
+      // Already open, but viewport changed (e.g. switching between
+      // inputs that summon different keyboards / autocomplete
+      // suggestions). Keep the sheet pinned to the new expanded
+      // height so the form stays fully visible.
+      animateTo(snaps.expanded);
+    }
+    // Intentionally not depending on `isExpanded` — that would refire
+    // on every drag and overwrite the user's drag mid-gesture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyboardOpen, snaps.expanded, snaps.collapsed]);
 
   // ─── Drag tracking — handle-only ───
   const dragStartYRef = useRef(0);
