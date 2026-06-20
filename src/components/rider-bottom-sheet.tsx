@@ -348,9 +348,13 @@ export function RiderBottomSheet({
           expanded+at-top+swiping-up). `touch-action: pan-y` tells
           the browser we want vertical pan but we'll intercept it
           when needed. */}
+          {/* `pb-16` (64 px) is just enough to clear the fixed action
+          bar (height ≈ 56 px) underneath. The previous `pb-24` left
+          a visible empty strip between the last form input and the
+          action bar. */}
           <div
             ref={contentScrollRef}
-            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-24 pt-1"
+            className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-16 pt-1"
           >
             {children}
           </div>

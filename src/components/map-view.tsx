@@ -1099,13 +1099,13 @@ export function MapView({
         if (!map) return;
         map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         map.setZoom(14);
-        // Shift up so the rider's location appears in the CENTER
-        // of the VISIBLE map area, not behind the bottom sheet.
-        // Wrapped in requestAnimationFrame so panBy fires AFTER
-        // setCenter + setZoom commit — otherwise Google Maps'
-        // internal animations can swallow the pan.
+        // Use the map's own `idle` event to fire panBy AFTER the
+        // setCenter + setZoom transition has actually settled. iOS
+        // Safari's Google Maps build sometimes swallows panBy when
+        // it's wrapped in requestAnimationFrame because the camera
+        // is still animating. `idle` is the canonical signal.
         if (mapBottomInsetPx > 0) {
-          requestAnimationFrame(() => {
+          google.maps.event.addListenerOnce(map, "idle", () => {
             mapRef.current?.panBy(0, mapBottomInsetPx / 2);
           });
         }
@@ -1433,11 +1433,11 @@ export function MapView({
     if (points.length === 0) {
       map.setCenter(JAMAICA_CENTER);
       map.setZoom(9);
-      // Shift up so the Jamaica overview sits in the visible map area
-      // (not behind a bottom-sheet overlay). rAF defers the pan so
-      // Google Maps' setCenter + setZoom commit first.
+      // Use the map's `idle` event so panBy fires after the camera
+      // transition has settled — works consistently across iOS
+      // Safari + Chrome Android (rAF didn't on Safari).
       if (mapBottomInsetPx > 0) {
-        requestAnimationFrame(() => {
+        google.maps.event.addListenerOnce(map, "idle", () => {
           mapRef.current?.panBy(0, mapBottomInsetPx / 2);
         });
       }
@@ -1486,7 +1486,7 @@ export function MapView({
       map.setCenter({ lat: points[0].place.lat, lng: points[0].place.lng });
       map.setZoom(14);
       if (mapBottomInsetPx > 0) {
-        requestAnimationFrame(() => {
+        google.maps.event.addListenerOnce(map, "idle", () => {
           mapRef.current?.panBy(0, mapBottomInsetPx / 2);
         });
       }
