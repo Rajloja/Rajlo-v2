@@ -2498,6 +2498,31 @@ function WaypointSlot({
               : "flag"
           }
           inputId={inputId}
+          // Surface "Use my current location" at the top of the mobile
+          // search overlay (pickup only) so it stays reachable while the
+          // rider is searching — it's the single most common pickup
+          // action and would otherwise be hidden behind the overlay.
+          overlayTop={
+            kind === "pickup" ? (
+              <button
+                type="button"
+                onClick={useCurrentLocation}
+                disabled={locating}
+                className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-soft disabled:cursor-wait disabled:opacity-70"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-soft text-rajlo-red">
+                  {locating ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  ) : (
+                    <Icon name="navigation" className="h-4 w-4" />
+                  )}
+                </span>
+                <span className="text-sm font-bold text-rajlo-red">
+                  {locating ? "Finding you…" : "Use my current location"}
+                </span>
+              </button>
+            ) : undefined
+          }
         />
 
         {/* Use my current location — pickup field only, hidden once a
