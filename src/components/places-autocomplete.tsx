@@ -338,7 +338,16 @@ export function PlacesAutocomplete({
     setSuggestions([]);
     setOpen(false);
     onClear?.();
-    (mobile ? overlayInputRef : inputRef).current?.focus();
+    // Keep typing after a clear — but ONLY when there's a visible input
+    // to type into: the desktop inline input, or the mobile overlay
+    // when it's actually open. Clearing from the COLLAPSED mobile
+    // trigger must not focus the hidden overlay input — that raises the
+    // keyboard with no overlay in sight (the rider just wanted to clear).
+    if (!mobile) {
+      inputRef.current?.focus();
+    } else if (expanded) {
+      overlayInputRef.current?.focus();
+    }
   };
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
