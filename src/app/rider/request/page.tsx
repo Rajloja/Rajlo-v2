@@ -1180,6 +1180,7 @@ export default function RiderRequestPage() {
               }
             }}
             onClear={() => setPickup(null)}
+            onSetOnMap={() => setPinPickerTarget("pickup")}
           />
 
           {stops.map((stop, i) => (
@@ -1224,29 +1225,16 @@ export default function RiderRequestPage() {
             }}
             onClear={() => setDropoff(null)}
             inputId="waypoint-dropoff"
+            onSetOnMap={() => setPinPickerTarget("dropoff")}
           />
         </div>
       </FadeUp>
 
-      {/* "Set on map" entry — opens the fullscreen MapPinPicker
-         pointed at whichever endpoint is empty (or pickup if both
-         are empty). Lets the rider drop a pin manually when they
-         don't know the address — esp. useful in rural Jamaica where
-         autocomplete coverage is patchy. */}
-      <FadeUp delay={0.12}>
-        <div className="mt-4 flex items-center justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              setPinPickerTarget(!pickup ? "pickup" : "dropoff");
-            }}
-            className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-xs font-bold text-muted transition-colors hover:border-rajlo-red/40 hover:text-rajlo-red"
-          >
-            <Icon name="map-pin" className="h-3.5 w-3.5" />
-            {!pickup ? "Set pickup on map" : "Set drop-off on map"}
-          </button>
-        </div>
-      </FadeUp>
+      {/* "Set on map" moved into the per-field search overlay (pickup
+         + drop-off) — each endpoint now offers its own pin-picker
+         shortcut at the top of its search screen, alongside "Use my
+         current location". Keeps the map-pick option contextual to the
+         field the rider is filling instead of one ambiguous button. */}
 
       </>)}
       {/* ═════════════════ END STEP 1 ═════════════════ */}
@@ -2317,6 +2305,7 @@ function WaypointSlot({
   onMoveUp,
   onMoveDown,
   inputId,
+  onSetOnMap,
 }: {
   kind: "pickup" | "stop" | "dropoff";
   label: string;
@@ -2324,6 +2313,9 @@ function WaypointSlot({
   onSelect: (p: Place) => void;
   onClear?: () => void;
   onRemove?: () => void;
+  /** Opens the map pin picker for this endpoint. Surfaced as a
+   *  shortcut inside the mobile search overlay (pickup/dropoff only). */
+  onSetOnMap?: () => void;
   /** Reorder controls — undefined when this stop can't move further
    *  in that direction (top stop has no onMoveUp, last stop has no
    *  onMoveDown). Only ever passed for kind="stop". */
@@ -2522,6 +2514,10 @@ function WaypointSlot({
                 </span>
               </button>
             ) : undefined
+          }
+          onSetOnMap={onSetOnMap}
+          setOnMapLabel={
+            kind === "pickup" ? "Set pickup on map" : "Set drop-off on map"
           }
         />
 

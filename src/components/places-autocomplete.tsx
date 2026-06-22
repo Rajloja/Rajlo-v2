@@ -62,6 +62,8 @@ export function PlacesAutocomplete({
   autoFocus,
   inputId,
   overlayTop,
+  onSetOnMap,
+  setOnMapLabel,
 }: {
   label?: string;
   placeholder?: string;
@@ -83,6 +85,11 @@ export function PlacesAutocomplete({
    *  above the results — e.g. a "Use my current location" shortcut so
    *  it stays reachable while the rider is searching. */
   overlayTop?: ReactNode;
+  /** When provided, the mobile overlay shows a "set on map" shortcut
+   *  (label from `setOnMapLabel`). Tapping it closes the overlay and
+   *  fires this — wired by the request page to open the pin picker. */
+  onSetOnMap?: () => void;
+  setOnMapLabel?: string;
 }) {
   const { isMobile, mounted } = useIsMobile();
   // Only switch to the overlay model once we've confirmed mobile on the
@@ -226,12 +233,27 @@ export function PlacesAutocomplete({
   };
 
   // ─── Mobile overlay open/close ───
+  // When the overlay opens over a pre-filled value (e.g. the rider
+  // tapped a saved-place chip, then tapped the field to edit it), kick
+  // off a search for that text immediately — otherwise `suggestions`
+  // is empty and the overlay shows "No matches" before the rider has
+  // typed anything. Also select the text so they can overtype in one go.
+  const primeOverlayQuery = () => {
+    const q = query.trim();
+    if (q.length >= 2) {
+      fetchSuggestions(q);
+      // rAF so the input is mounted/visible before we select its text.
+      requestAnimationFrame(() => overlayInputRef.current?.select());
+    }
+  };
+
   const openOverlay = () => {
     // Focus the (already-mounted) overlay input first, synchronously
     // within the tap, so iOS raises the keyboard, THEN reveal the
     // overlay. Order matters on iOS.
     overlayInputRef.current?.focus();
     setExpanded(true);
+    primeOverlayQuery();
   };
 
   const closeOverlay = () => {
@@ -251,6 +273,7 @@ export function PlacesAutocomplete({
     if (blockReopenRef.current) return;
     overlayInputRef.current?.focus();
     setExpanded(true);
+    primeOverlayQuery();
   };
 
   // Selecting via any path (current location, pin picker) sets `value`
@@ -553,8 +576,30 @@ export function PlacesAutocomplete({
 
             {/* Results / shortcuts area — scrolls under the keyboard. */}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              {overlayTop && (
-                <div className="border-b border-line">{overlayTop}</div>
+              {(overlayTop || onSetOnMap) && (
+                <div className="border-b border-line">
+                  {overlayTop}
+                  {onSetOnMap && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Close this overlay first — the pin picker is
+                        // z-[60], below our z-70, so it would render
+                        // behind us if we left the overlay open.
+                        closeOverlay();
+                        onSetOnMap();
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-soft"
+                    >
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-soft text-rajlo-red">
+                        <Icon name="map-pin" className="h-4 w-4" />
+                      </span>
+                      <span className="text-sm font-bold text-rajlo-red">
+                        {setOnMapLabel ?? "Set location on map"}
+                      </span>
+                    </button>
+                  )}
+                </div>
               )}
 
               {error && (
