@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { PlacesAutocomplete } from "@/components/places-autocomplete";
+import { NoteField } from "@/components/note-field";
 import { MapView } from "@/components/map-view";
 import {
   RiderBottomSheet,
@@ -1785,21 +1786,16 @@ export default function RiderRequestPage() {
 
       <FadeUp delay={0.2}>
         <div className={`mt-6 ${mode === "route_taxi" ? "hidden" : ""}`}>
-          <label className="block">
-            <span className="text-sm font-semibold">
-              Notes for the driver{" "}
-              <span className="ml-1 text-xs font-medium text-muted">
-                optional
-              </span>
-            </span>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Wait 5 mins at the BBQ stop · I'll have luggage · etc."
-              className="mt-2 w-full rounded-xl border border-line bg-surface-soft px-4 py-3 text-sm outline-none transition-all placeholder:text-muted/70 focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
-            />
-          </label>
+          <span className="text-sm font-semibold">
+            Notes for the driver{" "}
+            <span className="ml-1 text-xs font-medium text-muted">optional</span>
+          </span>
+          <NoteField
+            label="Notes for the driver"
+            value={notes}
+            onChange={setNotes}
+            placeholder="Wait 5 mins at the BBQ stop · I'll have luggage · etc."
+          />
         </div>
       </FadeUp>
 
