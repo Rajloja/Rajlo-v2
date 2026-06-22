@@ -153,19 +153,43 @@ export function RiderBottomSheet({
       }
     };
     recompute();
+    // iOS Safari settles visualViewport metrics SEVERAL frames after a
+    // focus-triggered keyboard open — and notably mis-positions a tall
+    // `position: fixed` sheet during that window, which is why the
+    // action bar slips behind the keyboard specifically when the sheet
+    // is already expanded. A `resize`/`scroll` listener alone can miss
+    // the final settle, so we also re-measure on focusin/focusout and
+    // chase the settle with a short rAF burst. Cheap (a handful of
+    // reads), and it self-corrects the bottom inset once iOS is done.
+    let rafIds: number[] = [];
+    const chaseSettle = () => {
+      rafIds.forEach(cancelAnimationFrame);
+      rafIds = [];
+      let n = 0;
+      const tick = () => {
+        recompute();
+        if (n++ < 6) rafIds.push(requestAnimationFrame(tick));
+      };
+      rafIds.push(requestAnimationFrame(tick));
+    };
     if (vv) {
       vv.addEventListener("resize", recompute);
       vv.addEventListener("scroll", recompute);
     }
     window.addEventListener("resize", recompute);
     window.addEventListener("orientationchange", recompute);
+    window.addEventListener("focusin", chaseSettle);
+    window.addEventListener("focusout", chaseSettle);
     return () => {
+      rafIds.forEach(cancelAnimationFrame);
       if (vv) {
         vv.removeEventListener("resize", recompute);
         vv.removeEventListener("scroll", recompute);
       }
       window.removeEventListener("resize", recompute);
       window.removeEventListener("orientationchange", recompute);
+      window.removeEventListener("focusin", chaseSettle);
+      window.removeEventListener("focusout", chaseSettle);
     };
   }, []);
 
@@ -469,7 +493,6 @@ export function RiderBottomSheet({
 
     let startY = 0;
     let startHeight = 0;
-    let startScrollTop = 0;
     let mode: "sheet" | "content" | null = null;
     let lastY = 0;
     let lastTime = 0;
@@ -479,7 +502,6 @@ export function RiderBottomSheet({
       const y = e.touches[0]?.clientY ?? 0;
       startY = y;
       startHeight = height.get();
-      startScrollTop = el.scrollTop;
       lastY = y;
       lastTime = performance.now();
       velocity = 0;
@@ -492,16 +514,13 @@ export function RiderBottomSheet({
 
       if (mode === null) {
         if (Math.abs(deltaY) < 4) return;
-        const isExpandedNow = startHeight >= snaps.expanded - 12;
-        if (!isExpandedNow) {
-          mode = "sheet";
-        } else if (startScrollTop > 0) {
-          mode = "content";
-        } else if (deltaY > 0) {
-          mode = "sheet";
-        } else {
-          mode = "content";
-        }
+        // Per Raj's request: a user swipe anywhere on the sheet body
+        // ALWAYS drives the sheet between its snap points — it never
+        // scrolls the form content independently. (iOS can still
+        // programmatically scroll a focused input into view; the
+        // container stays overflow-y-auto for that. We only suppress
+        // USER-initiated scrolling here by always choosing "sheet".)
+        mode = "sheet";
       }
 
       if (mode === "sheet") {
