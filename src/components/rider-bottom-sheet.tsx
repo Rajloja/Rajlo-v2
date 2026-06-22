@@ -127,69 +127,41 @@ export function RiderBottomSheet({
     };
   }, [enabled]);
 
-  // ─── Wrapper height + sheet bottom-inset tracked from visualViewport ───
-  // wrapperHeight = vv.height - 56 (sized for the map area).
-  // bottomInsetPx = window.innerHeight - vv.height - vv.offsetTop
-  //   = the gap between layout-viewport bottom and visual-viewport bottom.
-  //   Drives the SHEET's position:fixed `bottom` so it sits exactly at
-  //   the visualViewport bottom — lifting above the keyboard when open,
-  //   flush against viewport bottom (no home-indicator gap) when closed.
-  //   No env(safe-area-inset-bottom) — that introduced a visible 34px
-  //   strip below the action bar on iPhones which read as broken.
+  // ─── Wrapper height, sized from the LAYOUT viewport ───
+  // wrapperHeight = window.innerHeight - 56 (navbar).
+  //
+  // Critically this uses window.innerHeight, NOT visualViewport.height.
+  // The sheet no longer hosts ANY text inputs — every text field (the
+  // location search, the driver note) opens its own full-screen overlay
+  // ON TOP of the sheet. So the sheet must NOT react to the on-screen
+  // keyboard at all: it just stays anchored to the viewport bottom while
+  // an overlay's keyboard comes and goes above it.
+  //
+  // window.innerHeight does NOT shrink when the keyboard opens on iOS
+  // (only visualViewport.height does), so basing the sheet on it keeps
+  // it rock-steady — no more "action bar floating mid-screen with a
+  // white gap below it" after an overlay's keyboard dismisses, which is
+  // exactly what the old visualViewport-derived bottom inset caused.
+  // It still tracks the mobile browser's address-bar hide/show.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [wrapperHeight, setWrapperHeight] = useState(0);
-  const [bottomInsetPx, setBottomInsetPx] = useState(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const vv = window.visualViewport;
     const recompute = () => {
-      const vh = vv?.height ?? window.innerHeight;
-      setWrapperHeight(Math.max(0, Math.round(vh - 56))); // minus navbar
-      if (vv) {
-        const inset = window.innerHeight - vv.height - vv.offsetTop;
-        setBottomInsetPx(Math.max(0, Math.round(inset)));
-      } else {
-        setBottomInsetPx(0);
-      }
+      setWrapperHeight(Math.max(0, Math.round(window.innerHeight - 56)));
     };
     recompute();
-    // iOS Safari settles visualViewport metrics SEVERAL frames after a
-    // focus-triggered keyboard open — and notably mis-positions a tall
-    // `position: fixed` sheet during that window, which is why the
-    // action bar slips behind the keyboard specifically when the sheet
-    // is already expanded. A `resize`/`scroll` listener alone can miss
-    // the final settle, so we also re-measure on focusin/focusout and
-    // chase the settle with a short rAF burst. Cheap (a handful of
-    // reads), and it self-corrects the bottom inset once iOS is done.
-    let rafIds: number[] = [];
-    const chaseSettle = () => {
-      rafIds.forEach(cancelAnimationFrame);
-      rafIds = [];
-      let n = 0;
-      const tick = () => {
-        recompute();
-        if (n++ < 6) rafIds.push(requestAnimationFrame(tick));
-      };
-      rafIds.push(requestAnimationFrame(tick));
-    };
-    if (vv) {
-      vv.addEventListener("resize", recompute);
-      vv.addEventListener("scroll", recompute);
-    }
+    // visualViewport 'resize' also fires on address-bar changes and
+    // catches a few cases window 'resize' misses; recompute reads
+    // innerHeight either way, so keyboard open/close is a no-op.
+    const vv = window.visualViewport;
+    if (vv) vv.addEventListener("resize", recompute);
     window.addEventListener("resize", recompute);
     window.addEventListener("orientationchange", recompute);
-    window.addEventListener("focusin", chaseSettle);
-    window.addEventListener("focusout", chaseSettle);
     return () => {
-      rafIds.forEach(cancelAnimationFrame);
-      if (vv) {
-        vv.removeEventListener("resize", recompute);
-        vv.removeEventListener("scroll", recompute);
-      }
+      if (vv) vv.removeEventListener("resize", recompute);
       window.removeEventListener("resize", recompute);
       window.removeEventListener("orientationchange", recompute);
-      window.removeEventListener("focusin", chaseSettle);
-      window.removeEventListener("focusout", chaseSettle);
     };
   }, []);
 
@@ -240,9 +212,9 @@ export function RiderBottomSheet({
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Initial parking — set the sheet to collapsed once snaps resolve.
-  // We deliberately do NOT update on every snap change: the keyboard
-  // handler below owns viewport-driven resnaps; this effect only
-  // seeds the initial value on first paint.
+  // We deliberately do NOT update on every snap change: drag + the
+  // collapse signal own resnaps; this effect only seeds the initial
+  // value on first paint.
   useEffect(() => {
     if (snaps.collapsed > 0 && height.get() === 0) {
       height.set(snaps.collapsed);
@@ -280,81 +252,17 @@ export function RiderBottomSheet({
     [height],
   );
 
-  // ─── Keyboard-aware auto-expand ───
-  // When the mobile keyboard slides up, visualViewport.height shrinks
-  // by a chunky amount (typically 250–350px on iOS, 200–300px on
-  // Chrome Android). We detect that via a threshold against
-  // window.innerHeight (which DOESN'T change when the keyboard opens),
-  // and auto-expand the sheet to fill the visible area above the
-  // keyboard. This keeps the active input + action bar visible no
-  // matter where in the form the rider taps.
-  //
-  // Chrome's address-bar collapse/reveal is ~60px — well under the
-  // 150px threshold — so it doesn't trigger the auto-expand.
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  // Mirror in a ref so snapTo can read the current value without
-  // taking keyboardOpen as a useCallback dep (which would re-create
-  // snapTo on every keyboard transition, churning the drag handlers).
-  const keyboardOpenRef = useRef(false);
-  useEffect(() => {
-    if (!enabled) return;
-    if (typeof window === "undefined") return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const check = () => {
-      // Use a stable baseline: window.innerHeight on iOS/Android
-      // tracks the full viewport including keyboard area, while
-      // visualViewport.height tracks the visible area excluding
-      // the keyboard. The delta = keyboard height.
-      const delta = window.innerHeight - vv.height;
-      const open = delta > 150;
-      keyboardOpenRef.current = open;
-      setKeyboardOpen(open);
-    };
-    check();
-    vv.addEventListener("resize", check);
-    return () => vv.removeEventListener("resize", check);
-  }, [enabled]);
-
-  // Track whether the user had the sheet expanded BEFORE the keyboard
-  // opened. Refreshed by snapTo while the keyboard is open so a
-  // manual collapse mid-keyboard isn't undone when the keyboard
-  // dismisses. Declared above snapTo so the callback can close over it.
-  const userExpandedBeforeKeyboardRef = useRef(false);
-
   const snapTo = useCallback(
     (expanded: boolean, velocity = 0) => {
       setIsExpanded(expanded);
-      // While the keyboard is open, also update the "restore-to" target
-      // so a manual drag-collapse isn't overwritten by the keyboard's
-      // close handler later. Without this the rider would manually
-      // collapse the sheet, dismiss the keyboard, and watch it spring
-      // back to expanded against their will.
-      if (keyboardOpenRef.current) {
-        userExpandedBeforeKeyboardRef.current = expanded;
-      }
       animateTo(expanded ? snaps.expanded : snaps.collapsed, velocity);
     },
     [animateTo, snaps.collapsed, snaps.expanded],
   );
 
   // Imperative collapse on parent signal. Parent bumps `collapseSignal`
-  // (typically after the rider picks a dropoff from Places autocomplete).
-  //
-  // Behavior depends on keyboard state:
-  //   - keyboard CLOSED: snap to collapsed immediately.
-  //   - keyboard OPEN:   skip the immediate snap and let the
-  //                      keyboard-close handler do it after dismissal.
-  //                      Otherwise snaps.collapsed would be computed
-  //                      against the shrunken-by-keyboard wrapperHeight
-  //                      and the sheet would briefly shrink to a tiny
-  //                      pellet before springing back when keyboard
-  //                      closes. The parent should also blur the active
-  //                      input before bumping the signal so the keyboard
-  //                      actually dismisses.
-  // Either way we set userExpandedBeforeKeyboardRef to false so the
-  // keyboard-close handler restores to collapsed (not whatever the
-  // user had before the keyboard opened).
+  // (typically after the rider picks a dropoff). Snap to collapsed so
+  // the rider gets a wider map view of the now-complete route.
   const prevCollapseSignalRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!enabled) return;
@@ -364,53 +272,14 @@ export function RiderBottomSheet({
       prevCollapseSignalRef.current = collapseSignal;
       return;
     }
-    if (collapseSignal !== prevCollapseSignalRef.current) {
-      prevCollapseSignalRef.current = collapseSignal;
-      userExpandedBeforeKeyboardRef.current = false;
-      if (!keyboardOpenRef.current) {
-        snapTo(false);
-      }
-    }
+    if (collapseSignal === prevCollapseSignalRef.current) return;
+    prevCollapseSignalRef.current = collapseSignal;
+    // Defer out of the effect body (next frame) so we're not calling
+    // setState synchronously during the effect — and it reads as a
+    // deliberate animated collapse rather than an instant jump.
+    const id = requestAnimationFrame(() => snapTo(false));
+    return () => cancelAnimationFrame(id);
   }, [collapseSignal, enabled, snapTo]);
-
-  // Auto-resnap ONLY on keyboard transitions (open↔close edges) —
-  // NOT on intermediate visualViewport ticks while the keyboard is
-  // animating in/out. The keyboard's slide-in fires multiple resize
-  // events, snaps.expanded recomputes each time as wrapperHeight
-  // shrinks, and re-running animate on every tick was restarting
-  // the spring mid-flight = visible jitter. The wrapper-clamp effect
-  // above handles mid-keyboard viewport shifts via an eased spring
-  // to the new correct snap, so we don't need to re-fire here.
-  const prevKeyboardOpenRef = useRef(false);
-  useEffect(() => {
-    if (!enabled) return;
-    if (snaps.expanded <= 0) return;
-    const wasOpen = prevKeyboardOpenRef.current;
-    if (keyboardOpen === wasOpen) return; // edge-only — no thrashing
-    prevKeyboardOpenRef.current = keyboardOpen;
-
-    if (keyboardOpen) {
-      // Keyboard just opened — remember state, then expand to fill
-      // the visible area above the keyboard. Skip if already close
-      // enough to expanded (defense against redundant springs).
-      userExpandedBeforeKeyboardRef.current = isExpanded;
-      setIsExpanded(true);
-      if (Math.abs(height.get() - snaps.expanded) > 8) {
-        animateTo(snaps.expanded);
-      }
-    } else {
-      // Keyboard just closed — restore the rider's prior snap.
-      const wasExpanded = userExpandedBeforeKeyboardRef.current;
-      setIsExpanded(wasExpanded);
-      const target = wasExpanded ? snaps.expanded : snaps.collapsed;
-      if (Math.abs(height.get() - target) > 8) {
-        animateTo(target);
-      }
-    }
-    // Intentionally not depending on `isExpanded` — that would refire
-    // on every drag and overwrite the user's drag mid-gesture.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, keyboardOpen, snaps.expanded, snaps.collapsed]);
 
   // ─── Drag tracking — handle-only ───
   const dragStartYRef = useRef(0);
@@ -493,6 +362,7 @@ export function RiderBottomSheet({
 
     let startY = 0;
     let startHeight = 0;
+    let startScrollTop = 0;
     let mode: "sheet" | "content" | null = null;
     let lastY = 0;
     let lastTime = 0;
@@ -502,6 +372,7 @@ export function RiderBottomSheet({
       const y = e.touches[0]?.clientY ?? 0;
       startY = y;
       startHeight = height.get();
+      startScrollTop = el.scrollTop;
       lastY = y;
       lastTime = performance.now();
       velocity = 0;
@@ -514,13 +385,25 @@ export function RiderBottomSheet({
 
       if (mode === null) {
         if (Math.abs(deltaY) < 4) return;
-        // Per Raj's request: a user swipe anywhere on the sheet body
-        // ALWAYS drives the sheet between its snap points — it never
-        // scrolls the form content independently. (iOS can still
-        // programmatically scroll a focused input into view; the
-        // container stays overflow-y-auto for that. We only suppress
-        // USER-initiated scrolling here by always choosing "sheet".)
-        mode = "sheet";
+        // Decide per-gesture: drag the sheet, or scroll the content.
+        // Some steps (the summary, with its full fare breakdown) have
+        // content TALLER than the expanded sheet, so the rider must be
+        // able to scroll to see the bottom — but a swipe-down at the
+        // top should still collapse the sheet.
+        //   collapsed                 → drag sheet (expand)
+        //   expanded + scrolled       → scroll content
+        //   expanded + at top + down  → drag sheet (collapse)
+        //   expanded + at top + up    → scroll content (reveal more)
+        const isExpandedNow = startHeight >= snaps.expanded - 12;
+        if (!isExpandedNow) {
+          mode = "sheet";
+        } else if (startScrollTop > 0) {
+          mode = "content";
+        } else if (deltaY > 0) {
+          mode = "sheet";
+        } else {
+          mode = "content";
+        }
       }
 
       if (mode === "sheet") {
@@ -618,19 +501,18 @@ export function RiderBottomSheet({
         )}
       </div>
 
-      {/* Bottom sheet — position:fixed anchored to visualViewport bottom.
-       In body flow inside the wrapper, the sheet's bottom landed
-       short of the actual visualViewport bottom on iOS Safari (Safari
-       treats its bottom URL chrome as outside visualViewport, but the
-       wrapper's body-flow position didn't compensate). That left the
-       strip of body bg visible BELOW the action bar but above the
-       keyboard. position:fixed with bottom=bottomInsetPx puts the
-       sheet exactly at visualViewport bottom regardless of where the
-       wrapper lands. No safe-area-inset-bottom — that produced a 34px
-       gap below the action bar on iPhones. */}
+      {/* Bottom sheet — position:fixed, flush to the layout-viewport
+       bottom (bottom:0). It no longer tracks the keyboard via a
+       visualViewport-derived inset: that inset got stuck after a
+       full-screen overlay's keyboard dismissed, leaving the action bar
+       floating mid-screen with a white gap below it. Since no text
+       inputs live in the sheet anymore (they open overlays on top),
+       anchoring to bottom:0 keeps the action bar glued to the viewport
+       bottom at all times. No safe-area-inset-bottom — that produced a
+       34px gap below the action bar on iPhones. */}
       <m.div
-        className="fixed inset-x-0 z-40 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
-        style={{ height, bottom: `${bottomInsetPx}px` }}
+        className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl border-t border-line bg-surface shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.18)]"
+        style={{ height }}
       >
         {/* Handle — the ONLY draggable area. Big touch target. */}
         <button
