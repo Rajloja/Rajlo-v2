@@ -8,6 +8,7 @@ import { AuthFetchGuard } from "@/components/auth-fetch-guard";
 import { NativeBottomNav } from "@/components/native-bottom-nav";
 import { NativeBackButton } from "@/components/native-back-button";
 import { NativePageTransition } from "@/components/native-page-transition";
+import { Analytics } from "@vercel/analytics/next";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -255,6 +256,10 @@ export default function RootLayout({
             <div className="min-h-screen">{children}</div>
           </NativePageTransition>
         </MotionProvider>
+        {/* Vercel Web Analytics — privacy-friendly page-view + visitor
+            counts, no cookies. Renders nothing; injects the tracking
+            beacon on Vercel deployments. */}
+        <Analytics />
       </body>
     </html>
   );
