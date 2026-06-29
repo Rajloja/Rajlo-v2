@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import { Icon } from "@/components/icons";
 
 /**
@@ -44,31 +45,35 @@ export function AnonymousBookingPrompt({
     router.push(`/auth/rider/signup?next=${encodeURIComponent(nextHref)}`);
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <>
-      {/* Dim backdrop behind the prompt. Pulls visual attention to the
-         sheet and visually dampens the trip preview so the rider's
-         eye lands on the CTA. Pointer-events-none so the visitor can
-         still tap the map / sheet underneath (the prompt is meant to
-         nudge, not lock out). Backdrop-blur adds a subtle frosted
-         feel without fully hiding the map. */}
+      {/* Dark overlay over the WHOLE screen. Rendered via a portal to
+         document.body at a high z-index so it sits ABOVE the rider
+         bottom sheet (z-40) and the map — at z-30 in body flow it
+         landed underneath them and never actually dimmed anything.
+         pointer-events-none keeps the trip preview tappable underneath
+         (the visitor can still tweak pickup/dropoff); the prompt is a
+         nudge, not a hard lockout. backdrop-blur frosts the map behind
+         the popup. */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-0 z-30 bg-rajlo-black/40 backdrop-blur-[2px]"
+        className="pointer-events-none fixed inset-0 z-55 bg-rajlo-black/55 backdrop-blur-[2px]"
       />
 
       <div
         role="dialog"
         aria-modal="false"
         aria-labelledby="anon-prompt-title"
-        // Fixed to the bottom of the viewport, above the backdrop.
+        // Fixed to the bottom of the viewport, ABOVE the dark overlay.
         // pointer-events-none on the wrapper so the map underneath
         // stays interactive in the gap above the card; the card
         // itself restores pointer events for its inner content.
         // Bottom padding honors the iOS safe area so the prompt
         // doesn't sit underneath Safari's URL bar / the home
         // indicator on notched devices.
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-56 flex justify-center px-3"
         style={{
           paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
         }}
@@ -111,6 +116,7 @@ export function AnonymousBookingPrompt({
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
