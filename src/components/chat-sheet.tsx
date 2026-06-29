@@ -107,35 +107,34 @@ export function ChatSheet({
     };
   }, [open]);
 
-  /* ─── Visual viewport tracking ───
+  /* ─── Keep the newest message pinned when the keyboard opens ───
    *
-   * Mobile keyboards on iOS Safari (and even some Android browsers
-   * before `interactive-widget=resizes-content`) overlay the layout
-   * viewport without resizing it. That meant the chat panel's
-   * `100dvh` height stayed equal to the full screen, so the composer
-   * slid behind the keyboard the moment the rider tapped the input.
+   * We deliberately DON'T drive the panel height from the
+   * VisualViewport API anymore. The app sets
+   * `interactive-widget=resizes-content` in the viewport meta
+   * (src/app/layout.tsx), so the on-screen keyboard RESIZES the layout
+   * viewport — `position: fixed inset-0` + `h-[100dvh]` then fit the
+   * panel into the space above the keyboard on their own, with the
+   * composer (last flex child) sitting right on top of it.
    *
-   * The fix: ask the VisualViewport API for the actual visible
-   * height and apply it inline on the panel. Whenever the keyboard
-   * opens/closes, the panel snaps to fit the visible window and the
-   * composer ends up sitting just above the keyboard. The
-   * `100dvh` CSS fallback below covers browsers that don't support
-   * VisualViewport (very old Safari, Firefox on Android < 79).
+   * Setting an inline height from `visualViewport.height` ON TOP of
+   * that double-compensated on iOS: the panel collapsed and the
+   * composer jumped to the TOP of the screen with the live-trip page
+   * showing underneath. So we let the platform own the sizing and use
+   * the VisualViewport resize event only to re-pin the scroll to the
+   * latest message as the keyboard slides in/out.
    */
-  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   useEffect(() => {
     if (!open) return;
     const vv =
       typeof window !== "undefined" ? window.visualViewport : null;
     if (!vv) return;
-    const apply = () => setViewportHeight(vv.height);
-    apply();
-    vv.addEventListener("resize", apply);
-    vv.addEventListener("scroll", apply);
-    return () => {
-      vv.removeEventListener("resize", apply);
-      vv.removeEventListener("scroll", apply);
+    const pin = () => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     };
+    vv.addEventListener("resize", pin);
+    return () => vv.removeEventListener("resize", pin);
   }, [open]);
 
   /* ─── Mark messages read on open ─── */
@@ -207,7 +206,7 @@ export function ChatSheet({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, loading, viewportHeight]);
+  }, [messages, loading]);
 
   /* ─── Send text ─── */
   const sendText = async () => {
@@ -461,16 +460,7 @@ export function ChatSheet({
   // whole screen. SSR-safe via the typeof check.
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div
-      className="fixed inset-0 z-[70] flex overscroll-contain"
-      // Inline height matches the inner panel — this stops the iOS
-      // safari rubber-band on the backdrop from leaking touch into
-      // the page underneath when the keyboard is open and the layout
-      // viewport > visual viewport.
-      style={
-        viewportHeight !== null ? { height: viewportHeight } : undefined
-      }
-    >
+    <div className="fixed inset-0 z-[70] flex overscroll-contain">
       {/* Backdrop — dim layer behind the panel. Fades in. */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -479,16 +469,11 @@ export function ChatSheet({
       />
 
       {/* Panel — full-screen on mobile, right-edge sheet on desktop.
-         The inline `height` style overrides the `h-[100dvh]` fallback
-         when the VisualViewport API is available (every modern mobile
-         browser). That's what keeps the composer above the keyboard
-         instead of getting hidden underneath it. */}
-      <div
-        className="relative ml-auto flex h-[100dvh] w-full flex-col overscroll-contain bg-surface shadow-2xl md:max-w-md"
-        style={
-          viewportHeight !== null ? { height: viewportHeight } : undefined
-        }
-      >
+         `h-[100dvh]` + the app's `interactive-widget=resizes-content`
+         viewport meta mean the keyboard shrinks the viewport and this
+         panel fits above it, keeping the composer (last flex child)
+         on top of the keyboard. No JS height tracking. */}
+      <div className="relative ml-auto flex h-[100dvh] w-full flex-col overscroll-contain bg-surface shadow-2xl md:max-w-md">
         {/* Header — sticky at the top of the flex column. flex-shrink-0
            prevents it from compressing when the messages area is
            crowded. */}

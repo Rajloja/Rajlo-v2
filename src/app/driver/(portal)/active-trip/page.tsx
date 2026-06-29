@@ -291,15 +291,20 @@ export default function DriverActiveTripPage() {
   // route fetch — without this, the banner would flash empty for the
   // 1-2 seconds between mount and the first Directions response.
   const navHasRoute = !!navSnapshot.currentStep;
-  // The fullscreen nav surface is locked-on whenever there's a route
-  // to follow. No user-controlled minimize during a live trip — the
-  // driver's only escape hatch is the top-left Back button, which
-  // hands them back to wherever they came from. This matches the
-  // operational rule "no half-attended in-app nav on a real trip".
-  //
-  // `navFullscreen` is derived (not state) so we can never get into
-  // an inconsistent "I have a route but I'm minimized" state.
-  const navFullscreen = navHasRoute;
+  // Immersive fullscreen nav is OPT-IN, not the default. The driver's
+  // default surface is the normal live-trip screen (rider card, route
+  // details, action bar) with turn-by-turn VOICE already running — the
+  // voice is driven by `useTurnByTurn` above, independent of this flag,
+  // so it keeps talking on the normal screen. The driver taps the
+  // on-map "Navigate" button to blow the map up to the immersive
+  // heading-up nav surface, and the minimize control drops them back.
+  const [navFullscreen, setNavFullscreen] = useState(false);
+  // Never linger in fullscreen once there's no route to follow (trip
+  // completed, switched to a carpool tour, etc.) — otherwise the driver
+  // could be stranded on a blank fullscreen map.
+  useEffect(() => {
+    if (!navHasRoute) setNavFullscreen(false);
+  }, [navHasRoute]);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -844,16 +849,22 @@ export default function DriverActiveTripPage() {
             driverPosition={driverPosition}
             riderPosition={riderPosition}
             liveRoute={liveRoute}
-            navMode={navEnabled}
+            // Immersive heading-up nav camera only in fullscreen. In the
+            // normal inline view the map stays a north-up overview — but
+            // turn-by-turn VOICE keeps running regardless, because it's
+            // fed by `liveRoute`/useTurnByTurn, not `navMode`.
+            navMode={navFullscreen && navHasRoute}
             onDirectionsRoute={setDirectionsRoute}
             onUserDrag={() => setCameraDisengaged(true)}
             recenterToken={recenterToken}
             // Push the locate-me button up by the trip card's measured
             // height (plus an 8px gap) so it always sits above the
-            // card. Only applied during nav mode; outside nav, no card
-            // is rendered and the height stays at 0.
+            // card. Only applies in fullscreen nav, where the NavTripCard
+            // overlay exists; the inline view has no such card.
             floatingControlsBottomPx={
-              navHasRoute && tripCardHeight > 0 ? tripCardHeight + 8 : 0
+              navFullscreen && navHasRoute && tripCardHeight > 0
+                ? tripCardHeight + 8
+                : 0
             }
             className={
               navFullscreen && navHasRoute
@@ -861,14 +872,12 @@ export default function DriverActiveTripPage() {
                 : "h-[55vh] min-h-[20rem] w-full md:h-[60vh] md:max-h-[640px]"
             }
           />
-          {navHasRoute && (
+          {navHasRoute && navFullscreen && (
             <>
-              {/* Top-left Back button. Only escape hatch out of the
-                 fullscreen nav during a live trip — drivers can pop
-                 back to the previous screen (dashboard, requests
-                 inbox, etc.) without disturbing the trip itself. The
-                 trip stays alive server-side; this is purely a
-                 navigation action on the driver's device. */}
+              {/* Top-left Back button. Pops back to the previous screen
+                 (dashboard, requests inbox, etc.) without disturbing the
+                 trip itself. The trip stays alive server-side; this is
+                 purely a navigation action on the driver's device. */}
               <button
                 type="button"
                 onClick={() => router.back()}
@@ -887,9 +896,9 @@ export default function DriverActiveTripPage() {
                 }}
                 muted={voiceMuted}
                 onToggleMute={handleToggleVoice}
-                // Deliberately no onMinimize — drivers can't collapse
-                // the nav mid-trip. Back button at top-left lets them
-                // navigate away if they really need to.
+                // Collapse the immersive nav back to the normal
+                // live-trip screen. Voice keeps running either way.
+                onMinimize={() => setNavFullscreen(false)}
               />
               <NavTripCard
                 snapshot={navSnapshot}
@@ -1075,6 +1084,62 @@ export default function DriverActiveTripPage() {
                 }
               />
             </>
+          )}
+
+          {/* Inline (non-fullscreen) map controls. The normal live-trip
+             screen still gets turn-by-turn VOICE; these two buttons let
+             the driver (a) blow the map up to the immersive fullscreen
+             nav, and (b) mute/unmute the voice without entering it. */}
+          {navHasRoute && !navFullscreen && (
+            <div className="pointer-events-none absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
+              <button
+                type="button"
+                onClick={() => setNavFullscreen(true)}
+                aria-label="Enter full-screen navigation"
+                className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-rajlo-red px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/30 transition-transform active:scale-95"
+              >
+                <Icon name="navigation" className="h-4 w-4" />
+                Navigate
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleVoice}
+                aria-label={voiceMuted ? "Unmute voice" : "Mute voice"}
+                className="pointer-events-auto grid h-10 w-10 place-items-center rounded-full bg-white text-rajlo-black shadow-lg ring-1 ring-black/5 transition-transform active:scale-95"
+              >
+                {voiceMuted ? (
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                    aria-hidden
+                  >
+                    <path d="M11 5 6 9H2v6h4l5 4z" />
+                    <path d="M23 9l-6 6" />
+                    <path d="M17 9l6 6" />
+                  </svg>
+                ) : (
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                    aria-hidden
+                  >
+                    <path d="M11 5 6 9H2v6h4l5 4z" />
+                    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                    <path d="M19 5a9 9 0 0 1 0 14" />
+                  </svg>
+                )}
+              </button>
+            </div>
           )}
         </div>
       </FadeUp>
@@ -1285,11 +1350,11 @@ export default function DriverActiveTripPage() {
       )}
 
       {/* ── Action bar ──
-         Hidden when the in-app nav is active — the NavTripCard
-         overlay on the map provides the same primary action plus
-         cancel / no-show controls behind its "More options" toggle.
-         Two action surfaces stacked vertically would just confuse. */}
-      {!navHasRoute && (
+         Shown on the normal live-trip screen. Hidden only in fullscreen
+         nav, where the NavTripCard overlay provides the same primary
+         action plus cancel / no-show controls behind its "More options"
+         toggle. Two action surfaces stacked would just confuse. */}
+      {!navFullscreen && (
       <FadeUp delay={0.2}>
         <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex flex-col gap-2 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur md:relative md:mx-0 md:rounded-2xl md:border md:bg-surface md:px-5 md:py-4">
           {/* The "Open Google Maps" external deep-link was removed —
