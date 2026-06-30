@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rajlo map style preview</title>
+<style>
+  :root { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; }
+  body { margin: 0; background: #0f1115; color: #e8e8ea; padding: 28px; }
+  h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
+  p.sub { color: #9aa0a6; margin: 0 0 24px; font-size: 13px; }
+  .grid { display: grid; gap: 22px; grid-template-columns: 1fr 1fr; max-width: 1080px; }
+  @media (max-width: 760px){ .grid { grid-template-columns: 1fr; } }
+  .panel { background: #16181d; border: 1px solid #24262c; border-radius: 18px; overflow: hidden; }
+  .panel header { display:flex; align-items:center; gap:8px; padding: 12px 16px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; }
+  .panel header .dot { width:9px;height:9px;border-radius:50%; }
+  .panel svg { display:block; width:100%; height:auto; }
+  .legend { max-width: 1080px; margin-top: 26px; display:flex; flex-wrap:wrap; gap: 10px 18px; }
+  .sw { display:flex; align-items:center; gap:8px; font-size:12px; color:#c7cbd1; }
+  .sw i { width:16px; height:16px; border-radius:4px; border:1px solid rgba(255,255,255,.12); display:inline-block; }
+  code { color:#fff; font-size:11px; }
+</style>
+</head>
+<body>
+  <h1>Rajlo map style — preview</h1>
+  <p class="sub">Stylised approximation using the exact style hex values. The real Google map will follow the same palette once the style is applied to your Map ID.</p>
+
+  <div class="grid">
+    <!-- ───────── DEFAULT ───────── -->
+    <div class="panel">
+      <header style="color:#9aa0a6"><span class="dot" style="background:#9ec8e8"></span> Default (what you have now)</header>
+      <svg viewBox="0 0 480 320">
+        <!-- land -->
+        <rect width="480" height="320" fill="#cfe8cf"/>
+        <!-- water -->
+        <path d="M300,320 C320,250 420,250 480,210 L480,320 Z" fill="#9ec8e8"/>
+        <!-- park -->
+        <rect x="40" y="60" width="90" height="70" rx="10" fill="#aedda0"/>
+        <!-- roads -->
+        <g stroke="#ffffff" stroke-width="7" fill="none" stroke-linecap="round">
+          <path d="M0,150 H300"/>
+          <path d="M180,0 V320"/>
+          <path d="M60,240 H300"/>
+        </g>
+        <!-- highway -->
+        <path d="M-10,90 C120,70 260,140 330,300" stroke="#f3d27a" stroke-width="11" fill="none"/>
+        <!-- pins -->
+        <circle cx="120" cy="200" r="11" fill="#10b981" stroke="#fff" stroke-width="3"/>
+        <circle cx="250" cy="120" r="11" fill="#f10100" stroke="#fff" stroke-width="3"/>
+        <text x="135" y="190" font-size="11" fill="#3a3f47" font-weight="700">Half Way Tree</text>
+        <text x="362" y="300" font-size="11" fill="#5b86a3" font-weight="700">Sea</text>
+      </svg>
+    </div>
+
+    <!-- ───────── RAJLO ───────── -->
+    <div class="panel">
+      <header style="color:#f10100"><span class="dot" style="background:#f10100"></span> Rajlo style (proposed)</header>
+      <svg viewBox="0 0 480 320">
+        <!-- land -->
+        <rect width="480" height="320" fill="#f4f1ea"/>
+        <!-- water -->
+        <path d="M300,320 C320,250 420,250 480,210 L480,320 Z" fill="#d7e2e6"/>
+        <!-- park -->
+        <rect x="40" y="60" width="90" height="70" rx="10" fill="#dde5d8"/>
+        <!-- roads (white with a faint warm border for definition) -->
+        <g stroke="#e7e2d8" stroke-width="9" fill="none" stroke-linecap="round">
+          <path d="M0,150 H300"/>
+          <path d="M180,0 V320"/>
+          <path d="M60,240 H300"/>
+        </g>
+        <g stroke="#ffffff" stroke-width="7" fill="none" stroke-linecap="round">
+          <path d="M0,150 H300"/>
+          <path d="M180,0 V320"/>
+          <path d="M60,240 H300"/>
+        </g>
+        <!-- highway: soft red fill + red edge stroke -->
+        <path d="M-10,90 C120,70 260,140 330,300" stroke="#f10100" stroke-width="13" fill="none" opacity="0.9"/>
+        <path d="M-10,90 C120,70 260,140 330,300" stroke="#fbe4e4" stroke-width="9" fill="none"/>
+        <!-- route line A->B (brand red gradient feel) -->
+        <path d="M120,200 L250,120" stroke="#f10100" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.85"/>
+        <!-- nearby driver dots -->
+        <circle cx="90" cy="120" r="5" fill="#111906"/>
+        <circle cx="210" cy="220" r="5" fill="#111906"/>
+        <circle cx="270" cy="170" r="5" fill="#111906"/>
+        <!-- pins -->
+        <circle cx="120" cy="200" r="11" fill="#10b981" stroke="#fff" stroke-width="3"/>
+        <circle cx="250" cy="120" r="11" fill="#f10100" stroke="#fff" stroke-width="3"/>
+        <text x="135" y="190" font-size="11" fill="#5b6068" font-weight="700">Half Way Tree</text>
+        <text x="362" y="300" font-size="11" fill="#9aa7ad" font-weight="700">Sea</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="sw"><i style="background:#f4f1ea"></i> Land <code>#f4f1ea</code></span>
+    <span class="sw"><i style="background:#d7e2e6"></i> Water <code>#d7e2e6</code></span>
+    <span class="sw"><i style="background:#ffffff"></i> Roads <code>#ffffff</code></span>
+    <span class="sw"><i style="background:#fbe4e4"></i> Highway fill <code>#fbe4e4</code></span>
+    <span class="sw"><i style="background:#f10100"></i> Highway / brand <code>#f10100</code></span>
+    <span class="sw"><i style="background:#dde5d8"></i> Parks <code>#dde5d8</code></span>
+    <span class="sw"><i style="background:#5b6068"></i> Labels <code>#5b6068</code></span>
+    <span class="sw"><i style="background:#111906"></i> Driver dots <code>#111906</code></span>
+  </div>
+</body>
+</html>
