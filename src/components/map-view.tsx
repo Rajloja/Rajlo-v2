@@ -13,21 +13,33 @@ import { formatEta } from "@/lib/format-eta";
  * preview if Directions fails (e.g. impossible route, API hiccup).
  */
 
+// Rajlo brand map style — a clean, low-saturation light map (Uber-ish):
+// warm off-white land, white roads, red-accented highways, muted slate
+// water (NOT the default bright blue), no POI clutter.
+//
+// IMPORTANT: this array is ONLY applied when NO `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`
+// is set. When a Map ID IS set (current production setup), Google uses
+// CLOUD-based styling and ignores this array entirely — the brand style
+// then has to live on the Map ID itself in the Google Cloud Console
+// (Map Styles → import this JSON → associate with the Map ID). Keep the
+// two in sync so the look is identical whichever path is active.
 const MAP_STYLE: google.maps.MapTypeStyle[] = [
-  // Soft, low-contrast base so the route + markers pop. Branded subtly.
-  { elementType: "geometry", stylers: [{ color: "#f3f1ed" }] },
+  { elementType: "geometry", stylers: [{ color: "#f4f1ea" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#5b6068" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
   { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#d8d4cc" }] },
+  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
   { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.park", stylers: [{ visibility: "on" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#dde8d8" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#dde5d8" }, { visibility: "on" }] },
   { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
   { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#fbe9e9" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#f10100" }, { weight: 0.4 }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#fbe4e4" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#f10100" }, { weight: 0.5 }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#cfe6ec" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#d7e2e6" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9aa7ad" }] },
 ];
 
 export type LiveDot = { lat: number; lng: number };
@@ -482,6 +494,7 @@ export function MapView({
   dropoffEtaMinutes = null,
   searching = false,
   searchingUntil = null,
+  focusRadiusKm = null,
   viewer = "rider",
   boarding = null,
   alighting = null,
@@ -524,6 +537,13 @@ export function MapView({
    *  + "X:XX left" label, so the rider knows how long they have
    *  before the request auto-cancels. */
   searchingUntil?: string | null;
+  /** When set (km), the camera frames a box of roughly this radius
+   *  around the PICKUP instead of fitting the whole pickup→dropoff
+   *  route. Used on the rider's `requested` view so they see the
+   *  pickup area + the nearby drivers around them (e.g. 10km), rather
+   *  than zooming all the way out to a cross-island route overview.
+   *  Ignored once a `liveRoute` is engaged. */
+  focusRadiusKm?: number | null;
   /** Who's looking at the map. When `"driver"` we suppress:
    *    - The blue rider puck (the driver doesn't need to see their
    *      own car represented twice, and the rider's separate puck
@@ -1467,6 +1487,30 @@ export function MapView({
       markersRef.current.push(marker);
     });
 
+    // Focus mode — frame a ~focusRadiusKm box around the pickup so the
+    // rider sees their immediate surroundings (and the nearby drivers in
+    // them) instead of a zoomed-out cross-island route overview. Used on
+    // the `requested` view. Skipped once a liveRoute is engaged (a driver
+    // has accepted; the route view takes over).
+    if (focusRadiusKm && focusRadiusKm > 0 && pickup && !liveRoute) {
+      const latDelta = focusRadiusKm / 111; // ~111 km per degree of lat
+      const lngDelta =
+        focusRadiusKm /
+        (111 * Math.max(0.2, Math.cos((pickup.lat * Math.PI) / 180)));
+      const bounds = new google.maps.LatLngBounds(
+        { lat: pickup.lat - latDelta, lng: pickup.lng - lngDelta },
+        { lat: pickup.lat + latDelta, lng: pickup.lng + lngDelta },
+      );
+      map.fitBounds(bounds, {
+        top: 56,
+        right: 56,
+        bottom: 56 + mapBottomInsetPx,
+        left: 56,
+      });
+      recordOverviewFrame(map, bounds);
+      return;
+    }
+
     if (points.length === 1) {
       map.setCenter({ lat: points[0].place.lat, lng: points[0].place.lng });
       map.setZoom(14);
@@ -1582,7 +1626,7 @@ export function MapView({
     return () => {
       cancelled = true;
     };
-  }, [pickup, stops, dropoff, liveRoute, mapReady, suppressStaticRoute]);
+  }, [pickup, stops, dropoff, liveRoute, mapReady, suppressStaticRoute, focusRadiusKm, mapBottomInsetPx]);
 
   // Floating ETA bubbles above the pickup + dropoff pins. Lives in its
   // own effect so a nearest-driver-ETA tick can refresh the bubble

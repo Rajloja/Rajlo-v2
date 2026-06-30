@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
@@ -12,6 +12,7 @@ import {
   useFloatingControlsOffset,
 } from "@/components/rider-bottom-sheet";
 import { useIsMobile } from "@/lib/use-is-mobile";
+import { useFleet } from "@/lib/use-fleet";
 import { RequestingProgressBar } from "@/components/requesting-progress-bar";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useRidePosition } from "@/lib/use-ride-position";
@@ -189,6 +190,10 @@ type CompletedSnapshot = {
   fareJMD: number;
 };
 
+/** Radius (km) around the rider's pickup we surface nearby online
+ *  drivers — and frame the map to — while the ride is still searching. */
+const NEARBY_DRIVER_RADIUS_KM = 10;
+
 export default function RiderLiveTripPage() {
   const router = useRouter();
   const [data, setData] = useState<ActiveResponse | null>(null);
@@ -233,6 +238,29 @@ export default function RiderLiveTripPage() {
   // collapsed snap with a small gap so they're not flush against
   // the sheet edge.
   const floatingControlsOffset = useFloatingControlsOffset(0.55);
+
+  // While the ride is still `requested` (the matcher is scanning),
+  // subscribe to the live fleet so the rider sees the verified drivers
+  // around them on the map. Gated on the status so the subscription
+  // tears down the instant a driver accepts. We filter to a ~10km
+  // radius of the pickup so a driver across the island doesn't clutter
+  // the focused map.
+  const isSearchingForDriver = data?.ride?.status === "requested";
+  const fleetDrivers = useFleet(!!isSearchingForDriver);
+  const pickupLat = data?.ride?.pickup.lat;
+  const pickupLng = data?.ride?.pickup.lng;
+  const nearbyFleet = useMemo(() => {
+    if (!isSearchingForDriver || pickupLat == null || pickupLng == null) {
+      return [];
+    }
+    return fleetDrivers.filter(
+      (d) =>
+        haversineKm(
+          { lat: pickupLat, lng: pickupLng },
+          { lat: d.lat, lng: d.lng },
+        ) <= NEARBY_DRIVER_RADIUS_KM,
+    );
+  }, [isSearchingForDriver, fleetDrivers, pickupLat, pickupLng]);
 
   // Once the rider moves past a shown "trip ended" card — taps through
   // it or leaves the page — remember it so a later return lands on a
@@ -798,7 +826,9 @@ export default function RiderLiveTripPage() {
       <NoDriverFoundView
         rideId={ride.id}
         pickupName={ride.pickup.name}
+        pickupAddress={ride.pickup.address}
         dropoffName={ride.dropoff.name}
+        dropoffAddress={ride.dropoff.address}
         fareJMD={ride.estimatedFareJMD}
       />
     );
@@ -849,6 +879,14 @@ export default function RiderLiveTripPage() {
       dropoff={mapDropoff}
       driverPosition={driverPosition}
       riderPosition={riderPosition}
+      // While searching: show the verified drivers near the rider and
+      // frame the map to ~10km around pickup so they can see who's
+      // close. Both clear out once a driver accepts (status flips off
+      // `requested` → nearbyFleet empties, focusRadiusKm null).
+      nearbyDrivers={ride.status === "requested" ? nearbyFleet : undefined}
+      focusRadiusKm={
+        ride.status === "requested" ? NEARBY_DRIVER_RADIUS_KM : null
+      }
       liveRoute={
         ride.status === "accepted" || ride.status === "arrived"
           ? { target: "pickup" }
@@ -1478,12 +1516,16 @@ function CompletionDialog({
 function NoDriverFoundView({
   rideId,
   pickupName,
+  pickupAddress,
   dropoffName,
+  dropoffAddress,
   fareJMD,
 }: {
   rideId: string;
   pickupName: string;
+  pickupAddress: string;
   dropoffName: string;
+  dropoffAddress: string;
   fareJMD: number;
 }) {
   const router = useRouter();
@@ -1546,6 +1588,9 @@ function NoDriverFoundView({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold">{pickupName}</p>
+                {pickupAddress && pickupAddress !== pickupName && (
+                  <p className="truncate text-xs text-muted">{pickupAddress}</p>
+                )}
               </div>
             </div>
             <div className="flex items-start gap-3">
@@ -1554,6 +1599,9 @@ function NoDriverFoundView({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold">{dropoffName}</p>
+                {dropoffAddress && dropoffAddress !== dropoffName && (
+                  <p className="truncate text-xs text-muted">{dropoffAddress}</p>
+                )}
               </div>
             </div>
           </div>
