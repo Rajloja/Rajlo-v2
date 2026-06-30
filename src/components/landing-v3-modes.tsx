@@ -62,7 +62,7 @@ export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
             tone="light"
             imageSide="left"
             image={PHOTOS.modePrivate}
-            imageAlt="A driver behind the wheel of a private car in Kingston"
+            imageAlt="A rider meeting her verified Rajlo driver beside a private ride"
             kicker="Private ride"
             title="Door-to-door, just you."
             body="Pin your pickup and dropoff, see the fare upfront, pay from your wallet. Add stops mid-trip without paying twice. PIN-verify your driver before every trip."
@@ -73,7 +73,7 @@ export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
             tone="brand"
             imageSide="right"
             image={PHOTOS.modeRouteTaxi}
-            imageAlt="A route taxi pulling into a Half-Way Tree stop"
+            imageAlt="A route taxi and a private ride on a busy Jamaican high street"
             kicker="Route taxi"
             title="Hop the corridor."
             body="The official TA-anchored fare, paid by leg. Find the next driver running your route, board where you're standing, alight at your stop. Same fare you'd pay roadside — cashless."
