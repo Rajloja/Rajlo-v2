@@ -495,6 +495,7 @@ export function MapView({
   searching = false,
   searchingUntil = null,
   focusRadiusKm = null,
+  hideFullscreenControl = false,
   viewer = "rider",
   boarding = null,
   alighting = null,
@@ -544,6 +545,11 @@ export function MapView({
    *  than zooming all the way out to a cross-island route overview.
    *  Ignored once a `liveRoute` is engaged. */
   focusRadiusKm?: number | null;
+  /** Hides MapView's own top-right "expand to fullscreen" button.
+   *  Set on surfaces that provide their own fullscreen/nav affordance
+   *  (e.g. the driver active-trip page's "Navigate" button) so the two
+   *  controls don't collide in the same top-right corner. */
+  hideFullscreenControl?: boolean;
   /** Who's looking at the map. When `"driver"` we suppress:
    *    - The blue rider puck (the driver doesn't need to see their
    *      own car represented twice, and the rider's separate puck
@@ -2707,7 +2713,7 @@ export function MapView({
          top-left "Close" pill when expanded. The expand button is
          hidden during the matcher search radar (no point opening
          fullscreen when there's no route to look at yet). */}
-      {!loadError && !searching && !fullscreen && (
+      {!loadError && !searching && !fullscreen && !hideFullscreenControl && (
         <button
           type="button"
           onClick={(e) => {

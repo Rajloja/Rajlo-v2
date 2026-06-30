@@ -192,7 +192,7 @@ type CompletedSnapshot = {
 
 /** Radius (km) around the rider's pickup we surface nearby online
  *  drivers — and frame the map to — while the ride is still searching. */
-const NEARBY_DRIVER_RADIUS_KM = 10;
+const NEARBY_DRIVER_RADIUS_KM = 5;
 
 export default function RiderLiveTripPage() {
   const router = useRouter();

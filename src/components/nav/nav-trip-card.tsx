@@ -105,32 +105,37 @@ export function NavTripCard({
       style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}
     >
       <div className="pointer-events-auto rounded-2xl bg-surface shadow-2xl ring-1 ring-line">
-        {/* Compact row — always visible. */}
-        <div className="flex items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            {/* Meta row + price pill side-by-side. Price is the
-               driver's earnings preview — pinning it here keeps it in
-               peripheral vision the whole drive without competing
-               with the maneuver banner up top. */}
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="font-secondary text-xs font-bold uppercase tracking-wider text-muted">
-                {formatDuration(snapshot.totalRemainingS)} ·{" "}
-                {formatDistance(snapshot.totalRemainingM)} · ETA{" "}
-                {formatEta(snapshot.totalRemainingS)}
-              </p>
-              {priceLabel && (
-                <span className="shrink-0 rounded-full bg-rajlo-red px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-white shadow-sm shadow-rajlo-red/30">
-                  {priceLabel}
-                </span>
-              )}
-            </div>
-            <p className="mt-1 truncate text-sm font-bold text-foreground">
-              {headline}
+        {/* Compact block — always visible. Stacked rows so nothing gets
+           squeezed: (1) trip meta + earnings pill, (2) who/where, then
+           (3) a FULL-WIDTH action button. The action used to sit inline
+           to the right, which crushed the meta + fare into a sliver on
+           long labels ("I've arrived at pickup" + "JMD 24,100"). */}
+        <div className="px-4 py-3">
+          {/* Row 1 — trip meta on the left, earnings pill on the right.
+             The meta wraps to its own line and is never squeezed by the
+             action button anymore. */}
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 font-secondary text-xs font-bold uppercase tracking-wider text-muted">
+              {formatDuration(snapshot.totalRemainingS)} ·{" "}
+              {formatDistance(snapshot.totalRemainingM)} · ETA{" "}
+              {formatEta(snapshot.totalRemainingS)}
             </p>
-            {addressLine && (
-              <p className="truncate text-xs text-muted">{addressLine}</p>
+            {priceLabel && (
+              <span className="shrink-0 rounded-full bg-rajlo-red px-3 py-1 text-sm font-extrabold tabular-nums text-white shadow-sm shadow-rajlo-red/30">
+                {priceLabel}
+              </span>
             )}
           </div>
+
+          {/* Row 2 — who + where. */}
+          <p className="mt-2 truncate text-base font-extrabold tracking-tight text-foreground">
+            {headline}
+          </p>
+          {addressLine && (
+            <p className="truncate text-xs text-muted">{addressLine}</p>
+          )}
+
+          {/* Row 3 — full-width primary action. */}
           <button
             type="button"
             onClick={() => {
@@ -139,7 +144,7 @@ export function NavTripCard({
               onAction();
             }}
             disabled={actionDisabled || acting}
-            className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white shadow-md transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3.5 text-sm font-bold text-white shadow-md transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${
               actionVariant === "success"
                 ? "bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-700"
                 : "bg-rajlo-red shadow-rajlo-red/30 hover:bg-primary-hover"

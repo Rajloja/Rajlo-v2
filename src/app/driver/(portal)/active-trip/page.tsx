@@ -854,6 +854,11 @@ export default function DriverActiveTripPage() {
             // turn-by-turn VOICE keeps running regardless, because it's
             // fed by `liveRoute`/useTurnByTurn, not `navMode`.
             navMode={navFullscreen && navHasRoute}
+            // The "Navigate" button (and the immersive nav minimize)
+            // own the fullscreen affordance here — suppress MapView's
+            // own top-right expand button so it doesn't collide with /
+            // sit on top of the Navigate pill.
+            hideFullscreenControl
             onDirectionsRoute={setDirectionsRoute}
             onUserDrag={() => setCameraDisengaged(true)}
             recenterToken={recenterToken}
