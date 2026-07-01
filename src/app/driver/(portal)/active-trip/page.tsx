@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
@@ -148,7 +147,6 @@ const STAGE_COPY = {
 };
 
 export default function DriverActiveTripPage() {
-  const router = useRouter();
   // Seed from the cross-page cache so a tab-switch back to /driver/active-trip
   // renders content instantly instead of flashing skeletons. The
   // background refresh below still re-fetches to stay accurate.
@@ -871,6 +869,12 @@ export default function DriverActiveTripPage() {
                 ? tripCardHeight + 8
                 : 0
             }
+            // In fullscreen nav, tell MapView how tall the bottom trip
+            // card is so the follow camera lifts the driver puck above
+            // it (otherwise the taller card covers the nav arrow).
+            mapBottomInsetPx={
+              navFullscreen && navHasRoute ? tripCardHeight : 0
+            }
             className={
               navFullscreen && navHasRoute
                 ? "h-full w-full flex-1"
@@ -879,14 +883,14 @@ export default function DriverActiveTripPage() {
           />
           {navHasRoute && navFullscreen && (
             <>
-              {/* Top-left Back button. Pops back to the previous screen
-                 (dashboard, requests inbox, etc.) without disturbing the
-                 trip itself. The trip stays alive server-side; this is
-                 purely a navigation action on the driver's device. */}
+              {/* Top-left Back button. Collapses the immersive nav back
+                 to the normal live-trip screen — it does NOT leave the
+                 trip (that surprised drivers by dropping them on the
+                 home/dashboard). Same effect as the minimize control. */}
               <button
                 type="button"
-                onClick={() => router.back()}
-                aria-label="Back"
+                onClick={() => setNavFullscreen(false)}
+                aria-label="Exit full-screen navigation"
                 className="pointer-events-auto absolute left-3 z-40 grid h-10 w-10 place-items-center rounded-full bg-white text-rajlo-black shadow-lg ring-1 ring-black/5 transition-transform active:scale-95"
                 style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
               >

@@ -1108,9 +1108,14 @@ export default function RiderRequestPage() {
               <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-500 text-[10px] font-extrabold text-white">
                 A
               </span>
-              <p className="min-w-0 truncate text-sm font-semibold">
-                {pickup.name}
-              </p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{pickup.name}</p>
+                {pickup.address && pickup.address !== pickup.name && (
+                  <p className="truncate text-xs text-muted">
+                    {pickup.address}
+                  </p>
+                )}
+              </div>
             </div>
             {stops
               .filter((s): s is Place => !!s)
@@ -1119,18 +1124,26 @@ export default function RiderRequestPage() {
                   <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-black text-[10px] font-extrabold text-white">
                     {String.fromCharCode(66 + i)}
                   </span>
-                  <p className="min-w-0 truncate text-sm font-semibold">
-                    {s.name}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{s.name}</p>
+                    {s.address && s.address !== s.name && (
+                      <p className="truncate text-xs text-muted">{s.address}</p>
+                    )}
+                  </div>
                 </div>
               ))}
             <div className="flex items-start gap-3">
               <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-rajlo-red text-[10px] font-extrabold text-white">
                 {String.fromCharCode(66 + stops.filter(Boolean).length)}
               </span>
-              <p className="min-w-0 truncate text-sm font-semibold">
-                {dropoff.name}
-              </p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{dropoff.name}</p>
+                {dropoff.address && dropoff.address !== dropoff.name && (
+                  <p className="truncate text-xs text-muted">
+                    {dropoff.address}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </FadeUp>

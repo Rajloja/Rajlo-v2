@@ -733,6 +733,12 @@ export function MapView({
   const onDirectionsRouteRef = useRef<
     ((route: google.maps.DirectionsRoute) => void) | undefined
   >(undefined);
+  // Latest bottom inset (px) mirrored into a ref so the per-position
+  // nav-follow pan can read it without taking `mapBottomInsetPx` as a
+  // dep (which would re-run the whole follow effect on every card
+  // resize). Drives the puck's lower-third offset so the trip card
+  // never covers the driver's navigation arrow.
+  const mapBottomInsetRef = useRef(0);
   // Fleet markers — keyed by driverId so we move/dispose them in place
   // instead of recreating every render. Smoother and avoids the
   // marker-creation flash when positions update. We also remember each
@@ -988,20 +994,26 @@ export function MapView({
   useEffect(() => {
     onUserDragRef.current = onUserDrag;
     onDirectionsRouteRef.current = onDirectionsRoute;
-  }, [onUserDrag, onDirectionsRoute]);
+    mapBottomInsetRef.current = mapBottomInsetPx;
+  }, [onUserDrag, onDirectionsRoute, mapBottomInsetPx]);
 
-  // Nav-mode camera setup. Entering nav mode tilts the map to 45°,
-  // zooms in to street level, and re-arms follow so the next driver
-  // position update repositions us. Exiting restores the flat
-  // overhead view. The driver-follow effect handles the
-  // per-position heading + panBy offsets.
+  // Nav-mode camera setup. Entering nav mode tilts the map to the
+  // MAX vector angle (67.5°), zooms in to street level, and re-arms
+  // follow so the next driver position update repositions us. The
+  // steep tilt gives the driver a long look down the road ahead —
+  // more of the upcoming route + surrounding land in view, like a
+  // real turn-by-turn app — instead of the shallow 45° that showed
+  // mostly the immediate junction. Exiting restores the flat overhead
+  // view. The driver-follow effect handles per-position heading + panBy.
+  const NAV_MAX_TILT = 67.5;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     if (navMode) {
-      // Zoom BEFORE tilting — tilt is clamped to 0 at zoom < ~14 on
-      // every vector map. Without the zoom-first ordering, setTilt(45)
-      // silently rounds to 0 and the map stays flat.
+      // Zoom BEFORE tilting — tilt is clamped to 0 at zoom < ~14, and
+      // the FULL 67.5° is only reachable at high zoom. Without the
+      // zoom-first ordering, setTilt silently rounds down. 18 gives us
+      // headroom for the max tilt.
       const currentZoom = map.getZoom() ?? 0;
       if (currentZoom < 17) map.setZoom(18);
       // Explicit setTilt / setHeading rather than setOptions — the
@@ -1009,7 +1021,7 @@ export function MapView({
       // vector tilt + rotation; they're also what the API treats as
       // first-class programmatic camera commands. setOptions occasionally
       // races with internal style loads.
-      map.setTilt(45);
+      map.setTilt(NAV_MAX_TILT);
       followModeRef.current = true;
       // Diagnostic: setTilt is silently no-op on RASTER maps. If the
       // Map ID's renderer is raster (the default when "Quick create"
@@ -1020,14 +1032,14 @@ export function MapView({
         const actualTilt = map.getTilt() ?? 0;
         // eslint-disable-next-line no-console
         console.log(
-          `[MapView] nav mode ON — requested tilt=45, actual tilt=${actualTilt}, zoom=${map.getZoom()}, mapId=${
+          `[MapView] nav mode ON — requested tilt=${NAV_MAX_TILT}, actual tilt=${actualTilt}, zoom=${map.getZoom()}, mapId=${
             process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ? "set" : "MISSING"
           }`,
         );
         if (actualTilt < 5) {
           // eslint-disable-next-line no-console
           console.warn(
-            "[MapView] Map did NOT tilt despite setTilt(45). Almost " +
+            "[MapView] Map did NOT tilt despite setTilt(). Almost " +
               "certainly your Map ID's renderer is RASTER, not Vector. " +
               "Fix: Google Cloud Console → Map Management → click your " +
               "Map ID → Settings → set Renderer to Vector, enable Tilt " +
@@ -1228,6 +1240,13 @@ export function MapView({
               clearTimeout(zoomInRestoreTimerRef.current);
               zoomInRestoreTimerRef.current = null;
             }
+            // ...and cancel a pending idle-recenter so a new pan started
+            // within the countdown doesn't get interrupted by a snap-back
+            // to the driver's position while they're still looking around.
+            if (idleRecenterTimerRef.current) {
+              clearTimeout(idleRecenterTimerRef.current);
+              idleRecenterTimerRef.current = null;
+            }
           }
         });
         // Seed the zoom-tracking ref with whatever zoom the map
@@ -1247,6 +1266,16 @@ export function MapView({
           if (zoomInRestoreTimerRef.current) {
             clearTimeout(zoomInRestoreTimerRef.current);
             zoomInRestoreTimerRef.current = null;
+          }
+          // Crucially, also cancel a pending idle-recenter. `touchstart`
+          // fires the instant the driver puts a finger back on the map
+          // to keep panning — so a recenter armed by a brief earlier
+          // pause must NOT fire mid-scroll and yank them off the area
+          // they're still exploring. It re-arms only once they truly
+          // stop and the map goes idle again.
+          if (idleRecenterTimerRef.current) {
+            clearTimeout(idleRecenterTimerRef.current);
+            idleRecenterTimerRef.current = null;
           }
         };
         el2.addEventListener("wheel", markUserGesture, { passive: true });
@@ -2028,7 +2057,15 @@ export function MapView({
         map.panTo(pos);
         const el = containerRef.current;
         if (el) {
-          map.panBy(0, -Math.round(el.clientHeight * 0.25));
+          // Sit the puck in the lower third of the VISIBLE map — i.e.
+          // the area ABOVE the trip card (mapBottomInsetRef), not the
+          // full viewport. Adding 0.75× the card height to the upward
+          // pan lifts the puck clear of the card so it's never covered,
+          // while still leaving most of the road ahead in view.
+          const offset =
+            Math.round(el.clientHeight * 0.25) -
+            Math.round(mapBottomInsetRef.current * 0.75);
+          map.panBy(0, -offset);
         }
       } else {
         // Rider-side / non-nav surfaces: two camera modes.
