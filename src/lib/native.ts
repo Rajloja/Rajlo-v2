@@ -140,12 +140,20 @@ export const pip = {
   /** Enter the PiP float now (Android). Call from a user gesture while
    *  the nav screen is visible. Returns whether the OS accepted it. */
   async enterNow(): Promise<boolean> {
+    // eslint-disable-next-line no-console
+    console.log("[pipjs] enterNow start native=" + isNativeApp());
     try {
       const plugin = await getRajloPip();
+      // eslint-disable-next-line no-console
+      console.log("[pipjs] plugin=" + (plugin ? "ok" : "null"));
       if (!plugin) return false;
       const res = await plugin.enterPip();
+      // eslint-disable-next-line no-console
+      console.log("[pipjs] enterPip res=" + JSON.stringify(res));
       return !!res?.entered;
-    } catch {
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.log("[pipjs] enterNow ERROR " + (e as Error)?.message);
       return false;
     }
   },
