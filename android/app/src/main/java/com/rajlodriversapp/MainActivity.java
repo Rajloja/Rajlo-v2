@@ -4,6 +4,7 @@ import android.app.PictureInPictureParams;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.util.Rational;
 import android.webkit.CookieManager;
 
@@ -64,20 +65,74 @@ public class MainActivity extends BridgeActivity {
         // PiP is API 26+ (Android O); older devices just background
         // normally. Any failure is swallowed — a missing float must
         // never crash the app or block the driver from leaving.
+        Log.d("RajloPip", "onUserLeaveHint navActive=" + RajloPip.navActive
+            + " sdk=" + Build.VERSION.SDK_INT);
+        // Manually enter PiP here on ALL supported versions (API 26+).
+        // setAutoEnterEnabled (see setNavPipEnabled) is a nice-to-have,
+        // but Samsung One UI silently ignores it (the task's
+        // pictureInPictureParams stays null), so the manual call is the
+        // path that actually works on this device — and gating it out on
+        // API 31+ is exactly why nothing happened.
         if (RajloPip.navActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 PictureInPictureParams.Builder builder =
                     new PictureInPictureParams.Builder();
-                // Portrait-ish window that matches the nav screen shape,
-                // so the top turn banner reads cleanly when shrunk.
                 builder.setAspectRatio(new Rational(2, 3));
-                enterPictureInPictureMode(builder.build());
-            } catch (Exception ignored) {
-                // Some OEMs / users disable PiP at the system level —
-                // fall through to a normal background.
+                boolean entered = enterPictureInPictureMode(builder.build());
+                Log.d("RajloPip", "manual enterPiP returned " + entered);
+            } catch (Exception e) {
+                Log.e("RajloPip", "manual enterPiP failed", e);
             }
         }
         super.onUserLeaveHint();
+    }
+
+    /**
+     * Enter PiP immediately. Called from a user gesture (the nav "Float"
+     * button) while the activity is fully VISIBLE — which is the state
+     * Samsung One UI requires and which onUserLeaveHint no longer
+     * satisfies (the window is already hiding by then). Returns whether
+     * the system accepted the request.
+     */
+    public boolean enterPipNow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                PictureInPictureParams params =
+                    new PictureInPictureParams.Builder()
+                        .setAspectRatio(new Rational(2, 3))
+                        .build();
+                boolean entered = enterPictureInPictureMode(params);
+                Log.d("RajloPip", "enterPipNow returned " + entered);
+                return entered;
+            } catch (Exception e) {
+                Log.e("RajloPip", "enterPipNow failed", e);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * API 31+ : arm / disarm auto-enter Picture-in-Picture. When armed,
+     * the OS drops the activity into the PiP float by itself the moment
+     * the driver leaves the app — reliable where a manual
+     * enterPictureInPictureMode() in onUserLeaveHint is refused
+     * (Samsung One UI, Android 14). Called from RajloPip.setNavActive as
+     * the driver enters/leaves immersive nav.
+     */
+    public void setNavPipEnabled(boolean enabled) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                PictureInPictureParams params =
+                    new PictureInPictureParams.Builder()
+                        .setAspectRatio(new Rational(2, 3))
+                        .setAutoEnterEnabled(enabled)
+                        .build();
+                setPictureInPictureParams(params);
+                Log.d("RajloPip", "setAutoEnterEnabled(" + enabled + ")");
+            } catch (Exception e) {
+                Log.e("RajloPip", "setPictureInPictureParams failed", e);
+            }
+        }
     }
 
     @Override
@@ -86,6 +141,8 @@ public class MainActivity extends BridgeActivity {
         @NonNull Configuration newConfig
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        Log.d("RajloPip", "onPictureInPictureModeChanged isInPip="
+            + isInPictureInPictureMode);
         // Tell the web UI so it can swap to the compact directions-only
         // layout while floating (and back to the full nav screen on exit).
         RajloPip.emitPipChanged(isInPictureInPictureMode);

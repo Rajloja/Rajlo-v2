@@ -19,7 +19,7 @@ import { useLocationViolationMonitor } from "@/lib/use-location-violation-monito
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useTurnByTurn } from "@/lib/use-turn-by-turn";
 import * as navVoice from "@/lib/nav-voice";
-import { pip, onPipModeChanged } from "@/lib/native";
+import { pip, onPipModeChanged, isNativeApp } from "@/lib/native";
 import { PipDirections } from "@/components/nav/pip-directions";
 import type { DirectionsRoute } from "@/lib/turn-by-turn";
 import { formatJMD, type Place } from "@/lib/jamaica";
@@ -323,6 +323,9 @@ export default function DriverActiveTripPage() {
   // full nav screen while floating.
   const [inPip, setInPip] = useState(false);
   useEffect(() => onPipModeChanged(setInPip), []);
+  // Only the native Android shell can float into PiP — gate the button.
+  const [isNative, setIsNative] = useState(false);
+  useEffect(() => setIsNative(isNativeApp()), []);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -935,6 +938,9 @@ export default function DriverActiveTripPage() {
                 // Collapse the immersive nav back to the normal
                 // live-trip screen. Voice keeps running either way.
                 onMinimize={() => setNavFullscreen(false)}
+                // Native Android only: pop into a floating PiP window so
+                // directions stay visible over another app (music, etc).
+                onFloat={isNative ? () => void pip.enterNow() : undefined}
               />
               <NavTripCard
                 snapshot={navSnapshot}

@@ -1,10 +1,13 @@
 package com.rajlodriversapp.pip;
 
+import android.app.Activity;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.rajlodriversapp.MainActivity;
 
 import java.lang.ref.WeakReference;
 
@@ -44,7 +47,37 @@ public class RajloPip extends Plugin {
     @PluginMethod
     public void setNavActive(PluginCall call) {
         navActive = Boolean.TRUE.equals(call.getBoolean("active", false));
+        // Arm/disarm OS auto-enter PiP on the UI thread (API 31+). This
+        // is the reliable path on modern Android — the manual
+        // enterPictureInPictureMode() fallback (API 26-30) lives in
+        // MainActivity.onUserLeaveHint.
+        final boolean active = navActive;
+        final Activity activity = getActivity();
+        if (activity instanceof MainActivity) {
+            activity.runOnUiThread(
+                () -> ((MainActivity) activity).setNavPipEnabled(active)
+            );
+        }
         call.resolve();
+    }
+
+    /** JS → native: enter PiP right now (from a user gesture, while the
+     *  app is visible). Resolves { entered: boolean }. */
+    @PluginMethod
+    public void enterPip(PluginCall call) {
+        final Activity activity = getActivity();
+        if (!(activity instanceof MainActivity)) {
+            JSObject ret = new JSObject();
+            ret.put("entered", false);
+            call.resolve(ret);
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            boolean entered = ((MainActivity) activity).enterPipNow();
+            JSObject ret = new JSObject();
+            ret.put("entered", entered);
+            call.resolve(ret);
+        });
     }
 
     /** Called by MainActivity when the activity enters or exits PiP.

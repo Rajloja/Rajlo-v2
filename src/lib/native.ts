@@ -106,21 +106,47 @@ export function isNativeApp(): boolean {
  */
 type RajloPipPlugin = {
   setNavActive(options: { active: boolean }): Promise<void>;
+  enterPip(): Promise<{ entered: boolean }>;
   addListener(
     eventName: "pipModeChanged",
     listener: (data: { isInPip: boolean }) => void,
   ): Promise<{ remove: () => void }>;
 };
 
+// Register the RajloPip plugin exactly ONCE. Calling `registerPlugin`
+// more than once for the same name logs "Cannot register plugins twice"
+// and hands back a fresh proxy each time — so we memoise it here and
+// every caller shares the single registered instance.
+let rajloPipPromise: Promise<RajloPipPlugin | null> | null = null;
+function getRajloPip(): Promise<RajloPipPlugin | null> {
+  if (!isNativeApp()) return Promise.resolve(null);
+  if (!rajloPipPromise) {
+    rajloPipPromise = import("@capacitor/core")
+      .then(({ registerPlugin }) => registerPlugin<RajloPipPlugin>("RajloPip"))
+      .catch(() => null);
+  }
+  return rajloPipPromise;
+}
+
 export const pip = {
   async setNavActive(active: boolean): Promise<void> {
-    if (!isNativeApp()) return;
     try {
-      const { registerPlugin } = await import("@capacitor/core");
-      const RajloPip = registerPlugin<RajloPipPlugin>("RajloPip");
-      await RajloPip.setNavActive({ active });
+      const plugin = await getRajloPip();
+      await plugin?.setNavActive({ active });
     } catch {
       /* plugin missing (iOS / older build) — silent no-op */
+    }
+  },
+  /** Enter the PiP float now (Android). Call from a user gesture while
+   *  the nav screen is visible. Returns whether the OS accepted it. */
+  async enterNow(): Promise<boolean> {
+    try {
+      const plugin = await getRajloPip();
+      if (!plugin) return false;
+      const res = await plugin.enterPip();
+      return !!res?.entered;
+    } catch {
+      return false;
     }
   },
 };
@@ -132,14 +158,13 @@ export const pip = {
  * layout while floating. Returns an unsubscribe fn. No-op on web/iOS.
  */
 export function onPipModeChanged(cb: (inPip: boolean) => void): () => void {
-  if (!isNativeApp()) return () => {};
   let remove: (() => void) | undefined;
   let cancelled = false;
   void (async () => {
     try {
-      const { registerPlugin } = await import("@capacitor/core");
-      const RajloPip = registerPlugin<RajloPipPlugin>("RajloPip");
-      const handle = await RajloPip.addListener("pipModeChanged", (d) =>
+      const plugin = await getRajloPip();
+      if (!plugin) return;
+      const handle = await plugin.addListener("pipModeChanged", (d) =>
         cb(!!d?.isInPip),
       );
       if (cancelled) handle.remove();
