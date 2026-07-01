@@ -113,26 +113,37 @@ type RajloPipPlugin = {
   ): Promise<{ remove: () => void }>;
 };
 
-// Register the RajloPip plugin exactly ONCE. Calling `registerPlugin`
-// more than once for the same name logs "Cannot register plugins twice"
-// and hands back a fresh proxy each time — so we memoise it here and
-// every caller shares the single registered instance.
-let rajloPipPromise: Promise<RajloPipPlugin | null> | null = null;
-function getRajloPip(): Promise<RajloPipPlugin | null> {
-  if (!isNativeApp()) return Promise.resolve(null);
-  if (!rajloPipPromise) {
-    rajloPipPromise = import("@capacitor/core")
-      .then(({ registerPlugin }) => registerPlugin<RajloPipPlugin>("RajloPip"))
-      .catch(() => null);
+// Grab the RajloPip plugin from the runtime-injected global Capacitor
+// (`window.Capacitor.registerPlugin`) — NOT via `import("@capacitor/core")`.
+// On the device that dynamic import silently never resolved, so every
+// setNavActive/enterPip/addListener awaited forever (which is why nav
+// PiP never armed and the Float button did nothing). The global is
+// already present before the app boots, so this is synchronous and
+// cannot hang. Memoised so we register the proxy once.
+let rajloPipInstance: RajloPipPlugin | null = null;
+function getRajloPip(): RajloPipPlugin | null {
+  if (typeof window === "undefined") return null;
+  const cap = (
+    window as unknown as {
+      Capacitor?: {
+        isNativePlatform?: () => boolean;
+        registerPlugin?: <T>(name: string) => T;
+      };
+    }
+  ).Capacitor;
+  if (!cap?.isNativePlatform?.() || typeof cap.registerPlugin !== "function") {
+    return null;
   }
-  return rajloPipPromise;
+  if (!rajloPipInstance) {
+    rajloPipInstance = cap.registerPlugin<RajloPipPlugin>("RajloPip");
+  }
+  return rajloPipInstance;
 }
 
 export const pip = {
   async setNavActive(active: boolean): Promise<void> {
     try {
-      const plugin = await getRajloPip();
-      await plugin?.setNavActive({ active });
+      await getRajloPip()?.setNavActive({ active });
     } catch {
       /* plugin missing (iOS / older build) — silent no-op */
     }
@@ -140,20 +151,12 @@ export const pip = {
   /** Enter the PiP float now (Android). Call from a user gesture while
    *  the nav screen is visible. Returns whether the OS accepted it. */
   async enterNow(): Promise<boolean> {
-    // eslint-disable-next-line no-console
-    console.log("[pipjs] enterNow start native=" + isNativeApp());
     try {
-      const plugin = await getRajloPip();
-      // eslint-disable-next-line no-console
-      console.log("[pipjs] plugin=" + (plugin ? "ok" : "null"));
+      const plugin = getRajloPip();
       if (!plugin) return false;
       const res = await plugin.enterPip();
-      // eslint-disable-next-line no-console
-      console.log("[pipjs] enterPip res=" + JSON.stringify(res));
       return !!res?.entered;
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.log("[pipjs] enterNow ERROR " + (e as Error)?.message);
+    } catch {
       return false;
     }
   },
@@ -166,21 +169,19 @@ export const pip = {
  * layout while floating. Returns an unsubscribe fn. No-op on web/iOS.
  */
 export function onPipModeChanged(cb: (inPip: boolean) => void): () => void {
+  const plugin = getRajloPip();
+  if (!plugin) return () => {};
   let remove: (() => void) | undefined;
   let cancelled = false;
-  void (async () => {
-    try {
-      const plugin = await getRajloPip();
-      if (!plugin) return;
-      const handle = await plugin.addListener("pipModeChanged", (d) =>
-        cb(!!d?.isInPip),
-      );
+  void plugin
+    .addListener("pipModeChanged", (d) => cb(!!d?.isInPip))
+    .then((handle) => {
       if (cancelled) handle.remove();
       else remove = handle.remove;
-    } catch {
-      /* plugin missing — silent */
-    }
-  })();
+    })
+    .catch(() => {
+      /* silent */
+    });
   return () => {
     cancelled = true;
     remove?.();
