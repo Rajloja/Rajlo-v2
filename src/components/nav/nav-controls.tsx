@@ -21,7 +21,6 @@ export function NavControls({
   muted,
   onToggleMute,
   onMinimize,
-  onFloat,
 }: {
   cameraDisengaged: boolean;
   onRecenter: () => void;
@@ -30,9 +29,6 @@ export function NavControls({
   /** Tapped to collapse the fullscreen nav surface back into the
    *  regular trip page layout. Omitted when nav is already embedded. */
   onMinimize?: () => void;
-  /** Tapped to pop the nav into a floating Picture-in-Picture window
-   *  (native Android only). Omitted on web / iOS. */
-  onFloat?: () => void;
 }) {
   return (
     <div
@@ -44,34 +40,6 @@ export function NavControls({
         paddingTop: "calc(env(safe-area-inset-top, 0px) + 56px)",
       }}
     >
-      {onFloat && (
-        <button
-          type="button"
-          aria-label="Float navigation in a small window"
-          onClick={() => {
-            void haptics.tap();
-            onFloat();
-          }}
-          className="pointer-events-auto grid h-11 w-11 place-items-center rounded-full bg-white text-rajlo-black shadow-lg ring-1 ring-black/5 transition-transform active:scale-95"
-        >
-          {/* Float / picture-in-picture — a small rectangle nested in
-             the bottom-right of a larger one. */}
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-5 w-5"
-            aria-hidden
-          >
-            <rect x="3" y="4" width="18" height="14" rx="2" />
-            <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" />
-          </svg>
-        </button>
-      )}
-
       {onMinimize && (
         <button
           type="button"

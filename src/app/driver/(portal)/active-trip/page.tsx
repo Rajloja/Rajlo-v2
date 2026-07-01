@@ -19,8 +19,6 @@ import { useLocationViolationMonitor } from "@/lib/use-location-violation-monito
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useTurnByTurn } from "@/lib/use-turn-by-turn";
 import * as navVoice from "@/lib/nav-voice";
-import { pip, onPipModeChanged, isNativeApp } from "@/lib/native";
-import { PipDirections } from "@/components/nav/pip-directions";
 import type { DirectionsRoute } from "@/lib/turn-by-turn";
 import { formatJMD, type Place } from "@/lib/jamaica";
 import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
@@ -305,27 +303,6 @@ export default function DriverActiveTripPage() {
   useEffect(() => {
     if (!navHasRoute) setNavFullscreen(false);
   }, [navHasRoute]);
-
-  // Tell the native Android shell whether the driver is in immersive
-  // navigation, so it can drop into a Picture-in-Picture floating
-  // window if they leave the app (e.g. to change music) mid-nav. No-op
-  // on web / iOS. Cleared on unmount so leaving the trip page can't
-  // leave PiP armed.
-  useEffect(() => {
-    void pip.setNavActive(navFullscreen && navHasRoute);
-    return () => {
-      void pip.setNavActive(false);
-    };
-  }, [navFullscreen, navHasRoute]);
-
-  // Track whether the app is currently in the PiP float so we can
-  // render the compact directions-only view (see below) instead of the
-  // full nav screen while floating.
-  const [inPip, setInPip] = useState(false);
-  useEffect(() => onPipModeChanged(setInPip), []);
-  // Only the native Android shell can float into PiP — gate the button.
-  const [isNative, setIsNative] = useState(false);
-  useEffect(() => setIsNative(isNativeApp()), []);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -804,13 +781,6 @@ export default function DriverActiveTripPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 py-2 md:px-3 md:py-8">
-      {/* Picture-in-Picture float (Android): when the driver leaves the
-         app mid-nav, this compact directions-only view fills the tiny
-         window with just the next maneuver + distance. Overlays
-         everything via fixed inset-0; only mounted while actually in
-         PiP and navigating. */}
-      {inPip && navHasRoute && <PipDirections snapshot={navSnapshot} />}
-
       {/* Hero + non-critical banners are hidden while the nav is in
          fullscreen — the driver's attention belongs to the road. They
          reappear instantly when the nav is minimized. */}
@@ -938,9 +908,6 @@ export default function DriverActiveTripPage() {
                 // Collapse the immersive nav back to the normal
                 // live-trip screen. Voice keeps running either way.
                 onMinimize={() => setNavFullscreen(false)}
-                // Native Android only: pop into a floating PiP window so
-                // directions stay visible over another app (music, etc).
-                onFloat={isNative ? () => void pip.enterNow() : undefined}
               />
               <NavTripCard
                 snapshot={navSnapshot}
