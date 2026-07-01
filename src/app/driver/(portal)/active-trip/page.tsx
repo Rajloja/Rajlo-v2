@@ -19,6 +19,7 @@ import { useLocationViolationMonitor } from "@/lib/use-location-violation-monito
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useTurnByTurn } from "@/lib/use-turn-by-turn";
 import * as navVoice from "@/lib/nav-voice";
+import { pip } from "@/lib/native";
 import type { DirectionsRoute } from "@/lib/turn-by-turn";
 import { formatJMD, type Place } from "@/lib/jamaica";
 import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
@@ -303,6 +304,18 @@ export default function DriverActiveTripPage() {
   useEffect(() => {
     if (!navHasRoute) setNavFullscreen(false);
   }, [navHasRoute]);
+
+  // Tell the native Android shell whether the driver is in immersive
+  // navigation, so it can drop into a Picture-in-Picture floating
+  // window if they leave the app (e.g. to change music) mid-nav. No-op
+  // on web / iOS. Cleared on unmount so leaving the trip page can't
+  // leave PiP armed.
+  useEffect(() => {
+    void pip.setNavActive(navFullscreen && navHasRoute);
+    return () => {
+      void pip.setNavActive(false);
+    };
+  }, [navFullscreen, navHasRoute]);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation

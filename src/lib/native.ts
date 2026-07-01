@@ -96,6 +96,30 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * Picture-in-Picture bridge (Android only, via the custom RajloPip
+ * plugin). Tell the native shell when the driver is in immersive
+ * turn-by-turn navigation. When they then leave the app (Home button,
+ * switch to a music app), the native side drops into a floating PiP
+ * window so the turn banner + map stay on top — see MainActivity's
+ * `onUserLeaveHint`. No-op on web and iOS (iOS PiP is video-only; its
+ * equivalent is a Live Activity, tracked separately).
+ */
+export const pip = {
+  async setNavActive(active: boolean): Promise<void> {
+    if (!isNativeApp()) return;
+    try {
+      const { registerPlugin } = await import("@capacitor/core");
+      const RajloPip = registerPlugin<{
+        setNavActive(options: { active: boolean }): Promise<void>;
+      }>("RajloPip");
+      await RajloPip.setNavActive({ active });
+    } catch {
+      /* plugin missing (iOS / older build) — silent no-op */
+    }
+  },
+};
+
+/**
  * Open a URL in the device's external browser (not the in-app
  * WebView). Used by the driver app so any link pointing outside the
  * driver portal — marketing, legal, the rider/admin surfaces — opens

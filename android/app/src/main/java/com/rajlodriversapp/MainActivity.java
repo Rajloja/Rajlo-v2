@@ -1,10 +1,14 @@
 package com.rajlodriversapp;
 
+import android.app.PictureInPictureParams;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Rational;
 import android.webkit.CookieManager;
 
 import com.getcapacitor.BridgeActivity;
 import com.rajlodriversapp.callkit.RajloCallKit;
+import com.rajlodriversapp.pip.RajloPip;
 
 /**
  * Rajlo Driver — main Capacitor activity.
@@ -24,6 +28,9 @@ public class MainActivity extends BridgeActivity {
         // RajloCallKit is the bridge to Android's Telecom framework
         // for native lockscreen / system call UI on incoming calls.
         registerPlugin(RajloCallKit.class);
+        // RajloPip lets the web UI flag "driver is navigating" so we can
+        // drop into Picture-in-Picture on onUserLeaveHint (below).
+        registerPlugin(RajloPip.class);
 
         super.onCreate(savedInstanceState);
 
@@ -38,6 +45,36 @@ public class MainActivity extends BridgeActivity {
                 true
             );
         }
+    }
+
+    @Override
+    public void onUserLeaveHint() {
+        // Fired when the driver actively leaves the app (Home button,
+        // switching to another app — e.g. to change music). If they're
+        // mid-navigation, shrink the nav screen into a Picture-in-
+        // Picture window so the turn banner + map stay on top of
+        // whatever they open. The WebView keeps rendering live, so
+        // turn-by-turn instructions and voice continue in the float.
+        //
+        // Gated on RajloPip.navActive so PiP only happens during
+        // immersive nav — not every time the driver backgrounds the app.
+        // PiP is API 26+ (Android O); older devices just background
+        // normally. Any failure is swallowed — a missing float must
+        // never crash the app or block the driver from leaving.
+        if (RajloPip.navActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                PictureInPictureParams.Builder builder =
+                    new PictureInPictureParams.Builder();
+                // Portrait-ish window that matches the nav screen shape,
+                // so the top turn banner reads cleanly when shrunk.
+                builder.setAspectRatio(new Rational(2, 3));
+                enterPictureInPictureMode(builder.build());
+            } catch (Exception ignored) {
+                // Some OEMs / users disable PiP at the system level —
+                // fall through to a normal background.
+            }
+        }
+        super.onUserLeaveHint();
     }
 
     @Override
