@@ -19,7 +19,8 @@ import { useLocationViolationMonitor } from "@/lib/use-location-violation-monito
 import { useBackgroundRefresh } from "@/lib/use-background-refresh";
 import { useTurnByTurn } from "@/lib/use-turn-by-turn";
 import * as navVoice from "@/lib/nav-voice";
-import { pip } from "@/lib/native";
+import { pip, onPipModeChanged } from "@/lib/native";
+import { PipDirections } from "@/components/nav/pip-directions";
 import type { DirectionsRoute } from "@/lib/turn-by-turn";
 import { formatJMD, type Place } from "@/lib/jamaica";
 import { NO_SHOW_WAIT_SEC } from "@/lib/cancellation-fees";
@@ -316,6 +317,12 @@ export default function DriverActiveTripPage() {
       void pip.setNavActive(false);
     };
   }, [navFullscreen, navHasRoute]);
+
+  // Track whether the app is currently in the PiP float so we can
+  // render the compact directions-only view (see below) instead of the
+  // full nav screen while floating.
+  const [inPip, setInPip] = useState(false);
+  useEffect(() => onPipModeChanged(setInPip), []);
 
   // Watches location permission during an in_progress trip. If the
   // driver turns location off, vibrates the phone + POSTs a violation
@@ -794,6 +801,13 @@ export default function DriverActiveTripPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 py-2 md:px-3 md:py-8">
+      {/* Picture-in-Picture float (Android): when the driver leaves the
+         app mid-nav, this compact directions-only view fills the tiny
+         window with just the next maneuver + distance. Overlays
+         everything via fixed inset-0; only mounted while actually in
+         PiP and navigating. */}
+      {inPip && navHasRoute && <PipDirections snapshot={navSnapshot} />}
+
       {/* Hero + non-critical banners are hidden while the nav is in
          fullscreen — the driver's attention belongs to the road. They
          reappear instantly when the nav is minimized. */}

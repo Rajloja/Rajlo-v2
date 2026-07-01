@@ -104,20 +104,55 @@ export function isNativeApp(): boolean {
  * `onUserLeaveHint`. No-op on web and iOS (iOS PiP is video-only; its
  * equivalent is a Live Activity, tracked separately).
  */
+type RajloPipPlugin = {
+  setNavActive(options: { active: boolean }): Promise<void>;
+  addListener(
+    eventName: "pipModeChanged",
+    listener: (data: { isInPip: boolean }) => void,
+  ): Promise<{ remove: () => void }>;
+};
+
 export const pip = {
   async setNavActive(active: boolean): Promise<void> {
     if (!isNativeApp()) return;
     try {
       const { registerPlugin } = await import("@capacitor/core");
-      const RajloPip = registerPlugin<{
-        setNavActive(options: { active: boolean }): Promise<void>;
-      }>("RajloPip");
+      const RajloPip = registerPlugin<RajloPipPlugin>("RajloPip");
       await RajloPip.setNavActive({ active });
     } catch {
       /* plugin missing (iOS / older build) — silent no-op */
     }
   },
 };
+
+/**
+ * Subscribe to native PiP enter/exit. Fires `true` when the driver app
+ * drops into the Picture-in-Picture float, `false` when it comes back.
+ * The active-trip page uses this to render a compact directions-only
+ * layout while floating. Returns an unsubscribe fn. No-op on web/iOS.
+ */
+export function onPipModeChanged(cb: (inPip: boolean) => void): () => void {
+  if (!isNativeApp()) return () => {};
+  let remove: (() => void) | undefined;
+  let cancelled = false;
+  void (async () => {
+    try {
+      const { registerPlugin } = await import("@capacitor/core");
+      const RajloPip = registerPlugin<RajloPipPlugin>("RajloPip");
+      const handle = await RajloPip.addListener("pipModeChanged", (d) =>
+        cb(!!d?.isInPip),
+      );
+      if (cancelled) handle.remove();
+      else remove = handle.remove;
+    } catch {
+      /* plugin missing — silent */
+    }
+  })();
+  return () => {
+    cancelled = true;
+    remove?.();
+  };
+}
 
 /**
  * Open a URL in the device's external browser (not the in-app

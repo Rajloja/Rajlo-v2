@@ -1,10 +1,13 @@
 package com.rajlodriversapp;
 
 import android.app.PictureInPictureParams;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Rational;
 import android.webkit.CookieManager;
+
+import androidx.annotation.NonNull;
 
 import com.getcapacitor.BridgeActivity;
 import com.rajlodriversapp.callkit.RajloCallKit;
@@ -75,6 +78,17 @@ public class MainActivity extends BridgeActivity {
             }
         }
         super.onUserLeaveHint();
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(
+        boolean isInPictureInPictureMode,
+        @NonNull Configuration newConfig
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        // Tell the web UI so it can swap to the compact directions-only
+        // layout while floating (and back to the full nav screen on exit).
+        RajloPip.emitPipChanged(isInPictureInPictureMode);
     }
 
     @Override

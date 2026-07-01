@@ -1,24 +1,27 @@
 package com.rajlodriversapp.pip;
 
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.lang.ref.WeakReference;
+
 /**
- * Bridge that lets the web UI tell the native shell when the driver is
- * in turn-by-turn navigation, so the app can drop into Picture-in-
- * Picture (a floating window) when they leave it — e.g. to change
- * music — and keep the turn instructions on screen.
+ * Bridge for Picture-in-Picture on the driver app.
  *
- * The web side calls {@code setNavActive(true)} when the driver opens
- * the immersive nav, and {@code setNavActive(false)} when they leave
- * it. {@link com.rajlodriversapp.MainActivity#onUserLeaveHint()} reads
- * the flag to decide whether to enter PiP as the app is backgrounded.
+ * JS → native:
+ *   • setNavActive(active) — flag whether the driver is in immersive
+ *     turn-by-turn nav. Read by MainActivity.onUserLeaveHint to decide
+ *     whether to drop into PiP when the app is backgrounded.
  *
- * The flag is a static so the Activity can read it without holding a
- * reference to this plugin instance (the OS drives onUserLeaveHint from
- * its own lifecycle callbacks, not from a JS call).
+ * native → JS:
+ *   • pipModeChanged { isInPip } — fired when the activity enters/exits
+ *     PiP (from MainActivity.onPictureInPictureModeChanged). The web UI
+ *     listens and swaps the full nav screen for a compact directions-
+ *     only layout while floating, so the tiny window shows the next
+ *     maneuver + distance instead of the whole cropped screen.
  */
 @CapacitorPlugin(name = "RajloPip")
 public class RajloPip extends Plugin {
@@ -26,11 +29,31 @@ public class RajloPip extends Plugin {
     /** True while the driver is in immersive turn-by-turn navigation. */
     public static volatile boolean navActive = false;
 
+    /** Live instance handle so the static PiP-mode emitter (called from
+     *  the Activity's lifecycle callback, not a JS call) can reach
+     *  notifyListeners. */
+    private static WeakReference<RajloPip> instanceRef;
+
+    @Override
+    public void load() {
+        instanceRef = new WeakReference<>(this);
+    }
+
     /** JS → native: flip the nav-active flag. Called on every
      *  enter/exit of the immersive nav on the driver active-trip page. */
     @PluginMethod
     public void setNavActive(PluginCall call) {
         navActive = Boolean.TRUE.equals(call.getBoolean("active", false));
         call.resolve();
+    }
+
+    /** Called by MainActivity when the activity enters or exits PiP.
+     *  Emits `pipModeChanged` so the web UI can switch layouts. */
+    public static void emitPipChanged(boolean inPip) {
+        RajloPip plugin = instanceRef != null ? instanceRef.get() : null;
+        if (plugin == null) return;
+        JSObject data = new JSObject();
+        data.put("isInPip", inPip);
+        plugin.notifyListeners("pipModeChanged", data, true);
     }
 }
