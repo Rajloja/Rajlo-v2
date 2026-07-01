@@ -49,42 +49,54 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl(error?.message ?? "auth_failed"));
   }
 
-  // For Google OAuth: if this is a brand-new sign-up AND a role was requested,
-  // promote the profile from the default 'rider' to the intended role. We use
-  // service_role so RLS can't interfere, and we ONLY flip the role when:
-  //   1. role_intent is a whitelisted value
-  //   2. user_metadata didn't already pin a role (email signups always set it)
-  //   3. profile is currently the default 'rider' (never demote/promote later)
-  if (roleIntent === "driver" || roleIntent === "rider") {
-    const admin = getSupabaseServerClient();
-    const userMeta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
-    const metaHasRole = typeof userMeta.role === "string";
+  // Whether this OAuth handshake is a genuine first-time sign-up vs a
+  // returning user. This decides how a role mismatch is handled:
+  //   - brand-new  → assign the intended role (fresh signup)
+  //   - returning  → REJECT a wrong-portal attempt (e.g. tapping
+  //                  "Continue with Google" on the RIDER page with an
+  //                  email that owns a DRIVER account). Otherwise the
+  //                  rider sign-in would silently drop them into the
+  //                  driver portal.
+  const brandNew = isBrandNewUser(data.user);
 
-    if (admin && !metaHasRole) {
-      const { data: profile } = await admin
-        .from("profiles")
-        .select("role")
-        .eq("id", data.user.id)
-        .maybeSingle();
-
-      // Only set the role if it's still the default. Never reassign a role
-      // a returning user has already had — they just signed in, that's all.
-      if (profile?.role === "rider" && roleIntent === "driver") {
-        await admin
-          .from("profiles")
-          .update({ role: "driver" })
-          .eq("id", data.user.id);
-      }
-    }
-  }
-
-  // Re-fetch role (it may have just changed) to decide where to send them.
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, full_name")
     .eq("id", data.user.id)
-    .single();
-  const role = profile?.role ?? "rider";
+    .maybeSingle();
+  let role = profile?.role ?? "rider";
+
+  if (roleIntent === "driver" || roleIntent === "rider") {
+    if (brandNew) {
+      // Fresh Google signup — the DB trigger created the profile as the
+      // default 'rider'. Promote to 'driver' if they signed up from the
+      // driver page (rider intent needs no change). service_role so RLS
+      // can't interfere.
+      if (role === "rider" && roleIntent === "driver") {
+        const admin = getSupabaseServerClient();
+        if (admin) {
+          await admin
+            .from("profiles")
+            .update({ role: "driver" })
+            .eq("id", data.user.id);
+          role = "driver";
+        }
+      }
+    } else if (role !== roleIntent) {
+      // Returning user signing in from the WRONG portal. Tear the
+      // just-created session back down and bounce them to the portal
+      // they tried, telling them which account this email actually
+      // owns. `account_is_<role>` is mapped to copy by friendlyError().
+      await supabase.auth.signOut();
+      const base =
+        roleIntent === "driver"
+          ? "/auth/driver/login"
+          : "/auth/rider/login";
+      return NextResponse.redirect(
+        `${origin}${base}?error=account_is_${role}`,
+      );
+    }
+  }
 
   // A driver arriving here (OAuth sign-in, email confirmation, magic
   // link) is starting a fresh session — reset them OFFLINE so they

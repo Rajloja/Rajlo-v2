@@ -30,6 +30,15 @@ export function friendlyError(code: string | null): string | null {
       return "We couldn't read the confirmation code in that link. Please request a fresh one.";
     case "auth_failed":
       return "We couldn't verify that link. Please try signing in or request a new confirmation email.";
+    // Cross-portal sign-in: the email owns a different account type than
+    // the page they signed in from (set by /auth/callback). We name the
+    // account the email actually belongs to so they use the right app.
+    case "account_is_driver":
+      return "This email is registered to a Rajlo driver account. Please sign in from the driver app instead.";
+    case "account_is_rider":
+      return "This email is registered to a Rajlo rider account. Please sign in from the rider app instead.";
+    case "account_is_admin":
+      return "This email is registered to a Rajlo admin account.";
     default:
       // Fallback: surface Supabase's own error message verbatim
       return code;
