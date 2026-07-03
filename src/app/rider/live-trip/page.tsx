@@ -1017,10 +1017,20 @@ export default function RiderLiveTripPage() {
               <DriverEtaPill
                 driverLat={driverPosition.lat}
                 driverLng={driverPosition.lng}
-                pickupLat={ride.pickup.lat}
-                pickupLng={ride.pickup.lng}
+                targetLat={ride.pickup.lat}
+                targetLng={ride.pickup.lng}
+                mode="pickup"
               />
             )}
+          {ride.status === "in_progress" && driverPosition && (
+            <DriverEtaPill
+              driverLat={driverPosition.lat}
+              driverLng={driverPosition.lng}
+              targetLat={ride.dropoff.lat}
+              targetLng={ride.dropoff.lng}
+              mode="dropoff"
+            />
+          )}
         </FadeUp>
       )}
 
@@ -1662,21 +1672,29 @@ function NoDriverFoundView({
 /* ════════════════════ Driver ETA pill ════════════════════
  * Renders straight-line distance + a generous-but-honest ETA
  * derived from average city traffic. Re-computes whenever the
- * driverPosition prop changes (every realtime ping). */
+ * driverPosition prop changes (every realtime ping).
+ *
+ * `mode` picks the framing:
+ *   - "pickup"  → "Driver heading to you" (driver → pickup, pre-trip)
+ *   - "dropoff" → "Estimated arrival" (driver → destination, while the
+ *                 rider is ON the trip — so they can see when they'll
+ *                 get there). */
 function DriverEtaPill({
   driverLat,
   driverLng,
-  pickupLat,
-  pickupLng,
+  targetLat,
+  targetLng,
+  mode,
 }: {
   driverLat: number;
   driverLng: number;
-  pickupLat: number;
-  pickupLng: number;
+  targetLat: number;
+  targetLng: number;
+  mode: "pickup" | "dropoff";
 }) {
   const distanceKm = haversineKm(
     { lat: driverLat, lng: driverLng },
-    { lat: pickupLat, lng: pickupLng },
+    { lat: targetLat, lng: targetLng },
   );
   // Road-distance fudge (typical 1.3×) + 25 km/h average urban speed.
   const roadKm = distanceKm * 1.3;
@@ -1685,6 +1703,11 @@ function DriverEtaPill({
     distanceKm < 1
       ? `${Math.round(distanceKm * 1000)} m`
       : `${distanceKm.toFixed(1)} km`;
+  const title = mode === "pickup" ? "Driver heading to you" : "Estimated arrival";
+  const detail =
+    mode === "pickup"
+      ? `${distLabel} away · ~${etaMin} min`
+      : `~${etaMin} min to your destination · ${distLabel} to go`;
 
   return (
     <div className="mt-3 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -1693,10 +1716,10 @@ function DriverEtaPill({
       </span>
       <div className="min-w-0 flex-1">
         <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-          Driver heading to you
+          {title}
         </p>
         <p className="mt-0.5 text-sm font-extrabold tracking-tight text-emerald-900">
-          {distLabel} away · ~{etaMin} min
+          {detail}
         </p>
       </div>
     </div>

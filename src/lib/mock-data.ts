@@ -151,6 +151,10 @@ export type TADocument = {
   expiryDate?: string;
   status: DocStatus;
   note?: string;
+  // Set on approved docs that have an uploaded file the driver can
+  // preview (the image/PDF the admin accepted). Undefined otherwise.
+  hasFile?: boolean;
+  fileName?: string;
 };
 
 export const requiredTADocuments: TADocument[] = [

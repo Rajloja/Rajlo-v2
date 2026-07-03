@@ -1,12 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
 import Link from "next/link";
-import { MapView } from "@/components/map-view";
+import { LiveTripMap } from "@/components/live-trip-map";
 import { Icon } from "@/components/icons";
 import { useLiveQuery } from "@/lib/use-live-query";
-import { useRidePosition } from "@/lib/use-ride-position";
-import { formatJMD, type Place } from "@/lib/jamaica";
+import { formatJMD } from "@/lib/jamaica";
 
 /**
  * Live trips — admin ops surface.
@@ -123,43 +121,6 @@ export default function AdminLiveTripsPage() {
  * don't broadcast per-hail today).
  */
 function TripCard({ trip }: { trip: LiveTrip }) {
-  // Listen-only realtime subscription. `role` doesn't matter when
-  // `streamSelf=false` — we don't broadcast as either party, just
-  // receive both driver-position + rider-position events.
-  const { driverPosition: liveDriver, riderPosition: liveRider } =
-    useRidePosition(trip.id, "driver", false);
-
-  // Prefer live realtime fix, fall back to the API's cached one.
-  const driverPos: Pos = liveDriver
-    ? { lat: liveDriver.lat, lng: liveDriver.lng }
-    : trip.driverPosition;
-  const riderPos: Pos = liveRider
-    ? { lat: liveRider.lat, lng: liveRider.lng }
-    : null;
-
-  const pickup: Place = useMemo(
-    () => ({
-      placeId: `${trip.id}-pickup`,
-      name: trip.pickupName,
-      address: trip.pickupName,
-      lat: trip.pickupLat,
-      lng: trip.pickupLng,
-      parish: null,
-    }),
-    [trip.id, trip.pickupName, trip.pickupLat, trip.pickupLng],
-  );
-  const dropoff: Place = useMemo(
-    () => ({
-      placeId: `${trip.id}-dropoff`,
-      name: trip.dropoffName,
-      address: trip.dropoffName,
-      lat: trip.dropoffLat,
-      lng: trip.dropoffLng,
-      parish: null,
-    }),
-    [trip.id, trip.dropoffName, trip.dropoffLat, trip.dropoffLng],
-  );
-
   const statusStyle = STATUS_STYLES[trip.status] ?? {
     bg: "bg-surface-soft",
     text: "text-muted",
@@ -210,21 +171,16 @@ function TripCard({ trip }: { trip: LiveTrip }) {
       </div>
 
       {/* Map */}
-      <div className="relative">
-        <MapView
-          pickup={pickup}
-          stops={[]}
-          dropoff={dropoff}
-          driverPosition={driverPos}
-          riderPosition={riderPos}
-          className="h-72 w-full md:h-80"
-        />
-        {!driverPos && (
-          <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-rajlo-black/85 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur">
-            Waiting for driver GPS
-          </div>
-        )}
-      </div>
+      <LiveTripMap
+        rideId={trip.id}
+        pickupName={trip.pickupName}
+        pickupLat={trip.pickupLat}
+        pickupLng={trip.pickupLng}
+        dropoffName={trip.dropoffName}
+        dropoffLat={trip.dropoffLat}
+        dropoffLng={trip.dropoffLng}
+        cachedDriverPosition={trip.driverPosition}
+      />
 
       {/* Parties row */}
       <div className="grid grid-cols-2 gap-3 px-5 py-4">

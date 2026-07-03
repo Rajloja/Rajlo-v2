@@ -12,6 +12,7 @@ import { NativePageTransition } from "@/components/native-page-transition";
 import { CookieConsent, ConsentedAnalytics } from "@/components/cookie-consent";
 import {
   SITE_DESCRIPTION,
+  SITE_EMAIL,
   SITE_NAME,
   SITE_TAGLINE,
   SITE_URL,
@@ -123,37 +124,69 @@ export const metadata: Metadata = {
 };
 
 /**
- * Organization-level structured data — emitted as a JSON-LD script in
- * the document head so every page implicitly carries the brand schema.
- * Google parses this to populate the knowledge-panel sidebar, brand
- * card, and "About this result" tile for any rajlo.com URL.
+ * Site-wide structured data — an Organization + WebSite `@graph`,
+ * emitted as a plain inline JSON-LD `<script>` in the document body
+ * (NOT next/script, which trips the Turbopack "script tag while
+ * rendering" warning). It renders into the static HTML the server
+ * ships, so Googlebot reads it on the first pass.
  *
- * Kept in this file (not a component) so it renders in the static HTML
- * shipped by the server — JSON-LD that mounts client-side is ignored
- * by Googlebot's first pass.
+ * Why this matters for the search result:
+ *   - `WebSite.name = "Rajlo"` is the signal Google uses for the
+ *     bold SITE NAME shown above the URL. Without it Google falls
+ *     back to the bare domain ("rajlo.com"); with it, results read
+ *     "Rajlo" — the same way play.google.com shows "Google Play".
+ *   - The `Organization` entity feeds the brand knowledge panel,
+ *     logo, and "About this result" tile.
+ *
+ * The two nodes are linked by `@id` so Google treats them as one
+ * entity (publisher ↔ site) rather than two unrelated blobs.
  */
-const ORGANIZATION_JSON_LD = {
+const ORG_ID = `${SITE_URL}/#organization`;
+const WEBSITE_ID = `${SITE_URL}/#website`;
+
+const STRUCTURED_DATA = {
   "@context": "https://schema.org",
-  "@type": "Organization",
-  name: SITE_NAME,
-  alternateName: "Rajlo Jamaica",
-  url: SITE_URL,
-  logo: `${SITE_URL}/icon.svg`,
-  description: SITE_DESCRIPTION,
-  foundingDate: "2025",
-  areaServed: {
-    "@type": "Country",
-    name: "Jamaica",
-  },
-  contactPoint: {
-    "@type": "ContactPoint",
-    contactType: "customer support",
-    email: "hello@rajlo.com",
-    availableLanguage: ["English", "Jamaican Patois"],
-  },
-  sameAs: [
-    // Add real social profiles once they're claimed — placeholders
-    // omitted because Google penalises sameAs entries that 404.
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": ORG_ID,
+      name: SITE_NAME,
+      alternateName: "Rajlo Jamaica",
+      url: SITE_URL,
+      logo: {
+        "@type": "ImageObject",
+        url: `${SITE_URL}/icon.svg`,
+        caption: SITE_NAME,
+      },
+      image: `${SITE_URL}/icon.svg`,
+      description: SITE_DESCRIPTION,
+      slogan: SITE_TAGLINE,
+      foundingDate: "2025",
+      areaServed: {
+        "@type": "Country",
+        name: "Jamaica",
+      },
+      contactPoint: {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        email: SITE_EMAIL,
+        availableLanguage: ["English", "Jamaican Patois"],
+      },
+      sameAs: [
+        // Add real social profiles once they're claimed — placeholders
+        // omitted because Google penalises sameAs entries that 404.
+      ],
+    },
+    {
+      "@type": "WebSite",
+      "@id": WEBSITE_ID,
+      name: SITE_NAME,
+      alternateName: `${SITE_NAME} — ${SITE_TAGLINE}`,
+      url: SITE_URL,
+      description: SITE_DESCRIPTION,
+      inLanguage: "en-JM",
+      publisher: { "@id": ORG_ID },
+    },
   ],
 };
 
@@ -205,6 +238,14 @@ export default function RootLayout({
         className="min-h-full bg-background text-foreground"
         suppressHydrationWarning
       >
+        {/* Site-wide Organization + WebSite structured data. Plain
+            inline JSON-LD (not next/script) so it lands in the static
+            HTML for Googlebot and drives the "Rajlo" site name +
+            brand entity in search results. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+        />
         {/*
          * NOTE — Two `<Script>` tags used to live here:
          *

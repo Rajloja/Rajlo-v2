@@ -9,6 +9,7 @@ import { resolveRidePin } from "@/lib/pin-verify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
 import { FEE_UNCOLLECTED_STATUS } from "@/lib/cancellation-fees";
 import { getBalanceWithLock } from "@/lib/wallet-holds";
+import { nearestParish } from "@/lib/jamaica";
 
 /**
  * POST /api/rider/rides
@@ -220,13 +221,17 @@ export async function POST(request: Request) {
       pickup_address: body.pickup.address,
       pickup_lat: body.pickup.lat,
       pickup_lng: body.pickup.lng,
-      pickup_parish: body.pickup.parish ?? null,
+      pickup_parish:
+        body.pickup.parish ??
+        nearestParish({ lat: body.pickup.lat, lng: body.pickup.lng }),
       pickup_place_id: body.pickup.placeId ?? null,
       dropoff_name: body.dropoff.name,
       dropoff_address: body.dropoff.address,
       dropoff_lat: body.dropoff.lat,
       dropoff_lng: body.dropoff.lng,
-      dropoff_parish: body.dropoff.parish ?? null,
+      dropoff_parish:
+        body.dropoff.parish ??
+        nearestParish({ lat: body.dropoff.lat, lng: body.dropoff.lng }),
       dropoff_place_id: body.dropoff.placeId ?? null,
       seats,
       notes: body.notes?.trim() || null,
@@ -267,7 +272,7 @@ export async function POST(request: Request) {
       address: s.address,
       lat: s.lat,
       lng: s.lng,
-      parish: s.parish ?? null,
+      parish: s.parish ?? nearestParish({ lat: s.lat, lng: s.lng }),
       place_id: s.placeId ?? null,
     }));
     const { error: stopsError } = await supabase

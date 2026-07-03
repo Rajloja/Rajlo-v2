@@ -138,6 +138,36 @@ export async function proxy(request: NextRequest) {
       // redirects still work when testing.
       return NextResponse.redirect(url);
     }
+
+    // Marketing pages (Help, Contact, About, …) live on the apex ONLY.
+    // A subdomain should never serve them — so if the path isn't owned
+    // by ANY portal, isn't a shared page (legal, support, trip-share,
+    // auth helpers), and isn't an API/asset route, redirect it to
+    // rajlo.com on the same path. This is the mirror image of the apex
+    // rule below: apex bounces portal paths OUT to subdomains, and a
+    // subdomain bounces marketing paths BACK to the apex. Result: a
+    // "Help Center" link on driver.rajlo.com lands on rajlo.com/help,
+    // not driver.rajlo.com/help.
+    if (!owner) {
+      const isSharedPath = SHARED_PATH_PREFIXES.some((p) =>
+        path.startsWith(p),
+      );
+      const isApiPath = path === "/api" || path.startsWith("/api/");
+      // Skip file-like paths (manifest.webmanifest, robots.txt, OG
+      // images, etc.) — those are served per-host and must not be
+      // cross-origin redirected (a cross-origin PWA manifest is rejected
+      // by browsers). Anything with a dot in its final segment is a file.
+      const looksLikeFile = (path.split("/").pop() ?? "").includes(".");
+      if (!isSharedPath && !isApiPath && !looksLikeFile) {
+        const baseDomain = (host ?? "").replace(
+          /^(rider|driver|admin)\./i,
+          "",
+        );
+        const url = new URL(request.url);
+        url.host = baseDomain; // the apex (rajlo.com)
+        return NextResponse.redirect(url);
+      }
+    }
   } else if (isRajloApex(host)) {
     // rajlo.com (and www.) is the marketing site ONLY. Any portal path
     // — /rider/*, /driver/*, /admin/*, /auth/<portal>/* — belongs on

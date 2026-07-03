@@ -46,6 +46,7 @@ function TextInput({
   type = "text",
   min,
   max,
+  readOnly,
 }: {
   label: string;
   placeholder?: string;
@@ -56,6 +57,9 @@ function TextInput({
   type?: "text" | "email" | "tel" | "date" | "number";
   min?: string;
   max?: string;
+  /** Locks the field — used for values the driver can't change, e.g.
+   *  the email they registered with. */
+  readOnly?: boolean;
 }) {
   return (
     <label className="block">
@@ -71,7 +75,14 @@ function TextInput({
         placeholder={placeholder}
         min={min}
         max={max}
-        className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition-all placeholder:text-muted/70 focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
+        readOnly={readOnly}
+        aria-readonly={readOnly}
+        tabIndex={readOnly ? -1 : undefined}
+        className={`w-full rounded-xl border border-line px-4 py-3 text-sm outline-none transition-all placeholder:text-muted/70 ${
+          readOnly
+            ? "cursor-not-allowed bg-surface-soft text-muted focus:border-line focus:ring-0"
+            : "bg-surface focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
+        }`}
       />
     </label>
   );
@@ -409,6 +420,12 @@ function DriverOnboardingWizard() {
   const searchParams = useSearchParams();
   const editMode = searchParams.get("edit") === "1";
   const [userId, setUserId] = useState<string | null>(null);
+  // The email the driver registered/signed in with. This is the source
+  // of truth for the email field — it's locked (read-only) so a driver
+  // can't submit an application under a different address than the one
+  // their account + notifications are tied to.
+  const [authEmail, setAuthEmail] = useState<string>("");
+  const authEmailRef = useRef<string>("");
   const [step, setStep] = useState(1);
   const [files, setFiles] = useState<FileState>({});
   const [submitting, setSubmitting] = useState(false);
@@ -440,6 +457,13 @@ function DriverOnboardingWizard() {
         return;
       }
       setUserId(user.id);
+      // Lock the email field to the account's email. Set the ref first
+      // so anything that runs later in this effect (loadResubmissionData)
+      // can preserve it instead of overwriting with a stale DB value.
+      if (user.email) {
+        authEmailRef.current = user.email;
+        setAuthEmail(user.email);
+      }
 
       try {
         const res = await fetch("/api/driver/status");
@@ -475,6 +499,14 @@ function DriverOnboardingWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, editMode]);
 
+  // Keep the email field pinned to the account email no matter what a
+  // draft-restore or resubmission pre-fill tried to set. This is the
+  // final authority, so the field always reflects the registered email.
+  useEffect(() => {
+    if (!authEmail) return;
+    setForm((prev) => (prev.email === authEmail ? prev : { ...prev, email: authEmail }));
+  }, [authEmail]);
+
   /**
    * Pulls existing driver + documents and pre-fills the form for a rejected
    * driver who's resubmitting.
@@ -507,7 +539,9 @@ function DriverOnboardingWizard() {
           firstName: pick(d.first_name, prev.firstName),
           lastName: pick(d.last_name, prev.lastName),
           phone: pick(d.phone, prev.phone),
-          email: pick(d.email, prev.email),
+          // Email is locked to the account email — never let the DB value
+          // override it (the enforce effect also guards this).
+          email: authEmailRef.current || pick(d.email, prev.email),
           trn: pick(d.trn, prev.trn),
           nis: pick(d.nis, prev.nis),
           licenceNumber: pick(d.licence_number, prev.licenceNumber),
@@ -652,6 +686,27 @@ function DriverOnboardingWizard() {
       /* */
     }
     setHasDraft(false);
+  };
+
+  /**
+   * Wipe everything and restart the application from a clean slate.
+   * Beyond clearing the draft, this ALSO drops the resubmission context
+   * (isResubmission / flagged docs / admin note) so the red "Some
+   * documents need attention" banner disappears — the driver has chosen
+   * to redo the whole thing rather than patch the flagged docs. Used by
+   * both the "draft restored" banner and the resubmission banner.
+   */
+  const startOver = () => {
+    clearDraft();
+    // Keep the locked account email — everything else resets to blank.
+    setForm({ ...EMPTY_FORM, email: authEmailRef.current });
+    setFiles({});
+    setStep(1);
+    setRestored(false);
+    setIsResubmission(false);
+    setRejectedDocKeys(new Set());
+    setAdminNote(null);
+    setSubmitError(null);
   };
 
   /**
@@ -876,10 +931,7 @@ function DriverOnboardingWizard() {
                       "Discard your draft and start over? This cannot be undone.",
                     )
                   ) {
-                    clearDraft();
-                    setForm(EMPTY_FORM);
-                    setStep(1);
-                    setRestored(false);
+                    startOver();
                   }
                 }}
                 className="shrink-0 rounded-full border border-rajlo-red/30 bg-white px-4 py-1.5 text-xs font-bold text-rajlo-red hover:bg-rajlo-red hover:text-white"
@@ -949,6 +1001,28 @@ function DriverOnboardingWizard() {
                       </ul>
                     </div>
                   )}
+
+                  {/* Escape hatch: redo the whole application instead of
+                     patching the flagged docs. Clears the draft + this
+                     resubmission banner so the wizard reads as a fresh
+                     first-time application. */}
+                  <div className="mt-4 border-t border-rajlo-red/15 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            "Start your whole application over? This clears your saved draft and the flagged-document list so you can fill everything in fresh.",
+                          )
+                        ) {
+                          startOver();
+                        }
+                      }}
+                      className="text-[11px] font-bold text-rajlo-red/80 underline underline-offset-2 hover:text-rajlo-red"
+                    >
+                      Prefer to start over? Restart the application
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1028,7 +1102,7 @@ function DriverOnboardingWizard() {
                   <TextInput label="Last name" placeholder="Thompson" value={form.lastName} onChange={setField("lastName")} required />
                 </div>
                 <TextInput label="Mobile number" placeholder="876-XXX-XXXX" value={form.phone} onChange={setField("phone")} hint="Must match the number on your TA Badge application" required />
-                <TextInput label="Email address" placeholder="driver@example.com" value={form.email} onChange={setField("email")} required />
+                <TextInput label="Email address" type="email" value={authEmail || form.email} onChange={() => {}} hint="The email you registered with — used for all verification updates" required readOnly />
                 <div className="grid gap-5 md:grid-cols-2">
                   <TextInput label="TRN" placeholder="9-digit TRN" value={form.trn} onChange={setField("trn")} hint="Required for all TA fee processing" required />
                   <TextInput label="NIS number" placeholder="NIS number" value={form.nis} onChange={setField("nis")} hint="National Insurance Scheme" required />

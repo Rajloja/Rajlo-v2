@@ -7,6 +7,7 @@ import { Icon } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { HeroSkeleton, Skeleton } from "@/components/skeleton";
 import { LiveIndicator } from "@/components/live-indicator";
+import { LiveTripMap } from "@/components/live-trip-map";
 import { useLiveQuery } from "@/lib/use-live-query";
 import { formatJMD } from "@/lib/jamaica";
 
@@ -31,9 +32,15 @@ type RideDetail = {
     pickup_name: string;
     pickup_address: string;
     pickup_parish: string | null;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
     dropoff_name: string;
     dropoff_address: string;
     dropoff_parish: string | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
+    driver_last_lat: number | null;
+    driver_last_lng: number | null;
     seats: number;
     notes: string | null;
     estimated_fare_jmd: number;
@@ -154,6 +161,24 @@ export default function AdminRideDetailPage() {
   const isCompleted = ride.status === "completed";
   const fare = ride.final_fare_jmd ?? ride.estimated_fare_jmd;
 
+  // Live map: shown whenever we have pickup + dropoff coords. It's
+  // "active" (driver marker + realtime tracking) for in-flight rides,
+  // and a static A→B route for terminal ones.
+  const isLive =
+    ride.status === "accepted" ||
+    ride.status === "arrived" ||
+    ride.status === "in_progress";
+  const hasRoute =
+    typeof ride.pickup_lat === "number" &&
+    typeof ride.pickup_lng === "number" &&
+    typeof ride.dropoff_lat === "number" &&
+    typeof ride.dropoff_lng === "number";
+  const cachedDriverPos =
+    typeof ride.driver_last_lat === "number" &&
+    typeof ride.driver_last_lng === "number"
+      ? { lat: ride.driver_last_lat, lng: ride.driver_last_lng }
+      : null;
+
   return (
     <div className="mx-auto max-w-5xl space-y-5 px-2 py-4 md:px-3 md:py-8">
       <Link
@@ -228,6 +253,40 @@ export default function AdminRideDetailPage() {
           </div>
         </div>
       </FadeUp>
+
+      {/* Live map — driver tracking on top of the A→B route */}
+      {hasRoute && (
+        <FadeUp delay={0.03}>
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+            <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+              <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+                {isLive ? "Live trip" : "Route"}
+              </p>
+              {isLive && (
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  </span>
+                  Tracking
+                </span>
+              )}
+            </div>
+            <LiveTripMap
+              rideId={ride.id}
+              pickupName={ride.pickup_name}
+              pickupLat={ride.pickup_lat as number}
+              pickupLng={ride.pickup_lng as number}
+              dropoffName={ride.dropoff_name}
+              dropoffLat={ride.dropoff_lat as number}
+              dropoffLng={ride.dropoff_lng as number}
+              cachedDriverPosition={cachedDriverPos}
+              active={isLive}
+              className="h-80 w-full md:h-96"
+            />
+          </div>
+        </FadeUp>
+      )}
 
       {/* Two-up: rider + driver */}
       <div className="grid gap-3 md:grid-cols-2">

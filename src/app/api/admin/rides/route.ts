@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
+import { nearestParish } from "@/lib/jamaica";
 
 /**
  * GET /api/admin/rides
@@ -18,6 +19,13 @@ import { requireAdmin } from "@/lib/admin-auth";
  */
 
 const ACTIVE_STATUSES = ["requested", "accepted", "arrived", "in_progress"];
+
+/** Derive a parish name from a ride's stored GPS, used only as a
+ * fallback when `*_parish` is null on older rides. */
+function parishFromCoords(lat: number | null, lng: number | null): string | null {
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  return nearestParish({ lat, lng });
+}
 
 export async function GET(request: NextRequest) {
   const gate = await requireAdmin();
@@ -60,7 +68,7 @@ export async function GET(request: NextRequest) {
   let query = supabase
     .from("rides")
     .select(
-      "id, status, rider_id, driver_id, pickup_name, pickup_address, pickup_parish, dropoff_name, dropoff_address, dropoff_parish, seats, estimated_fare_jmd, final_fare_jmd, requested_at, accepted_at, completed_at, cancelled_at, cancellation_reason",
+      "id, status, rider_id, driver_id, pickup_name, pickup_address, pickup_parish, pickup_lat, pickup_lng, dropoff_name, dropoff_address, dropoff_parish, dropoff_lat, dropoff_lng, seats, estimated_fare_jmd, final_fare_jmd, requested_at, accepted_at, completed_at, cancelled_at, cancellation_reason",
       { count: "exact" },
     )
     .order("requested_at", { ascending: false })
@@ -101,9 +109,13 @@ export async function GET(request: NextRequest) {
     pickup_name: string;
     pickup_address: string;
     pickup_parish: string | null;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
     dropoff_name: string;
     dropoff_address: string;
     dropoff_parish: string | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
     seats: number;
     estimated_fare_jmd: number;
     final_fare_jmd: number | null;
@@ -184,12 +196,16 @@ export async function GET(request: NextRequest) {
       pickup: {
         name: r.pickup_name,
         address: r.pickup_address,
-        parish: r.pickup_parish,
+        // Older rides were saved without a parish column value; fall back
+        // to deriving it from the stored GPS coords so the monitor never
+        // shows "? → ?" for a ride we clearly know the location of.
+        parish: r.pickup_parish ?? parishFromCoords(r.pickup_lat, r.pickup_lng),
       },
       dropoff: {
         name: r.dropoff_name,
         address: r.dropoff_address,
-        parish: r.dropoff_parish,
+        parish:
+          r.dropoff_parish ?? parishFromCoords(r.dropoff_lat, r.dropoff_lng),
       },
       seats: r.seats,
       fare: r.final_fare_jmd ?? r.estimated_fare_jmd,

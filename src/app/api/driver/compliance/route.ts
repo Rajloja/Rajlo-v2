@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
   const { data: docs, error: docsError } = await supabase
     .from("driver_documents")
     .select(
-      "doc_key, label, description, renewal_period_days, expires_on, status, note",
+      "doc_key, label, description, renewal_period_days, expires_on, status, note, file_path, file_name",
     )
     .eq("driver_id", driverRowId);
 
@@ -98,6 +98,11 @@ export async function GET(request: NextRequest) {
       return { ...templateDoc, status: "missing" };
     }
     const status = deriveDocStatus(dbDoc.status, dbDoc.expires_on ?? undefined);
+    // The driver may preview a doc only when the admin has APPROVED it and
+    // a file is actually on record. We gate on the raw DB status (not the
+    // expiry-derived one) so a still-approved-but-expiring doc stays
+    // previewable. The signing endpoint re-checks this server-side.
+    const hasFile = dbDoc.status === "approved" && !!dbDoc.file_path;
     return {
       ...templateDoc,
       label: dbDoc.label ?? templateDoc.label,
@@ -107,6 +112,8 @@ export async function GET(request: NextRequest) {
       expiryDate: dbDoc.expires_on ?? undefined,
       note: dbDoc.note ?? undefined,
       status,
+      hasFile,
+      fileName: hasFile ? dbDoc.file_name ?? undefined : undefined,
     };
   });
 

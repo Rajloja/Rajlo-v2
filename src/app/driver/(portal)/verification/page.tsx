@@ -129,6 +129,7 @@ export default function DriverVerificationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
+  const [previewDoc, setPreviewDoc] = useState<TADocument | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -430,15 +431,27 @@ export default function DriverVerificationPage() {
                     </div>
                   )}
 
-                  {(needsAction || badge.tone === "warning") && (
+                  {(needsAction || badge.tone === "warning" || doc.hasFile) && (
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Link
-                        href={`/driver/renew/${doc.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
-                      >
-                        {needsAction ? "Upload / resubmit" : "Renew now"}
-                        <Icon name="arrow-right" className="h-3 w-3" />
-                      </Link>
+                      {(needsAction || badge.tone === "warning") && (
+                        <Link
+                          href={`/driver/renew/${doc.id}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
+                        >
+                          {needsAction ? "Upload / resubmit" : "Renew now"}
+                          <Icon name="arrow-right" className="h-3 w-3" />
+                        </Link>
+                      )}
+                      {doc.hasFile && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewDoc(doc)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-4 py-2 text-xs font-bold text-foreground transition-all hover:-translate-y-0.5 hover:border-rajlo-red hover:text-rajlo-red"
+                        >
+                          <Icon name="file-text" className="h-3.5 w-3.5" />
+                          View document
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -473,6 +486,162 @@ export default function DriverVerificationPage() {
           </ul>
         </div>
       </FadeUp>
+
+      {previewDoc && (
+        <DocPreviewModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Full-screen viewer for an approved document. Fetches a short-lived
+ * signed URL for the driver's OWN file from /api/driver/document-url
+ * and renders the image inline (or the PDF in an iframe). Mirrors the
+ * admin verification preview so it feels consistent.
+ */
+function DocPreviewModal({
+  doc,
+  onClose,
+}: {
+  doc: TADocument;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(doc.fileName ?? null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/driver/document-url?docKey=${encodeURIComponent(doc.id)}`,
+        );
+        const json = (await res.json().catch(() => ({}))) as {
+          url?: string;
+          fileName?: string | null;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok || !json.url) {
+          setError(json.error ?? "Preview unavailable");
+          return;
+        }
+        setUrl(json.url);
+        if (json.fileName) setFileName(json.fileName);
+      } catch {
+        if (!cancelled) setError("Could not load preview");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.id]);
+
+  // Lock page scroll while the viewer is open.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  const isImage = /\.(jpe?g|png|gif|webp|heic)$/i.test(fileName ?? "");
+  const isPdf = /\.pdf$/i.test(fileName ?? "");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-rajlo-black/70 p-3 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${doc.label} preview`}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-surface shadow-2xl"
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold tracking-tight">{doc.label}</p>
+            {fileName && (
+              <p className="truncate text-xs text-muted">{fileName}</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {url && (
+              <a
+                href={url}
+                download
+                className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-bold hover:bg-surface-soft"
+              >
+                Download
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close preview"
+              className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-soft"
+            >
+              <Icon name="x" className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-auto bg-surface-soft">
+          {error ? (
+            <div className="grid h-full place-items-center p-8 text-center">
+              <div>
+                <span aria-hidden className="block text-4xl leading-none">
+                  😢
+                </span>
+                <p className="mt-3 text-sm font-semibold">{error}</p>
+                <p className="mt-1 text-xs text-muted">
+                  The file may have been removed. Try again later.
+                </p>
+              </div>
+            </div>
+          ) : !url ? (
+            <div className="grid h-full place-items-center p-8">
+              <Skeleton
+                className="h-full max-h-[480px] w-full max-w-lg"
+                rounded="2xl"
+              />
+            </div>
+          ) : isImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={doc.label}
+              className="mx-auto h-full w-auto object-contain"
+            />
+          ) : isPdf ? (
+            <iframe src={url} title={doc.label} className="h-full w-full" />
+          ) : (
+            <div className="grid h-full place-items-center p-8 text-center">
+              <div>
+                <Icon name="file-text" className="mx-auto h-8 w-8 text-muted" />
+                <p className="mt-3 text-sm font-semibold">
+                  Preview not supported for this file type
+                </p>
+                <a
+                  href={url}
+                  download
+                  className="mt-3 inline-block rounded-full bg-rajlo-red px-4 py-2 text-xs font-bold text-white hover:bg-primary-hover"
+                >
+                  Download instead
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

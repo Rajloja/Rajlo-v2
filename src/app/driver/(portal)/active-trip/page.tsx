@@ -189,11 +189,15 @@ export default function DriverActiveTripPage() {
   // the driver taps "Start trip" on a PIN-required ride; cleared when
   // they verify, cancel, or the 3-strike auto-cancel fires.
   const [pinTargetId, setPinTargetId] = useState<string | null>(null);
-  // Complete-trip confirmation. Tapping "Complete trip" arms this so
-  // we get one explicit "yes, end this now" before charging the rider
-  // and closing the ride out — completion is irreversible.
-  const [completeConfirmFor, setCompleteConfirmFor] =
-    useState<string | null>(null);
+  // Primary-action confirmation. EVERY trip-progression tap (I've
+  // arrived / Start trip / Complete trip) arms this so the driver gets
+  // one explicit "yes" before it fires — nav is a busy surface and a
+  // stray tap shouldn't advance the trip. (Start with a required PIN
+  // skips straight to the PIN dialog instead, which is its own gate.)
+  const [actionConfirm, setActionConfirm] = useState<{
+    rideId: string;
+    action: "arrived" | "start" | "complete";
+  } | null>(null);
   // No-show confirmation. Tapping "Rider didn't show up" arms this so
   // the driver gets a clear "the rider will be charged" confirmation
   // before the no-show fee actually fires.
@@ -940,17 +944,12 @@ export default function DriverActiveTripPage() {
                     setPinTargetId(ride.id);
                     return;
                   }
-                  // Complete-trip is one-way (charges the rider, closes
-                  // out the ride). Always confirm before firing.
-                  if (stage.actionAction === "complete") {
-                    setCompleteConfirmFor(ride.id);
-                    return;
-                  }
-                  handleAction(
-                    ride.id,
-                    stage.actionAction,
-                    ride.estimatedFareJMD,
-                  );
+                  // Every action is confirmed before it fires — a stray
+                  // tap on the nav surface shouldn't advance the trip.
+                  setActionConfirm({
+                    rideId: ride.id,
+                    action: stage.actionAction,
+                  });
                 }}
                 expandedChildren={
                   <>
@@ -1390,11 +1389,11 @@ export default function DriverActiveTripPage() {
                 setPinTargetId(ride.id);
                 return;
               }
-              if (stage.actionAction === "complete") {
-                setCompleteConfirmFor(ride.id);
-                return;
-              }
-              handleAction(ride.id, stage.actionAction, ride.estimatedFareJMD);
+              // Confirm every action before it fires.
+              setActionConfirm({
+                rideId: ride.id,
+                action: stage.actionAction,
+              });
             }}
             disabled={acting}
             className={`group inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0 ${
@@ -1490,59 +1489,92 @@ export default function DriverActiveTripPage() {
       {/* The chat launcher (icon + sheet + toast) lives inside the
          rider card above. Nothing more to mount here. */}
 
-      {/* Complete-trip confirmation. Completion is irreversible (the
-         rider is charged, the wallet credit posts to the driver, the
-         ride row is finalised) so we always front it with a one-tap
-         "yes I'm done". Confirm fires handleAction; Cancel just
-         closes the dialog. */}
-      {completeConfirmFor && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-rajlo-black/60 p-4 backdrop-blur-sm md:items-center">
-          <div className="w-full max-w-md space-y-4 rounded-3xl bg-surface p-5 shadow-2xl md:p-6">
-            <div>
-              <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                Complete trip
-              </p>
-              <h2 className="mt-1 text-xl font-extrabold tracking-tight">
-                Are you sure you want to complete this trip?
-              </h2>
-              <p className="mt-2 text-sm text-muted">
-                Tapping Complete charges the rider {formatJMD(ride.estimatedFareJMD)} and ends the trip. You can&apos;t undo it.
-              </p>
+      {/* Action confirmation — fronts EVERY trip-progression tap
+         (I've arrived / Start trip / Complete trip) with an explicit
+         "yes". Nav is a busy surface and these advance (or end) the
+         trip, so a stray tap shouldn't fire them. Confirm runs
+         handleAction; "Not yet" just closes. */}
+      {actionConfirm &&
+        (() => {
+          const cfg = {
+            arrived: {
+              eyebrow: "Arrive at pickup",
+              eyebrowColor: "text-rajlo-red",
+              title: "Confirm you've arrived at the pickup?",
+              body: `${rider?.name ?? "The rider"} will be notified that you're at the pickup point.`,
+              confirmLabel: "Yes, I've arrived",
+              confirmClass:
+                "bg-rajlo-red hover:bg-primary-hover shadow-rajlo-red/30",
+              icon: "map-pin" as const,
+            },
+            start: {
+              eyebrow: "Start trip",
+              eyebrowColor: "text-rajlo-red",
+              title: "Start the trip now?",
+              body: `Make sure ${rider?.name ?? "the rider"} is in the vehicle before you start.`,
+              confirmLabel: "Yes, start trip",
+              confirmClass:
+                "bg-rajlo-red hover:bg-primary-hover shadow-rajlo-red/30",
+              icon: "arrow-right" as const,
+            },
+            complete: {
+              eyebrow: "Complete trip",
+              eyebrowColor: "text-emerald-700",
+              title: "Are you sure you want to complete this trip?",
+              body: `Tapping Complete charges the rider ${formatJMD(
+                ride.estimatedFareJMD,
+              )} and ends the trip. You can't undo it.`,
+              confirmLabel: "Yes, complete trip",
+              confirmClass:
+                "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30",
+              icon: "check-circle" as const,
+            },
+          }[actionConfirm.action];
+          return (
+            <div className="fixed inset-0 z-60 flex items-end justify-center bg-rajlo-black/60 p-4 backdrop-blur-sm md:items-center">
+              <div className="w-full max-w-md space-y-4 rounded-3xl bg-surface p-5 shadow-2xl md:p-6">
+                <div>
+                  <p
+                    className={`font-secondary text-[10px] font-bold uppercase tracking-wider ${cfg.eyebrowColor}`}
+                  >
+                    {cfg.eyebrow}
+                  </p>
+                  <h2 className="mt-1 text-xl font-extrabold tracking-tight">
+                    {cfg.title}
+                  </h2>
+                  <p className="mt-2 text-sm text-muted">{cfg.body}</p>
+                </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setActionConfirm(null)}
+                    disabled={acting}
+                    className="inline-flex w-full items-center justify-center rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                  >
+                    Not yet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const { rideId, action } = actionConfirm;
+                      setActionConfirm(null);
+                      void handleAction(rideId, action, ride.estimatedFareJMD);
+                    }}
+                    disabled={acting}
+                    className={`inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${cfg.confirmClass}`}
+                  >
+                    {acting ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Icon name={cfg.icon} className="h-4 w-4" />
+                    )}
+                    {cfg.confirmLabel}
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setCompleteConfirmFor(null)}
-                disabled={acting}
-                className="inline-flex w-full items-center justify-center rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-bold text-muted hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                Not yet
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const rideId = completeConfirmFor;
-                  setCompleteConfirmFor(null);
-                  void handleAction(
-                    rideId,
-                    "complete",
-                    ride.estimatedFareJMD,
-                  );
-                }}
-                disabled={acting}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                {acting ? (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : (
-                  <Icon name="check-circle" className="h-4 w-4" />
-                )}
-                Yes, complete trip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
 
       <CancelReasonDialog
         open={cancelTargetId !== null}
