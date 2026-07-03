@@ -78,6 +78,17 @@ export function CookieConsent() {
     return () => window.clearTimeout(t);
   }, []);
 
+  // Lock page scroll while the consent modal is up so the dimmed page
+  // behind it can't be scrolled until the visitor chooses.
+  useEffect(() => {
+    if (!show || typeof document === "undefined") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [show]);
+
   const choose = (value: Consent) => {
     writeConsent(value);
     setShow(false);
@@ -89,10 +100,17 @@ export function CookieConsent() {
     <div
       role="dialog"
       aria-label="Cookie consent"
-      className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-3"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center px-3"
       style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
     >
-      <div className="w-full max-w-xl rounded-3xl border border-line bg-surface p-4 shadow-2xl shadow-rajlo-black/30 md:p-5">
+      {/* Dark blurred backdrop — dims + freezes the page behind the
+         banner. Non-dismissible: the visitor must pick Accept/Decline. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-rajlo-black/60 backdrop-blur-sm"
+      />
+      <div className="relative w-full max-w-xl rounded-3xl border border-line bg-surface p-4 shadow-2xl shadow-rajlo-black/40 md:p-5">
         <div className="flex items-start gap-3">
           <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-primary-soft text-rajlo-red">
             <Icon name="shield-check" className="h-5 w-5" />
