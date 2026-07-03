@@ -67,6 +67,15 @@ export async function POST(
     return NextResponse.json({ error: banError.message }, { status: 500 });
   }
 
+  // Account-level deactivation flag (all roles). The ban blocks new
+  // sessions but a currently-logged-in user's token stays valid for up
+  // to ~1h; this flag lets /api/me/status + the DeactivatedGate detect
+  // it immediately and show the "Account deactivated" screen.
+  await supabase
+    .from("profiles")
+    .update({ deactivated_at: reactivate ? null : new Date().toISOString() })
+    .eq("id", id);
+
   // Driver-side bookkeeping
   if (profile.role === "driver") {
     const { data: driver } = await supabase

@@ -5,10 +5,11 @@ import { MotionProvider } from "@/components/motion-provider";
 import { NativeDriverGuard } from "@/components/native-driver-guard";
 import { NativePushHandler } from "@/components/native-push-handler";
 import { AuthFetchGuard } from "@/components/auth-fetch-guard";
+import { DeactivatedGate } from "@/components/deactivated-gate";
 import { NativeBottomNav } from "@/components/native-bottom-nav";
 import { NativeBackButton } from "@/components/native-back-button";
 import { NativePageTransition } from "@/components/native-page-transition";
-import { Analytics } from "@vercel/analytics/next";
+import { CookieConsent, ConsentedAnalytics } from "@/components/cookie-consent";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -244,6 +245,10 @@ export default function RootLayout({
           {/* Global 401 interceptor — any /api/* call that returns
               unauthorized bounces the user to the right login page. */}
           <AuthFetchGuard />
+          {/* Detects mid-session account deactivation and takes over the
+              screen with an "Account deactivated · contact support" panel
+              instead of a confusing "link expired" bounce. */}
+          <DeactivatedGate />
           {/* Native-only bottom tab bar for the driver app. No-op on
               web and on auth / verification screens. */}
           <NativeBottomNav />
@@ -256,10 +261,11 @@ export default function RootLayout({
             <div className="min-h-screen">{children}</div>
           </NativePageTransition>
         </MotionProvider>
-        {/* Vercel Web Analytics — privacy-friendly page-view + visitor
-            counts, no cookies. Renders nothing; injects the tracking
-            beacon on Vercel deployments. */}
-        <Analytics />
+        {/* Cookie-consent banner (web only). */}
+        <CookieConsent />
+        {/* Vercel Web Analytics — gated behind cookie consent: only
+            loads/tracks after the visitor taps "Accept cookies". */}
+        <ConsentedAnalytics />
       </body>
     </html>
   );
