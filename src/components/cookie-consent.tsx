@@ -21,23 +21,41 @@ import { isNativeApp } from "@/lib/native";
  */
 const CONSENT_KEY = "rajlo-cookie-consent";
 const CONSENT_EVENT = "rajlo-cookie-consent-change";
+const CONSENT_MAX_AGE = 365 * 24 * 60 * 60; // 1 year
 type Consent = "accepted" | "declined";
 
-function readConsent(): Consent | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const v = window.localStorage.getItem(CONSENT_KEY);
-    return v === "accepted" || v === "declined" ? v : null;
-  } catch {
-    return null;
+// Store the choice in a COOKIE (not localStorage) so it's shared across
+// every *.rajlo.com surface — apex, rider., driver., admin. localStorage
+// is per-origin, which is why the banner reappeared on each subdomain.
+// A cookie scoped to `.rajlo.com` is sent to (and readable from) all of
+// them, so one Accept/Decline covers the whole domain. On localhost /
+// *.vercel.app previews the cookie is host-only (that domain wouldn't
+// accept a `.rajlo.com` scope).
+function consentCookieDomain(): string {
+  if (typeof window === "undefined") return "";
+  const host = window.location.hostname;
+  if (host === "rajlo.com" || host.endsWith(".rajlo.com")) {
+    return "; domain=.rajlo.com";
   }
+  return "";
+}
+
+function readConsent(): Consent | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(
+    new RegExp("(?:^|; )" + CONSENT_KEY + "=([^;]*)"),
+  );
+  const v = match ? decodeURIComponent(match[1]) : null;
+  return v === "accepted" || v === "declined" ? v : null;
 }
 
 function writeConsent(value: Consent) {
-  try {
-    window.localStorage.setItem(CONSENT_KEY, value);
-  } catch {
-    /* private mode / storage disabled — the banner just reappears */
+  if (typeof document !== "undefined") {
+    const secure =
+      window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie =
+      `${CONSENT_KEY}=${value}; path=/; max-age=${CONSENT_MAX_AGE}` +
+      `${consentCookieDomain()}; SameSite=Lax${secure}`;
   }
   window.dispatchEvent(new CustomEvent(CONSENT_EVENT, { detail: value }));
 }
