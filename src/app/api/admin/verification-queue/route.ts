@@ -19,6 +19,19 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const scope = searchParams.get("scope");
   const isActiveScope = scope === "active";
+
+  // Pagination — client fetches a page at a time and appends via
+  // Load more. `limit` is capped so a malicious client can't request
+  // "all rows in one call"; `hasMore` in the response drives the
+  // button's visibility.
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)),
+  );
+  const offset = Math.max(
+    0,
+    parseInt(searchParams.get("offset") ?? "0", 10) || 0,
+  );
   // Verify caller is admin
   const auth = await createSupabaseAuthServerClient();
   const {
@@ -62,14 +75,26 @@ export async function GET(request: Request) {
       .order("submitted_at", { ascending: true, nullsFirst: true });
   }
 
-  const { data: drivers, error } = await driversQuery;
+  // Fetch one extra row than requested — the presence of that N+1 tells
+  // us whether there's another page without a separate count query.
+  const { data: driversRaw, error } = await driversQuery.range(
+    offset,
+    offset + limit,
+  );
+  const driversAll = driversRaw ?? [];
+  const hasMore = driversAll.length > limit;
+  const drivers = hasMore ? driversAll.slice(0, limit) : driversAll;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!drivers || drivers.length === 0) {
-    return NextResponse.json({ source: "supabase", drivers: [] });
+  if (drivers.length === 0) {
+    return NextResponse.json({
+      source: "supabase",
+      drivers: [],
+      pagination: { hasMore: false, limit, offset },
+    });
   }
 
   // Bulk fetch document counts per driver (1 query) — exclude legacy doc_keys
@@ -110,5 +135,6 @@ export async function GET(request: Request) {
         docsRejected: counts.rejected,
       };
     }),
+    pagination: { hasMore, limit, offset },
   });
 }

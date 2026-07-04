@@ -7,13 +7,22 @@ import { Logo } from "@/components/logo";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { Icon, type IconName } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
-import { FileUpload, type FileState } from "@/components/file-upload";
+import { FileUpload, type FileState, type UploadedFile } from "@/components/file-upload";
 import { Skeleton } from "@/components/skeleton";
 import { VehiclePicker } from "@/components/vehicle-picker";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
-import { uploadDriverDocument, removeDriverDocument } from "@/lib/storage";
+import {
+  uploadDriverDocument,
+  removeDriverDocument,
+  createDriverDocumentSignedUrl,
+} from "@/lib/storage";
 import { NativeUnverifiedRedirect } from "@/components/native-unverified-redirect";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
+
+/** YYYY-MM-DD sanity check for date-input values before formatting.
+ *  Guards against `new Date("something invalid")` printing "Invalid
+ *  Date" into the review sheet. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Prefix used to build a per-user draft key. Keeping drafts scoped to
 // the authenticated Supabase user id is critical: a shared, unscoped
@@ -283,6 +292,69 @@ function humanizeDocKey(key: string): string {
     nis: "NIS",
   };
   return map[key] ?? key.replace(/_/g, " ");
+}
+
+/**
+ * Single row in the "Documents ready" summary on the review step.
+ * Shows what the file is for (doc label), the raw file name + size,
+ * and an eye button that opens a signed-URL preview in a new tab —
+ * the driver's last sanity check before submitting.
+ *
+ * The signed URL is fetched on demand (per-click) rather than on
+ * mount. That avoids burning Supabase egress + a network round-trip
+ * for every doc when the driver only ever previews one or two, and
+ * keeps the review render cheap.
+ */
+function DocumentReadyRow({
+  docKey,
+  file,
+}: {
+  docKey: string;
+  file: UploadedFile;
+}) {
+  const [previewing, setPreviewing] = useState(false);
+
+  const openPreview = async () => {
+    if (!file.path || previewing) return;
+    setPreviewing(true);
+    try {
+      const url = await createDriverDocumentSignedUrl(file.path);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  return (
+    <li className="flex items-center gap-3 overflow-hidden rounded-lg bg-surface px-3 py-2.5">
+      <Icon
+        name="check-circle"
+        className="h-5 w-5 shrink-0 text-emerald-600"
+      />
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <p className="truncate text-sm font-semibold">
+          {humanizeDocKey(docKey)}
+        </p>
+        <p className="truncate text-[11px] text-muted">
+          {file.name} · {(file.size / 1024).toFixed(0)} KB
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={openPreview}
+        disabled={previewing}
+        aria-label={`Preview ${humanizeDocKey(docKey)}`}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-rajlo-red/40 hover:bg-primary-soft hover:text-rajlo-red disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {previewing ? (
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+        ) : (
+          <Icon name="eye" className="h-3.5 w-3.5" />
+        )}
+        <span className="hidden sm:inline">Preview</span>
+      </button>
+    </li>
+  );
 }
 
 /**
@@ -1224,7 +1296,7 @@ function DriverOnboardingWizard() {
             {step === 6 && (
               <div className="space-y-5">
                 <FileUpload field={{ id: "police_record", label: "Police record / Good Conduct Certificate", hint: "Obtained from any police station in Jamaica. Required at first application; periodically thereafter.", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
-                <FileUpload field={{ id: "selfie", label: "Live identity selfie", hint: "Clear photo of your face against a plain background. JPG or PNG. Used to match against your licence and TA badge.", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
+                <FileUpload field={{ id: "selfie", label: "Live identity selfie", hint: "Clear photo of your face against a plain background. JPG or PNG. Used to match against your licence and TA badge.", required: true, previewAsAvatar: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
               </div>
             )}
 
@@ -1239,20 +1311,39 @@ function DriverOnboardingWizard() {
                     Personal & vehicle details
                   </p>
                   <div className="grid gap-2 rounded-2xl border border-line bg-surface-soft p-3">
-                    {[
+                    {/* Each row is [label, value, expiry?] — expiry is
+                        rendered underneath the value in muted text so
+                        the driver can sanity-check they typed the
+                        right expiry alongside the doc number. Only the
+                        two docs the driver actually enters expiries
+                        for (licence + franchise) carry a third tuple
+                        entry; everything else stays single-line. */}
+                    {([
                       ["Full name", `${form.firstName} ${form.lastName}`.trim() || "—"],
                       ["Mobile", form.phone || "—"],
                       ["TRN", form.trn || "—"],
                       ["NIS", form.nis || "—"],
-                      ["Driver's licence", form.licenceNumber || "—"],
+                      ["Driver's licence", form.licenceNumber || "—", form.licenceExpiry],
                       ["TA badge", form.badgeNumber || "—"],
                       ["Red plate", form.plateNumber || "—"],
                       ["Vehicle", form.vehicleMake && form.vehicleModel ? `${form.vehicleYear} ${form.vehicleMake} ${form.vehicleModel}` : "—"],
-                      ["Franchise cert", form.franchiseNumber || "—"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex items-center justify-between rounded-lg bg-surface px-3 py-2">
-                        <span className="text-xs font-medium text-muted">{label}</span>
-                        <span className="text-sm font-semibold">{value}</span>
+                      ["Franchise cert", form.franchiseNumber || "—", form.franchiseExpiry],
+                    ] as Array<[string, string, string?]>).map(([label, value, expiry]) => (
+                      <div key={label} className="flex items-start justify-between gap-3 rounded-lg bg-surface px-3 py-2">
+                        <span className="mt-0.5 text-xs font-medium text-muted">{label}</span>
+                        <div className="text-right">
+                          <span className="text-sm font-semibold">{value}</span>
+                          {expiry && ISO_DATE.test(expiry) && (
+                            <p className="mt-0.5 text-[11px] font-medium text-muted">
+                              Expires{" "}
+                              {new Date(expiry).toLocaleDateString("en-JM", {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1272,11 +1363,11 @@ function DriverOnboardingWizard() {
                         {Object.entries(files)
                           .filter(([, f]) => f?.path)
                           .map(([key, file]) => (
-                            <li key={key} className="flex items-center gap-2.5 rounded-lg bg-surface px-3 py-2 text-sm">
-                              <Icon name="check-circle" className="h-4 w-4 text-emerald-600" />
-                              <span className="flex-1 font-medium">{file!.name}</span>
-                              <span className="text-xs text-muted">{(file!.size / 1024).toFixed(0)} KB</span>
-                            </li>
+                            <DocumentReadyRow
+                              key={key}
+                              docKey={key}
+                              file={file!}
+                            />
                           ))}
                       </ul>
                     )}

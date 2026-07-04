@@ -45,7 +45,7 @@ function VerificationDetailLoading() {
   return (
     <div className="mx-auto max-w-6xl space-y-5 px-2 py-6 md:px-3 md:py-10">
       <HeroSkeleton />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className="h-28 w-full" rounded="xl" />
         ))}
@@ -114,7 +114,10 @@ function VerificationDetailInner() {
         const url = queryDriverId
           ? `/api/admin/verification?driverId=${encodeURIComponent(queryDriverId)}`
           : `/api/admin/verification`;
-        const res = await fetch(url);
+        // Bypass browser HTTP cache so a stale response can't hide
+        // a fresh doc/expiry update from the admin. Verification data
+        // is per-driver moderation state — always want the current row.
+        const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to load verification details");
         const payload = (await res.json()) as {
           source: "supabase" | "mock";
@@ -536,7 +539,7 @@ function VerificationDetailInner() {
             )}
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             <DetailGroup icon="user" title="Contact">
               <DetailRow label="Email" value={contact.email} />
               <DetailRow label="Phone" value={contact.phone} />
@@ -564,7 +567,7 @@ function VerificationDetailInner() {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[2fr_1fr]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
         {/* ─── Documents list ─── */}
         <section className="space-y-3">
           {docs.map((doc) => {
@@ -636,29 +639,28 @@ function VerificationDetailInner() {
                       </DecisionButton>
                     </div>
 
-                    {/* Read-only expiry display for docs that renew.
-                       The driver owns this field — they enter it during
-                       upload / renewal. Admin sees it here so they can
-                       sanity-check it matches what's on the actual
-                       document, but can't edit it. If it's wrong the
-                       admin marks the doc "resubmit" and asks the
-                       driver to re-upload with the right date. */}
-                    {doc.renewalPeriodDays > 0 && (
+                    {/* Read-only expiry display — shown ONLY when the
+                       driver has actually supplied an expiry for this
+                       doc. Correlates 1:1 with the driver portal: the
+                       onboarding form only asks for licence + franchise
+                       expiries, so those are the only docs where this
+                       block appears at initial submission. Once a doc
+                       is renewed / resubmitted with a fresh expiry,
+                       this block appears for that doc too.
+                       Rendering off `expiresOn` (not `renewalPeriodDays`)
+                       avoids showing empty "— not provided by driver —"
+                       slots for docs the driver was never asked about. */}
+                    {doc.expiresOn && ISO_DATE.test(doc.expiresOn) && (
                       <div className="mt-4 rounded-xl border border-line bg-surface-soft px-3 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
                           Expiry on document
                         </p>
                         <p className="mt-1.5 text-sm font-bold text-foreground">
-                          {doc.expiresOn && ISO_DATE.test(doc.expiresOn)
-                            ? new Date(doc.expiresOn).toLocaleDateString(
-                                "en-JM",
-                                {
-                                  year: "numeric",
-                                  month: "long",
-                                  day: "numeric",
-                                },
-                              )
-                            : "— not provided by driver —"}
+                          {new Date(doc.expiresOn).toLocaleDateString("en-JM", {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          })}
                         </p>
                         <p className="mt-1 text-[10px] leading-relaxed text-muted">
                           Entered by the driver at upload. If it&apos;s
@@ -738,7 +740,7 @@ function VerificationDetailInner() {
               {auditTrail.map((entry) => (
                 <li
                   key={entry}
-                  className="rounded-lg border border-line/60 bg-surface-soft px-3 py-2 text-[11px] leading-relaxed text-muted"
+                  className="rounded-lg border border-line/60 bg-surface-soft px-3 py-2 text-[11px] leading-relaxed break-words text-muted"
                 >
                   {entry}
                 </li>

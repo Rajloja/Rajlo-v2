@@ -83,14 +83,20 @@ export function LiveTripMap({
     [rideId, dropoffName, dropoffLat, dropoffLng],
   );
 
+  // Driver + rider markers only render while the ride is live. For a
+  // terminal trip (completed / cancelled) they'd otherwise pin to the
+  // driver's LAST cached GPS ping — which is either the dropoff (fine
+  // but redundant with the B pin) or somewhere mid-route (misleading:
+  // reads as "driver still en route" for a finished trip). Suppressing
+  // both keeps the terminal map to a clean A→B route summary.
   return (
     <div className="relative">
       <MapView
         pickup={pickup}
         stops={[]}
         dropoff={dropoff}
-        driverPosition={driverPos}
-        riderPosition={riderPos}
+        driverPosition={active ? driverPos : null}
+        riderPosition={active ? riderPos : null}
         className={className}
       />
       {active && !driverPos && (

@@ -77,6 +77,8 @@ const TABS: { id: StatusFilter; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
+const PAGE_SIZE = 100;
+
 export default function AdminPayoutsPage() {
   const [filter, setFilter] = useState<StatusFilter>("pending");
   const [payouts, setPayouts] = useState<Payout[] | null>(null);
@@ -86,18 +88,53 @@ export default function AdminPayoutsPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [bankRef, setBankRef] = useState("");
   const [excludeTarget, setExcludeTarget] = useState<Payout | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   const refresh = async () => {
     setPayouts(null);
     setSelected(new Set());
+    setHasMore(false);
+    setLoadMoreError(null);
     try {
-      const res = await fetch(`/api/admin/payouts?status=${filter}`);
+      const res = await fetch(
+        `/api/admin/payouts?status=${filter}&limit=${PAGE_SIZE}&offset=0`,
+      );
       const json = (await res.json().catch(() => ({}))) as {
         payouts?: Payout[];
+        pagination?: { hasMore: boolean };
       };
       setPayouts(json.payouts ?? []);
+      setHasMore(json.pagination?.hasMore ?? false);
     } catch {
       setPayouts([]);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!payouts) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/payouts?status=${filter}&limit=${PAGE_SIZE}&offset=${payouts.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        payouts?: Payout[];
+        pagination?: { hasMore: boolean };
+      };
+      const incoming = json.payouts ?? [];
+      const seen = new Set(payouts.map((p) => p.id));
+      setPayouts([...payouts, ...incoming.filter((p) => !seen.has(p.id))]);
+      setHasMore(json.pagination?.hasMore ?? false);
+    } catch (e) {
+      setLoadMoreError(
+        e instanceof Error ? e.message : "Couldn't load more payouts.",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -404,6 +441,28 @@ export default function AdminPayoutsPage() {
               </tbody>
             </table>
           </div>
+          {(hasMore || loadMoreError) && (
+            <div className="flex flex-col items-center gap-2 pt-3">
+              {loadMoreError && (
+                <p className="text-xs font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore && (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  )}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+            </div>
+          )}
         </FadeUp>
       )}
 

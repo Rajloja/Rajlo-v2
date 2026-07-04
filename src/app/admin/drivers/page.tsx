@@ -17,9 +17,10 @@ import { useLiveQuery } from "@/lib/use-live-query";
  * critical "needs review" cohort — drivers who've re-uploaded a
  * previously-approved doc that admin hasn't re-approved yet).
  *
- * Click a row → drops into the existing /admin/verification-detail
- * flow which already handles per-doc approve/reject + driver
- * deactivation. So this page is the queue, that page is the action.
+ * Click a row → opens the driver hub at /admin/drivers/[externalId]
+ * which shows a full profile (personal, vehicle, docs+expiry, rides,
+ * violations, wallet, ratings). The hub then CTAs into
+ * /admin/verification-detail for the per-doc moderation workflow.
  */
 
 type DriverRow = {
@@ -317,7 +318,7 @@ function DriverCardMobile({ driver }: { driver: DriverRow }) {
   return (
     <li>
       <Link
-        href={`/admin/verification-detail?driverId=${encodeURIComponent(driver.externalId)}`}
+        href={`/admin/drivers/${encodeURIComponent(driver.externalId)}`}
         className={`block rounded-2xl border bg-surface p-4 transition-all hover:-translate-y-0.5 hover:border-rajlo-red/30 hover:shadow-md ${
           driver.needsReview ? "border-amber-300" : "border-line"
         }`}
@@ -366,7 +367,7 @@ function DriverRowDesktop({
     >
       <td className="px-4 py-3">
         <Link
-          href={`/admin/verification-detail?driverId=${encodeURIComponent(driver.externalId)}`}
+          href={`/admin/drivers/${encodeURIComponent(driver.externalId)}`}
           className="block hover:text-rajlo-red"
         >
           <p className="font-bold">{driver.fullName}</p>

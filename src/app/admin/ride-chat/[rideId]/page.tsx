@@ -82,7 +82,7 @@ export default function AdminRideChatPage({
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 px-4 py-8">
+      <div className="mx-auto max-w-3xl space-y-4 px-2 py-8 md:px-3">
         <Skeleton className="h-32 w-full" rounded="xl" />
         {[0, 1, 2, 3, 4].map((i) => (
           <Skeleton key={i} className="h-12 w-full" rounded="xl" />
@@ -110,7 +110,7 @@ export default function AdminRideChatPage({
   const { ride, messages } = data;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 md:py-10">
+    <div className="mx-auto max-w-3xl space-y-5 px-2 py-6 md:px-3 md:py-10">
       <FadeUp>
         <div className="rounded-3xl border border-line bg-rajlo-black p-6 text-white shadow-xl">
           <p className="font-secondary text-xs font-bold uppercase tracking-wider text-rajlo-red">

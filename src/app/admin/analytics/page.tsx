@@ -194,13 +194,13 @@ export default function AdminAnalyticsPage() {
 
       {/* KPI strip */}
       {loading ? (
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-24 w-full" rounded="xl" />
           ))}
         </div>
       ) : totals ? (
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
           <Kpi label="Rides booked" value={totals.totalRides.toLocaleString("en-JM")} />
           <Kpi label="Gross revenue" value={formatJMD(totals.totalRevenue)} />
           <Kpi label="Completion rate" value={`${totals.completionRate}%`} tone="emerald" />
@@ -213,7 +213,7 @@ export default function AdminAnalyticsPage() {
       ) : null}
 
       {/* Volume + revenue */}
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <FadeUp delay={0.04}>
           <div className="rounded-2xl border border-line bg-surface p-5 lg:col-span-2">
             <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
@@ -284,7 +284,7 @@ export default function AdminAnalyticsPage() {
       </FadeUp>
 
       {/* Heatmap + ratings */}
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <FadeUp delay={0.1}>
           <div className="overflow-hidden rounded-2xl border border-line bg-surface p-5 lg:col-span-2">
             <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
@@ -349,7 +349,7 @@ export default function AdminAnalyticsPage() {
       </div>
 
       {/* Vehicle types + Compliance + Cancellations */}
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <FadeUp delay={0.14}>
           <div className="rounded-2xl border border-line bg-surface p-5">
             <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
@@ -474,7 +474,7 @@ export default function AdminAnalyticsPage() {
       </FadeUp>
 
       {/* Leaderboards */}
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <FadeUp delay={0.22}>
           <Leaderboard
             title="Top drivers"

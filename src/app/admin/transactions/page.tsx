@@ -366,7 +366,7 @@ export default function AdminTransactionsPage() {
         <section className="rounded-3xl border border-line bg-surface p-5 md:p-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <label className="relative flex-1">
-              <span className="sr-only">Search by user name</span>
+              <span className="sr-only">Search by user name or transaction ID</span>
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
                 <Icon name="search" className="h-4 w-4" />
               </span>
@@ -374,7 +374,7 @@ export default function AdminTransactionsPage() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search transactions by user name"
+                placeholder="Search by user name or transaction ID"
                 className="block w-full rounded-xl border border-line bg-surface-soft py-2.5 pl-10 pr-4 text-sm font-medium outline-none placeholder:text-muted focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/20"
               />
             </label>

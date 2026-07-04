@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp, Stagger, StaggerItem } from "@/components/anim";
@@ -23,6 +23,10 @@ type Driver = {
   docsRejected: number;
 };
 
+type QueueResponse = { drivers: Driver[]; pagination?: { hasMore: boolean } };
+
+const PAGE_SIZE = 50;
+
 type Filter = "all" | "pending" | "rejected" | "active";
 
 // Source of truth for the doc count display; matches mock-data.requiredTADocuments
@@ -33,26 +37,125 @@ export default function VerificationQueuePage() {
   const [filter, setFilter] = useState<Filter>("all");
 
   // Two parallel live queries — pipeline (pending/rejected) and active.
-  // Both refresh every 20s so newly-submitted onboardings + admin-side
-  // status changes appear without a manual reload.
-  const pipelineQuery = useLiveQuery<{ drivers: Driver[] }>(
-    "/api/admin/verification-queue",
+  // Both fetch the FIRST page (PAGE_SIZE rows) and refresh every 20s so
+  // newly-submitted onboardings + admin-side status changes appear
+  // without a manual reload. Additional pages come via `loadMore` and
+  // are appended to `extraPipeline` / `extraActive` — polling on the
+  // first page still auto-refreshes without wiping the extra pages.
+  const pipelineQuery = useLiveQuery<QueueResponse>(
+    `/api/admin/verification-queue?limit=${PAGE_SIZE}&offset=0`,
     { interval: 20_000 },
   );
-  const activeQuery = useLiveQuery<{ drivers: Driver[] }>(
-    "/api/admin/verification-queue?scope=active",
+  const activeQuery = useLiveQuery<QueueResponse>(
+    `/api/admin/verification-queue?scope=active&limit=${PAGE_SIZE}&offset=0`,
     { interval: 20_000 },
   );
-  // Stable derived array — without useMemo, every render produces a
-  // fresh `drivers` reference, which churns the `filtered` + `counts`
-  // memos downstream and trips the exhaustive-deps lint rule.
+  const [extraPipeline, setExtraPipeline] = useState<Driver[]>([]);
+  const [extraActive, setExtraActive] = useState<Driver[]>([]);
+  const [pipelineHasMore, setPipelineHasMore] = useState<boolean | null>(null);
+  const [activeHasMore, setActiveHasMore] = useState<boolean | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  // Reset the appended pages whenever the first-page query re-runs a
+  // fresh fetch (component remount / manual refresh). Without this,
+  // stale extra pages would linger on top of a refreshed first page.
+  useEffect(() => {
+    setExtraPipeline([]);
+    setPipelineHasMore(
+      pipelineQuery.data?.pagination?.hasMore ?? null,
+    );
+  }, [pipelineQuery.data?.drivers]);
+  useEffect(() => {
+    setExtraActive([]);
+    setActiveHasMore(activeQuery.data?.pagination?.hasMore ?? null);
+  }, [activeQuery.data?.drivers]);
+
+  // Stable derived array. Without useMemo every render produces a
+  // fresh `drivers` reference, churning downstream memos.
   const drivers = useMemo(
     () => [
       ...(pipelineQuery.data?.drivers ?? []),
+      ...extraPipeline,
       ...(activeQuery.data?.drivers ?? []),
+      ...extraActive,
     ],
-    [pipelineQuery.data?.drivers, activeQuery.data?.drivers],
+    [
+      pipelineQuery.data?.drivers,
+      activeQuery.data?.drivers,
+      extraPipeline,
+      extraActive,
+    ],
   );
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const canPipeline = pipelineHasMore === true;
+      const canActive = activeHasMore === true;
+      const fetches: Promise<void>[] = [];
+      if (canPipeline) {
+        const offset =
+          (pipelineQuery.data?.drivers.length ?? 0) + extraPipeline.length;
+        fetches.push(
+          fetch(
+            `/api/admin/verification-queue?limit=${PAGE_SIZE}&offset=${offset}`,
+          )
+            .then((r) => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.json() as Promise<QueueResponse>;
+            })
+            .then((json) => {
+              setExtraPipeline((prev) => {
+                const seen = new Set([
+                  ...(pipelineQuery.data?.drivers ?? []).map((d) => d.id),
+                  ...prev.map((d) => d.id),
+                ]);
+                return [
+                  ...prev,
+                  ...json.drivers.filter((d) => !seen.has(d.id)),
+                ];
+              });
+              setPipelineHasMore(json.pagination?.hasMore ?? false);
+            }),
+        );
+      }
+      if (canActive) {
+        const offset =
+          (activeQuery.data?.drivers.length ?? 0) + extraActive.length;
+        fetches.push(
+          fetch(
+            `/api/admin/verification-queue?scope=active&limit=${PAGE_SIZE}&offset=${offset}`,
+          )
+            .then((r) => {
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              return r.json() as Promise<QueueResponse>;
+            })
+            .then((json) => {
+              setExtraActive((prev) => {
+                const seen = new Set([
+                  ...(activeQuery.data?.drivers ?? []).map((d) => d.id),
+                  ...prev.map((d) => d.id),
+                ]);
+                return [
+                  ...prev,
+                  ...json.drivers.filter((d) => !seen.has(d.id)),
+                ];
+              });
+              setActiveHasMore(json.pagination?.hasMore ?? false);
+            }),
+        );
+      }
+      await Promise.all(fetches);
+    } catch (e) {
+      setLoadMoreError(e instanceof Error ? e.message : "Couldn't load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const canLoadMore = pipelineHasMore === true || activeHasMore === true;
   const loading = pipelineQuery.loading || activeQuery.loading;
   const error = pipelineQuery.error;
   const newestUpdate = [
@@ -212,13 +315,37 @@ export default function VerificationQueuePage() {
           </p>
         </div>
       ) : (
-        <Stagger className="space-y-3" amount={0.05}>
-          {filtered.map((d) => (
-            <StaggerItem key={d.id}>
-              <DriverCard driver={d} />
-            </StaggerItem>
-          ))}
-        </Stagger>
+        <>
+          <Stagger className="space-y-3" amount={0.05}>
+            {filtered.map((d) => (
+              <StaggerItem key={d.id}>
+                <DriverCard driver={d} />
+              </StaggerItem>
+            ))}
+          </Stagger>
+          {(canLoadMore || loadMoreError) && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              {loadMoreError && (
+                <p className="text-xs font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+              {canLoadMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore && (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  )}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

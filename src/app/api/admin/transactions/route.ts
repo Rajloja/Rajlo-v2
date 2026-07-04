@@ -179,26 +179,25 @@ export async function GET(request: NextRequest) {
     listQuery = listQuery.eq("direction", directionFilter);
   }
 
-  // Search by user name → resolve to user ids first, then constrain.
+  // Search matches either a user name OR a transaction id prefix. The
+  // admin usually pastes the short 8-char id shown in the UI (e.g.
+  // "dc9ac4b3") — we ilike-prefix so partial matches work. `%` and `_`
+  // in the query would be interpreted as SQL wildcards, so strip them
+  // to keep the ilike safe.
   if (q) {
+    const safe = q.replace(/[%_]/g, "");
     const { data: matchProfiles } = await supabase
       .from("profiles")
       .select("id")
-      .ilike("full_name", `%${q}%`)
+      .ilike("full_name", `%${safe}%`)
       .limit(50);
-    const ids = (matchProfiles ?? []).map((p) => p.id);
-    if (ids.length === 0) {
-      return NextResponse.json({
-        totals,
-        dailySeries,
-        topSpenders,
-        topEarners,
-        transactions: [],
-        pagination: { hasMore: false },
-        usersById: {},
-      });
+    const nameUserIds = (matchProfiles ?? []).map((p) => p.id);
+
+    const orClauses: string[] = [`id.ilike.${safe}%`];
+    if (nameUserIds.length > 0) {
+      orClauses.push(`user_id.in.(${nameUserIds.join(",")})`);
     }
-    listQuery = listQuery.in("user_id", ids);
+    listQuery = listQuery.or(orClauses.join(","));
   }
 
   const { data: txnsRaw, error: listError } = await listQuery;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { useLiveQuery } from "@/lib/use-live-query";
 
@@ -34,15 +34,63 @@ const KIND_LABEL: Record<string, string> = {
   permission_denied_at_toggle: "Denied permission at toggle",
 };
 
+const PAGE_SIZE = 100;
+
 export default function AdminViolationsPage() {
   const [status, setStatus] = useState<"open" | "resolved" | "all">("open");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const url = `/api/admin/driver-violations?status=${status}&limit=100`;
+  // First page — polled every 15s so newly-created violations surface
+  // automatically. Additional pages appended via loadMore + kept out
+  // of the polling refresh so older entries don't blink in and out.
+  const url = `/api/admin/driver-violations?status=${status}&limit=${PAGE_SIZE}&offset=0`;
   const query = useLiveQuery<{ violations: Violation[]; total: number }>(url, {
     interval: 15_000,
   });
-  const violations = query.data?.violations ?? [];
+  const firstPage = query.data?.violations ?? [];
+  const total = query.data?.total ?? 0;
+
+  const [extras, setExtras] = useState<Violation[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  // Reset appended pages when filter changes / first page refreshes.
+  useEffect(() => {
+    setExtras([]);
+    setLoadMoreError(null);
+  }, [status, query.data?.violations]);
+
+  const violations = [
+    ...firstPage,
+    ...extras.filter((e) => !firstPage.some((f) => f.id === e.id)),
+  ];
+  const hasMore = violations.length < total;
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/driver-violations?status=${status}&limit=${PAGE_SIZE}&offset=${violations.length}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        violations: Violation[];
+        total: number;
+      };
+      setExtras((prev) => {
+        const seen = new Set([
+          ...firstPage.map((v) => v.id),
+          ...prev.map((v) => v.id),
+        ]);
+        return [...prev, ...json.violations.filter((v) => !seen.has(v.id))];
+      });
+    } catch (e) {
+      setLoadMoreError(e instanceof Error ? e.message : "Couldn't load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const act = async (
     violationId: string,
@@ -130,17 +178,41 @@ export default function AdminViolationsPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {violations.map((v) => (
-            <ViolationCard
-              key={v.id}
-              v={v}
-              busy={busy === v.id}
-              onResolve={(notes) => act(v.id, "resolve", notes)}
-              onReactivate={(notes) => act(v.id, "reactivate", notes)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {violations.map((v) => (
+              <ViolationCard
+                key={v.id}
+                v={v}
+                busy={busy === v.id}
+                onResolve={(notes) => act(v.id, "resolve", notes)}
+                onReactivate={(notes) => act(v.id, "reactivate", notes)}
+              />
+            ))}
+          </div>
+          {(hasMore || loadMoreError) && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              {loadMoreError && (
+                <p className="text-xs font-semibold text-rajlo-red">
+                  {loadMoreError}
+                </p>
+              )}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-5 py-2 text-xs font-bold text-foreground transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore && (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-rajlo-red border-t-transparent" />
+                  )}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

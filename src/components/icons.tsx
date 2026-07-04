@@ -51,7 +51,8 @@ export type IconName =
   | "mic"
   | "mic-off"
   | "bar-chart"
-  | "google-play";
+  | "google-play"
+  | "eye";
 
 const props = {
   fill: "none",
@@ -116,6 +117,12 @@ const paths: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.3-4.3" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
     </>
   ),
   "map-pin": (

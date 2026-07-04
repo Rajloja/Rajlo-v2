@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
   let driverQuery = supabase
     .from("drivers")
     .select(
-      "id, external_id, first_name, last_name, phone, email, trn, nis, licence_number, plate_number, vehicle_make, vehicle_model, vehicle_year, onboarding_status, activated, admin_note, created_at, submitted_at",
+      "id, external_id, first_name, last_name, phone, email, trn, nis, licence_number, licence_expiry, plate_number, vehicle_make, vehicle_model, vehicle_year, franchise_expiry, onboarding_status, activated, admin_note, created_at, submitted_at",
     );
 
   if (driverIdParam) {
@@ -136,6 +136,32 @@ export async function GET(request: NextRequest) {
         const meta = requiredTADocuments.find((r) => r.id === doc.doc_key);
         const renewalPeriodDays =
           (doc.renewal_period_days ?? meta?.renewalPeriodDays ?? 0) as number;
+
+        // Two expiry sources reconciled here:
+        //   1. `driver_documents.expires_on` — set on renewal / resubmit
+        //      flows where the driver enters a new expiry per-doc.
+        //   2. `drivers.licence_expiry` / `drivers.franchise_expiry` —
+        //      the onboarding form only asks the driver for these two
+        //      expiries, and stores them on the drivers row (NOT on
+        //      driver_documents). Without this fallback, licence and
+        //      franchise docs would look expiry-less to admin even
+        //      though the driver entered dates during onboarding.
+        //
+        //   Per-doc row wins if set (it's the newer/renewed value);
+        //   the drivers-table field is a fallback for the initial
+        //   onboarding-supplied expiry.
+        let expiresOn = (doc.expires_on ?? null) as string | null;
+        if (!expiresOn) {
+          if (
+            doc.doc_key === "drivers_licence_front" ||
+            doc.doc_key === "drivers_licence_back"
+          ) {
+            expiresOn = (driver.licence_expiry ?? null) as string | null;
+          } else if (doc.doc_key === "franchise_cert") {
+            expiresOn = (driver.franchise_expiry ?? null) as string | null;
+          }
+        }
+
         return {
           id: doc.doc_key,
           label: doc.label,
@@ -148,7 +174,7 @@ export async function GET(request: NextRequest) {
           fileName: doc.file_name ?? null,
           filePath: doc.file_path ?? null,
           previouslyApproved: doc.previously_approved === true,
-          expiresOn: (doc.expires_on ?? null) as string | null,
+          expiresOn,
           renewalPeriodDays,
         };
       }) ?? [],

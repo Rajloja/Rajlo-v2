@@ -31,7 +31,11 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get("days") ?? "30",
     10,
   );
-  const days = Math.min(90, Math.max(7, isNaN(requested) ? 30 : requested));
+  // Min was 7 to keep the weekly-trend charts meaningful, but ride
+  // monitoring calls this same endpoint for its status-count KPIs
+  // and needs to support 24h. 1-day aggregates are fine for count
+  // rollups; the heatmap just gets sparse (which is honest).
+  const days = Math.min(90, Math.max(1, isNaN(requested) ? 30 : requested));
 
   const now = new Date();
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);

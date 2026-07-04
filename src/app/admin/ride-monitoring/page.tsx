@@ -171,19 +171,54 @@ export default function AdminRideMonitoringPage() {
   const liveRides = liveQuery.data?.rides ?? [];
   const loadingLive = liveQuery.loading;
 
-  // Heatmap from the analytics overview — refresh every 2 minutes;
-  // hour-of-day patterns barely move minute-to-minute.
-  const heatmapQuery = useLiveQuery<{ heatmap: number[][] }>(
-    "/api/admin/analytics/overview?days=30",
+  // Overview payload — one round trip powers BOTH the demand heatmap
+  // and the timeframe-scoped stats KPI strip. The heatmap stays on a
+  // rolling 30-day window (hour × day-of-week patterns need enough
+  // rides to look non-random), while stats respect the admin's
+  // timeframe selector below. Cadence stays at 2 min — status counts
+  // and hour-of-day patterns don't need faster than that.
+  //
+  // `days` is passed through to the API so cancels/completions/gross
+  // revenue reflect the selected window. `days=0` (All time) collapses
+  // to the API max (90) since we don't have a bounded aggregate for
+  // "since day zero" without slower joins.
+  const statsDays = days === 0 ? 90 : days;
+  const overviewQuery = useLiveQuery<{
+    heatmap: number[][];
+    statusCounts: Record<string, number>;
+    daily: Array<{ date: string; label: string; rides: number; revenue: number }>;
+  }>(
+    `/api/admin/analytics/overview?days=${statsDays}`,
     { interval: 120_000 },
   );
-  const heatmap = heatmapQuery.data?.heatmap ?? null;
+  const heatmap = overviewQuery.data?.heatmap ?? null;
+  const statusCounts = overviewQuery.data?.statusCounts ?? null;
+  const grossRevenue =
+    overviewQuery.data?.daily.reduce((sum, d) => sum + d.revenue, 0) ?? 0;
+  const statsLoading = overviewQuery.loading;
+
+  // Derived counts for the KPI strip. Any status the API doesn't
+  // return simply defaults to 0.
+  const totalBookings = statusCounts
+    ? Object.values(statusCounts).reduce((s, n) => s + n, 0)
+    : 0;
+  const completed = statusCounts?.completed ?? 0;
+  const cancelled = statusCounts?.cancelled ?? 0;
+  const inFlightAgg =
+    (statusCounts?.requested ?? 0) +
+    (statusCounts?.accepted ?? 0) +
+    (statusCounts?.arrived ?? 0) +
+    (statusCounts?.in_progress ?? 0);
+  const completionRate =
+    totalBookings === 0
+      ? 0
+      : Math.round((completed / totalBookings) * 100);
 
   // Aggregate "freshest of any sub-query" for the page-level live pill.
   const newestUpdate = [
     filteredQuery.lastUpdated,
     liveQuery.lastUpdated,
-    heatmapQuery.lastUpdated,
+    overviewQuery.lastUpdated,
   ].reduce<Date | null>(
     (acc, d) => (d && (!acc || d > acc) ? d : acc),
     null,
@@ -191,11 +226,11 @@ export default function AdminRideMonitoringPage() {
   const anyRefreshing =
     filteredQuery.refreshing ||
     liveQuery.refreshing ||
-    heatmapQuery.refreshing;
+    overviewQuery.refreshing;
   const refreshAll = () => {
     filteredQuery.refresh();
     liveQuery.refresh();
-    heatmapQuery.refresh();
+    overviewQuery.refresh();
   };
 
   const liveCount = liveRides.length;
@@ -234,6 +269,66 @@ export default function AdminRideMonitoringPage() {
               strip refreshes every 8 seconds; the historical list every 20.
             </p>
           </div>
+        </div>
+      </FadeUp>
+
+      {/* Booking stats KPI strip — scoped to the timeframe selector
+          below. Sits ABOVE the in-flight list so the admin's eye lands
+          on the summary first, then drills into individual rides. */}
+      <FadeUp delay={0.03}>
+        <div className="rounded-2xl border border-line bg-surface p-4 md:p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-secondary text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
+                Booking stats
+              </p>
+              <p className="mt-0.5 text-sm font-bold">{timeframeLabel(days)}</p>
+            </div>
+            <select
+              value={days}
+              onChange={(e) => setDays(parseInt(e.target.value, 10))}
+              className="rounded-full border border-line bg-surface-soft px-4 py-2 text-xs font-semibold focus:border-rajlo-red focus:outline-none"
+              aria-label="Stats timeframe"
+            >
+              <option value={1}>Last 24 hours</option>
+              <option value={7}>Last 7 days</option>
+              <option value={30}>Last 30 days</option>
+              <option value={90}>Last 90 days</option>
+              <option value={0}>All time (max 90d)</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <KpiTile
+              loading={statsLoading}
+              label="Bookings"
+              value={totalBookings.toLocaleString("en-JM")}
+            />
+            <KpiTile
+              loading={statsLoading}
+              label="Completed"
+              value={completed.toLocaleString("en-JM")}
+              tone="emerald"
+            />
+            <KpiTile
+              loading={statsLoading}
+              label="Cancelled"
+              value={cancelled.toLocaleString("en-JM")}
+              tone={cancelled > 0 ? "danger" : undefined}
+            />
+            <KpiTile
+              loading={statsLoading}
+              label="In flight"
+              value={inFlightAgg.toLocaleString("en-JM")}
+            />
+            <KpiTile
+              loading={statsLoading}
+              label="Gross revenue"
+              value={formatJMD(grossRevenue)}
+            />
+          </div>
+          <p className="mt-3 text-[11px] text-muted">
+            Completion rate {completionRate}% · updates every 2 minutes
+          </p>
         </div>
       </FadeUp>
 
@@ -316,17 +411,9 @@ export default function AdminRideMonitoringPage() {
                   </option>
                 ))}
               </select>
-              <select
-                value={days}
-                onChange={(e) => setDays(parseInt(e.target.value, 10))}
-                className="rounded-full border border-line bg-surface-soft px-4 py-2 text-xs font-semibold focus:border-rajlo-red focus:outline-none"
-              >
-                <option value={1}>Last 24 hours</option>
-                <option value={7}>Last 7 days</option>
-                <option value={30}>Last 30 days</option>
-                <option value={90}>Last 90 days</option>
-                <option value={0}>All time</option>
-              </select>
+              {/* Timeframe control lives in the Booking stats card above —
+                  the same `days` state drives both stats AND this list
+                  filter, so we don't render a duplicate selector here. */}
               <label className="relative flex-1">
                 <Icon
                   name="search"
@@ -521,4 +608,52 @@ function ago(iso: string): string {
 
 function elapsedMinutes(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+}
+
+/**
+ * Compact KPI cell used by the booking-stats strip. The `tone` prop
+ * colours the value only when it visually helps the admin — emerald
+ * for "good" (completed), danger for "attention" (cancelled).
+ */
+function KpiTile({
+  label,
+  value,
+  tone,
+  loading,
+}: {
+  label: string;
+  value: string;
+  tone?: "emerald" | "danger";
+  loading?: boolean;
+}) {
+  const valueClass =
+    tone === "emerald"
+      ? "text-emerald-700"
+      : tone === "danger"
+        ? "text-rajlo-red"
+        : "text-foreground";
+  return (
+    <div className="rounded-xl border border-line bg-surface-soft px-3 py-3">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+        {label}
+      </p>
+      {loading ? (
+        <Skeleton className="mt-1 h-6 w-16" rounded="md" />
+      ) : (
+        <p className={`mt-1 text-xl font-extrabold tracking-tight ${valueClass}`}>
+          {value}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Human-readable label for the stats timeframe dropdown value. */
+function timeframeLabel(days: number): string {
+  if (days === 1) return "Last 24 hours";
+  if (days === 7) return "Last 7 days";
+  if (days === 30) return "Last 30 days";
+  if (days === 90) return "Last 90 days";
+  if (days === 0) return "All time · showing last 90 days";
+  return `Last ${days} days`;
 }
