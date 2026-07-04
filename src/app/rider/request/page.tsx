@@ -249,10 +249,13 @@ export default function RiderRequestPage() {
     const toName = params.get("to_name");
     const toLat = parseFloat(params.get("to_lat") ?? "");
     const toLng = parseFloat(params.get("to_lng") ?? "");
-    if (toName && Number.isFinite(toLat) && Number.isFinite(toLng)) {
+    const dropoffValid = Boolean(
+      toName && Number.isFinite(toLat) && Number.isFinite(toLng),
+    );
+    if (dropoffValid) {
       setDropoff({
         placeId: params.get("to_place") ?? "",
-        name: toName,
+        name: toName!,
         address: params.get("to_address") ?? "",
         lat: toLat,
         lng: toLng,
@@ -267,10 +270,13 @@ export default function RiderRequestPage() {
     const fromName = params.get("from_name");
     const fromLat = parseFloat(params.get("from_lat") ?? "");
     const fromLng = parseFloat(params.get("from_lng") ?? "");
-    if (fromName && Number.isFinite(fromLat) && Number.isFinite(fromLng)) {
+    const pickupValid = Boolean(
+      fromName && Number.isFinite(fromLat) && Number.isFinite(fromLng),
+    );
+    if (pickupValid) {
       setPickup({
         placeId: params.get("from_place") ?? "",
-        name: fromName,
+        name: fromName!,
         address: params.get("from_address") ?? "",
         lat: fromLat,
         lng: fromLng,
@@ -284,6 +290,23 @@ export default function RiderRequestPage() {
     const seatsParam = parseInt(params.get("seats") ?? "", 10);
     if (Number.isFinite(seatsParam) && seatsParam >= 1 && seatsParam <= 4) {
       setSeats(seatsParam);
+    }
+
+    // Deep-link fast-forward. When the landing widget already collected
+    // pickup + dropoff (both endpoints hydrated above) and marked which
+    // ride type the visitor picked (`mode=private|route_taxi`), skip
+    // Step 1 and drop them straight on the "Choose your ride" step with
+    // that mode pre-selected. The route-taxi mode picks itself only
+    // when the matcher confirms a corridor — the existing auto-revert
+    // effect on `mode` handles the "picked hail-a-ride but no corridor
+    // exists" case by falling back to private, so setting the URL mode
+    // here can't leave the flow in a broken state.
+    if (dropoffValid && pickupValid) {
+      const modeParam = params.get("mode");
+      if (modeParam === "private" || modeParam === "route_taxi") {
+        setMode(modeParam);
+      }
+      setStep("choose-ride");
     }
   }, []);
 
