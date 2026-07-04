@@ -15,7 +15,16 @@ import { uploadDriverDocument, removeDriverDocument } from "@/lib/storage";
 import { NativeUnverifiedRedirect } from "@/components/native-unverified-redirect";
 import { LegalConsentGate } from "@/components/legal-consent-gate";
 
-const DRAFT_KEY = "rajlo-driver-onboarding-draft";
+// Prefix used to build a per-user draft key. Keeping drafts scoped to
+// the authenticated Supabase user id is critical: a shared, unscoped
+// key like the old `rajlo-driver-onboarding-draft` meant that any new
+// driver signing up on a browser where a previous applicant had saved
+// a draft got shown the PREVIOUS applicant's name, TRN, phone number
+// etc. as "your restored draft" — leaking PII and pre-filling the wrong
+// person's data into a fresh account. The per-user key isolates drafts.
+const DRAFT_KEY_PREFIX = "rajlo-driver-onboarding-draft";
+const LEGACY_DRAFT_KEY = DRAFT_KEY_PREFIX; // the old unscoped key we now purge on sight
+const draftKeyFor = (uid: string) => `${DRAFT_KEY_PREFIX}:${uid}`;
 
 const STEPS: {
   id: number;
@@ -611,10 +620,27 @@ function DriverOnboardingWizard() {
   };
 
   // ────────── Auto-save draft to localStorage ──────────
-  // Restore on mount (form + step + uploaded file metadata)
+  // Restore on mount ONCE per userId (form + step + uploaded file
+  // metadata). Waits for userId — restoring without it would either
+  // read the wrong user's data or force us back to a shared key.
+  const restoredForUserRef = useRef<string | null>(null);
   useEffect(() => {
+    // Purge the legacy unscoped key so a previous applicant's PII
+    // can't be inherited by a fresh account on this device. Do this
+    // regardless of whether we've resolved userId yet — the legacy
+    // key has no owner so nobody misses it.
     try {
-      const raw = localStorage.getItem(DRAFT_KEY);
+      localStorage.removeItem(LEGACY_DRAFT_KEY);
+    } catch {
+      /* localStorage disabled — nothing to purge */
+    }
+
+    if (!userId) return;
+    if (restoredForUserRef.current === userId) return;
+    restoredForUserRef.current = userId;
+
+    try {
+      const raw = localStorage.getItem(draftKeyFor(userId));
       if (!raw) return;
       const draft = JSON.parse(raw) as {
         form?: typeof EMPTY_FORM;
@@ -647,11 +673,13 @@ function DriverOnboardingWizard() {
     } catch {
       /* corrupted draft — ignore */
     }
-  }, []);
+  }, [userId]);
 
-  // Save on every form/step/files change
+  // Save on every form/step/files change (only after userId resolves —
+  // otherwise we'd have no key to write under).
   useEffect(() => {
     if (done) return;
+    if (!userId) return;
     const isEmpty =
       Object.values(form).every((v) => v === "") &&
       Object.keys(files).length === 0;
@@ -670,18 +698,19 @@ function DriverOnboardingWizard() {
         }
       });
       localStorage.setItem(
-        DRAFT_KEY,
+        draftKeyFor(userId),
         JSON.stringify({ form, step, files: persistableFiles, savedAt: Date.now() }),
       );
       setHasDraft(true);
     } catch {
       /* localStorage full or disabled */
     }
-  }, [form, step, files, done]);
+  }, [form, step, files, done, userId]);
 
   const clearDraft = () => {
+    if (!userId) return;
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(draftKeyFor(userId));
     } catch {
       /* */
     }
