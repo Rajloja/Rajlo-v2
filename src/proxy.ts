@@ -214,8 +214,18 @@ export async function proxy(request: NextRequest) {
   const isAdminPage = path === "/admin" || path.startsWith("/admin/");
   const isAdminApi =
     path === "/api/admin" || path.startsWith("/api/admin/");
-  const isDriverRoute = path.startsWith("/driver") && path !== "/driver-join";
-  const isRiderRoute = path.startsWith("/rider");
+  // Portal path checks are BOUNDED — we match either the bare portal
+  // path OR a subpath under it (with a trailing slash). The old
+  // `startsWith("/driver")` match was too loose: it matched
+  // `/driver-join`, `/driver-jobs-in/kingston`, and any future
+  // /driver-* marketing route, then had to special-case each one back
+  // out via an exact-string exclusion. A trailing slash on the URL
+  // (or Next's request path with a query fragment) then broke that
+  // exclusion and the marketing page got auth-gated → visitor bounced
+  // to /auth/driver/login?next=/driver-join. This form has no such
+  // ambiguity: /driver-anything can never match.
+  const isDriverRoute = path === "/driver" || path.startsWith("/driver/");
+  const isRiderRoute = path === "/rider" || path.startsWith("/rider/");
   const isProtectedPage = isAdminPage || isDriverRoute || isRiderRoute;
 
   // Shared paths bypass auth entirely.

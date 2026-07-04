@@ -89,10 +89,14 @@ export function CookieConsent() {
   useEffect(() => {
     if (isNativeApp()) return; // native app — not a browser-cookie context
     if (readConsent() !== null) return; // already chose — never show again
-    // Defer out of the effect body (avoids a synchronous setState) and
-    // keeps the first paint banner-free until we've read client storage,
-    // so there's no SSR/hydration mismatch.
-    const t = window.setTimeout(() => setShow(true), 0);
+    // Show the banner after a randomised 5–10s delay so it doesn't slam
+    // the visitor the moment the page paints (that reads as forcing a
+    // decision). The randomness keeps every session slightly different
+    // so it doesn't look like a scripted "always at 5s" prompt. If the
+    // visitor navigates away in that window, the cleanup below cancels
+    // the timer and we never mount the banner at all.
+    const delayMs = 5_000 + Math.random() * 5_000;
+    const t = window.setTimeout(() => setShow(true), delayMs);
     return () => window.clearTimeout(t);
   }, []);
 

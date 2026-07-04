@@ -1,5 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "./logo";
+
+/**
+ * Marketing home URL for the Rajlo wordmark shown on auth screens.
+ *
+ * Every portal subdomain (rider./driver./admin.) treats "/" as its own
+ * portal login — the proxy redirects `<portal>.rajlo.com/` to
+ * `/auth/<portal>/login`. So a plain `href="/"` on the auth-screen logo
+ * would loop back to the login page the user is already on. The
+ * expected behaviour is "logo takes me to the Rajlo marketing site" —
+ * so on production portal subdomains we resolve to the absolute apex
+ * URL. On the apex itself and on dev/preview hosts (no subdomains) "/"
+ * already IS the marketing landing, so a relative link is correct.
+ */
+function useMarketingHomeUrl(): string {
+  const [href, setHref] = useState<string>("/");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const host = window.location.hostname;
+    if (/^(rider|driver|admin)\.rajlo\.com$/i.test(host)) {
+      setHref("https://rajlo.com/");
+    }
+  }, []);
+  return href;
+}
 import { ArcWatermark } from "./arc-pattern";
 import {
   PhoneMockup,
@@ -81,6 +105,7 @@ export function AuthShell({
   footer,
 }: AuthShellProps) {
   const { eyebrow, quotes, mockup: Mockup } = AUDIENCE_COPY[audience];
+  const homeHref = useMarketingHomeUrl();
 
   // Staff sign-in is intentionally minimal — no marketing/brand panel,
   // no rotating taglines, no phone mockup. Internal ops users get a
@@ -121,7 +146,7 @@ export function AuthShell({
         />
 
         <FadeUp delay={0.05}>
-          <Logo size="md" variant="white" tagline />
+          <Logo size="md" variant="white" tagline href={homeHref} />
         </FadeUp>
 
         <div className="relative">
@@ -201,11 +226,11 @@ export function AuthShell({
              variant so it reads as the Rajlo wordmark immediately. */}
         {minimal ? (
           <div className="flex justify-center pt-2 md:pt-0">
-            <Logo size="md" tagline />
+            <Logo size="md" tagline href={homeHref} />
           </div>
         ) : (
           <div className="md:hidden">
-            <Logo size="sm" tagline />
+            <Logo size="sm" tagline href={homeHref} />
           </div>
         )}
 
