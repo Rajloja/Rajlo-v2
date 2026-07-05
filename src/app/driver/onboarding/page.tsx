@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Logo } from "@/components/logo";
 import { ArcWatermark } from "@/components/arc-pattern";
 import { Icon, type IconName } from "@/components/icons";
@@ -416,10 +417,15 @@ function DocumentPreviewModal({
   isPdf: boolean;
   onClose: () => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+
   // Escape key + body-scroll lock while the modal is open. Restored to
   // the previous overflow on cleanup so we don't leak the lock across
   // unmounts (e.g. if the driver submits the application while it's up).
+  // `mounted` gates the portal so we don't attempt to render into
+  // document.body during SSR (document doesn't exist there).
   useEffect(() => {
+    setMounted(true);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -432,7 +438,16 @@ function DocumentPreviewModal({
     };
   }, [onClose]);
 
-  return (
+  if (!mounted) return null;
+
+  // Render through a portal to document.body. Without the portal the
+  // modal <div> was a sibling of <li> inside the "Documents ready"
+  // <ul>, which is invalid HTML — some browsers silently drop DOM
+  // children of a <ul> that aren't <li>, which is why "nothing
+  // happened" when the eye button was tapped. The portal lifts the
+  // modal out of every parent stacking / overflow context to sit
+  // directly on document.body.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -492,7 +507,8 @@ function DocumentPreviewModal({
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -800,11 +816,16 @@ function DriverOnboardingWizard() {
         json.documents.forEach((doc) => {
           const localUpload = prev[doc.doc_key];
           if (doc.status === "rejected") {
-            if (localUpload?.path) {
-              merged[doc.doc_key] = localUpload;
-            } else {
-              rejectedDocs.add(doc.doc_key);
-            }
+            // ALWAYS force re-upload for a rejected doc. Previously we
+            // preserved a local upload when one existed, assuming it
+            // was a fresh replacement — but the localStorage draft is
+            // typically the ORIGINAL upload (the one that got rejected),
+            // so keeping it made the wizard render the rejected file
+            // as if still valid. When the driver actually uploads a
+            // replacement via the resubmit flow, that goes through
+            // /api/driver/documents/:key/replace which flips DB status
+            // to "pending" — so the block below picks up the new file.
+            rejectedDocs.add(doc.doc_key);
             return;
           }
           if (doc.file_path && doc.file_name) {
@@ -820,9 +841,25 @@ function DriverOnboardingWizard() {
         });
 
         // setRejectedDocKeys inside setFiles' updater is intentional: we need
-        // the closure access to `prev` to know which rejected docs already
-        // have a local replacement. React batches both updates.
+        // the closure access to `prev` for the pending-check above. React
+        // batches both updates.
         setRejectedDocKeys(rejectedDocs);
+
+        // Jump the wizard to the step that contains the FIRST rejected
+        // doc (lowest step number in DOC_TO_STEP) so the driver lands
+        // exactly where they need to re-upload — not on step 1
+        // (Personal info) which they don't need to touch. Guarded on
+        // editMode + rejectedDocs > 0 so we only fire this in the
+        // resubmission flow.
+        if (editMode && rejectedDocs.size > 0) {
+          const steps = Array.from(rejectedDocs)
+            .map((k) => DOC_TO_STEP[k])
+            .filter((s): s is number => typeof s === "number");
+          if (steps.length > 0) {
+            setStep(Math.min(...steps));
+          }
+        }
+
         return merged;
       });
     } catch {
@@ -862,7 +899,17 @@ function DriverOnboardingWizard() {
         setForm({ ...EMPTY_FORM, ...draft.form });
         setHasDraft(true);
       }
-      if (typeof draft.step === "number" && draft.step >= 1 && draft.step <= STEPS.length) {
+      // In resubmission edit mode, loadResubmissionData is authoritative
+      // for `step` — it jumps to the first rejected doc's step. Restoring
+      // the draft's step here would overwrite that with wherever the
+      // driver was when they last saved (usually step 7 = Review), which
+      // isn't where they need to be for a resubmit.
+      if (
+        !editMode &&
+        typeof draft.step === "number" &&
+        draft.step >= 1 &&
+        draft.step <= STEPS.length
+      ) {
         setStep(draft.step);
       }
       if (draft.files) {
