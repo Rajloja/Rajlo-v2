@@ -275,8 +275,18 @@ export async function proxy(request: NextRequest) {
   // the admin surface.
   const adminAllowed = role === "admin" || role === "safety_officer";
 
-  // ─── Page-level role separation (unchanged behaviour) ───
-  if (isProtectedPage) {
+  // ─── Page-level role separation ───
+  // Anonymous-friendly rider paths (currently just /rider/request)
+  // ALSO bypass the wrong-role check — the booking page renders its
+  // own AnonymousBookingPrompt overlay, which handles both "not signed
+  // in" and "signed in with wrong role" by asking the visitor to sign
+  // in / create a rider account before submitting. A driver who wants
+  // to book a ride for themselves clicking "Book a ride" from the
+  // marketing landing was hitting a dead-end 403 before this.
+  const isAnonymousFriendly =
+    isRiderRoute && ANONYMOUS_FRIENDLY_RIDER_PATHS.has(path);
+
+  if (isProtectedPage && !isAnonymousFriendly) {
     if (
       (isAdminPage && !adminAllowed) ||
       (isDriverRoute && role !== "driver") ||

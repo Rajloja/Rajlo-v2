@@ -133,16 +133,34 @@ export default function RiderRequestPage() {
   // pickup + dropoff + fare estimate) before being asked to sign in.
   //   null  = haven't checked auth yet (suppress overlay during first
   //           paint to avoid flicker)
-  //   true  = visitor is signed out → show AnonymousBookingPrompt
-  //   false = signed in → normal booking flow
+  //   true  = visitor is signed out OR signed in with a non-rider role
+  //           (driver / admin) → show AnonymousBookingPrompt so they
+  //           can sign in with a rider account before booking
+  //   false = signed in as a rider → normal booking flow
   const [isAnonymous, setIsAnonymous] = useState<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
     const supabase = createSupabaseBrowserClient();
-    void supabase.auth.getUser().then(({ data }) => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
       if (cancelled) return;
-      setIsAnonymous(!data.user);
-    });
+      if (!data.user) {
+        setIsAnonymous(true);
+        return;
+      }
+      // Signed in — check the profile role. A driver or admin who
+      // clicked "Book a ride" from the marketing landing should get
+      // the same sign-in-as-rider prompt an anonymous visitor gets,
+      // not be silently allowed to attempt a booking under the wrong
+      // role (which the /api/rider/rides POST would reject anyway).
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+      if (cancelled) return;
+      setIsAnonymous((profile?.role ?? "rider") !== "rider");
+    })();
     return () => {
       cancelled = true;
     };

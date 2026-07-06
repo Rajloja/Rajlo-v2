@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Analytics } from "@vercel/analytics/next";
 import { Icon } from "./icons";
 import { isNativeApp } from "@/lib/native";
@@ -85,10 +86,20 @@ export function ConsentedAnalytics() {
  */
 export function CookieConsent() {
   const [show, setShow] = useState(false);
+  const pathname = usePathname();
+
+  // Suppress on every /legal/* page. Cookie Policy, Privacy Policy,
+  // Terms of Service — anywhere the visitor is actively trying to
+  // read the exact document the banner is about — is off-limits. The
+  // banner appearing on top of the Cookie Policy while the visitor is
+  // trying to read it (the whole reason they clicked the link) is
+  // both a bad UX and defeats the point of having a linkable policy.
+  const isLegalPage = pathname?.startsWith("/legal/") ?? false;
 
   useEffect(() => {
     if (isNativeApp()) return; // native app — not a browser-cookie context
     if (readConsent() !== null) return; // already chose — never show again
+    if (isLegalPage) return; // legal pages get an uninterrupted read
     // Show the banner after a randomised 5–10s delay so it doesn't slam
     // the visitor the moment the page paints (that reads as forcing a
     // decision). The randomness keeps every session slightly different
@@ -98,7 +109,17 @@ export function CookieConsent() {
     const delayMs = 5_000 + Math.random() * 5_000;
     const t = window.setTimeout(() => setShow(true), delayMs);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [isLegalPage]);
+
+  // Belt-and-braces: if the visitor was on a non-legal page when the
+  // 5-10s timer resolved (banner mounted) and THEN navigated to a
+  // /legal/* URL, hide it in-flight. Rare in practice — the timer is
+  // 5-10s and legal-link clicks are usually much faster than that —
+  // but this closes the exact case the user reported (banner still
+  // visible on the Cookie Policy page after clicking through).
+  useEffect(() => {
+    if (isLegalPage && show) setShow(false);
+  }, [isLegalPage, show]);
 
   // Lock page scroll while the consent modal is up so the dimmed page
   // behind it can't be scrolled until the visitor chooses.
