@@ -14,8 +14,10 @@ import { formatJMD } from "@/lib/jamaica";
  *   - Shows BOTH the fare and the current balance so the rider can
  *     see exactly how short they are (and the gap, computed below).
  *   - Two actions: secondary "Not now" closes; primary "Deposit now"
- *     navigates to /rider/wallet?deposit=open which auto-opens the
- *     deposit composer on the wallet page.
+ *     either invokes the `onDeposit` callback (parent handles it —
+ *     typically to open the inline DepositBottomSheet) or, absent a
+ *     callback, falls back to navigating to /rider/wallet?deposit=open
+ *     so surfaces that haven't wired the inline sheet still work.
  *
  * Backdrop click + Esc both close — the dialog is informational, so
  * we don't trap the user inside it.
@@ -25,6 +27,7 @@ export function InsufficientFundsDialog({
   fareJmd,
   balanceJmd,
   onClose,
+  onDeposit,
 }: {
   open: boolean;
   /** Estimated fare for the trip the rider tried to book. */
@@ -32,16 +35,27 @@ export function InsufficientFundsDialog({
   /** Current wallet balance. */
   balanceJmd: number;
   onClose: () => void;
+  /** Optional handler for the primary CTA. When provided, the dialog
+   *  closes itself and delegates the deposit flow to the parent
+   *  (typically to open an inline DepositBottomSheet). When omitted,
+   *  the dialog navigates the rider to /rider/wallet?deposit=open —
+   *  the legacy behaviour, preserved for any surface that hasn't
+   *  wired the inline sheet yet. */
+  onDeposit?: () => void;
 }) {
   const router = useRouter();
   const shortBy = Math.max(0, fareJmd - balanceJmd);
 
   const handleDeposit = () => {
     onClose();
-    // ?deposit=open is the contract the wallet page reads on mount to
-    // pre-expand the deposit composer. Means the rider lands on the
-    // exact action they came for — one tap less than open-wallet →
-    // tap-deposit.
+    if (onDeposit) {
+      // Delegate — parent decides what happens next (e.g. open the
+      // DepositBottomSheet in-place on the request page).
+      onDeposit();
+      return;
+    }
+    // Legacy fallback — take the rider to the wallet page's deposit
+    // composer with ?deposit=open so it auto-expands.
     router.push("/rider/wallet?deposit=open");
   };
 

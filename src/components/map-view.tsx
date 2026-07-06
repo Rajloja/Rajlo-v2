@@ -1557,12 +1557,27 @@ export function MapView({
     if (liveRoute) return;
 
     // Two or more points → ask Google for a road-following route.
-    // Token marker we use to ignore stale responses if the points change
-    // again before the API call resolves.
-    let cancelled = false;
+    // We snapshot the CURRENT route signature and compare it inside
+    // the fetch resolution instead of a plain `cancelled` boolean. Why:
+    // this effect's deps include the `pickup` / `stops` / `dropoff`
+    // object references, so a parent that polls every 10s (e.g. the
+    // admin ride-detail page) hands us new object refs with identical
+    // coord values on every tick. Each tick re-runs the effect, which
+    // fires the cleanup below — and a plain `cancelled = true` in that
+    // cleanup killed every in-flight DirectionsService fetch, so the
+    // polyline never drew until a hard refresh happened to land its
+    // fetch inside a single polling window.
+    //
+    // Same-content re-runs short-circuit above without touching
+    // `lastRouteSignatureRef`, so comparing our snapshot against the
+    // ref at resolution time correctly IGNORES benign re-runs and
+    // only discards results when the coords have genuinely changed.
+    const fetchSignature = signature;
+    const isStale = () =>
+      lastRouteSignatureRef.current !== fetchSignature;
 
     const drawStraightLineFallback = () => {
-      if (cancelled) return;
+      if (isStale()) return;
       polylineRef.current = drawGradientPolyline(
         map,
         points.map((p) => ({ lat: p.place.lat, lng: p.place.lng })),
@@ -1622,7 +1637,7 @@ export function MapView({
         provideRouteAlternatives: waypoints.length === 0,
       })
       .then((response) => {
-        if (cancelled) return;
+        if (isStale()) return;
         const route = pickFastestRoute(response.routes ?? []);
         if (!route) {
           drawStraightLineFallback();
@@ -1649,7 +1664,7 @@ export function MapView({
         }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (isStale()) return;
         // Most common: ZERO_RESULTS for an over-water/un-routable pair, or
         // API not enabled. Surface a straight line so the user still sees
         // *something* connecting their points.
@@ -1658,9 +1673,8 @@ export function MapView({
         drawStraightLineFallback();
       });
 
-    return () => {
-      cancelled = true;
-    };
+    // No cleanup needed — staleness is derived from the signature ref
+    // at resolution time, not from a per-run cancellation flag.
   }, [pickup, stops, dropoff, liveRoute, mapReady, suppressStaticRoute, focusRadiusKm, mapBottomInsetPx]);
 
   // Floating ETA bubbles above the pickup + dropoff pins. Lives in its

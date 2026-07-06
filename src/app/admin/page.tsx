@@ -248,7 +248,7 @@ export default function AdminOperationsPage() {
       </FadeUp>
 
       {/* ─── KPI strip ─── */}
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile
           eyebrow="Rides today"
           value={loading ? "—" : String(stats?.rides.today ?? 0)}
@@ -311,7 +311,7 @@ export default function AdminOperationsPage() {
             <p className="font-secondary mb-3 text-[10px] font-bold uppercase tracking-wider text-rajlo-red">
               Needs attention
             </p>
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
               <QueueChip
                 count={stats.queue.docsPending}
                 label="Pending TA documents"
@@ -345,7 +345,7 @@ export default function AdminOperationsPage() {
 
       {/* ─── Charts row — business analytics, senior tiers only ─── */}
       {canViewAnalytics && (
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Volume area chart — spans 2 columns */}
         <FadeUp delay={0.08}>
           <div className="rounded-2xl border border-line bg-surface p-5 lg:col-span-2">
@@ -423,7 +423,7 @@ export default function AdminOperationsPage() {
 
       {/* ─── Bottom row: Top drivers + parishes + activity ─── */}
       <div
-        className={`grid gap-5 ${canViewAnalytics ? "lg:grid-cols-3" : ""}`}
+        className={`grid grid-cols-1 gap-5 ${canViewAnalytics ? "lg:grid-cols-3" : ""}`}
       >
         {canViewAnalytics && (
         <FadeUp delay={0.12}>

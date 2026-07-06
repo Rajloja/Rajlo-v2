@@ -179,13 +179,21 @@ export async function GET(request: NextRequest) {
     listQuery = listQuery.eq("direction", directionFilter);
   }
 
-  // Search matches either a user name OR a transaction id prefix. The
-  // admin usually pastes the short 8-char id shown in the UI (e.g.
-  // "dc9ac4b3") — we ilike-prefix so partial matches work. `%` and `_`
-  // in the query would be interpreted as SQL wildcards, so strip them
-  // to keep the ilike safe.
+  // Search matches either a user name OR a transaction id. The admin
+  // usually pastes either the 8-char short id shown in the UI (e.g.
+  // "dc9ac4b3") or the full 36-char UUID.
+  //
+  // Why NOT `id.ilike.<val>%` — wallet_transactions.id is a UUID
+  // column, and PostgreSQL has no ILIKE operator for uuid. PostgREST
+  // returns an error and the whole request 500s. So we do the ID
+  // lookup via UUID-safe operators (`eq` for a full UUID, a bounded
+  // id-only fetch + client-side prefix match for a partial), then
+  // union the resulting IDs with the name-match user_ids via two
+  // `.in.(...)` clauses inside `.or(...)` — both of which ARE safe
+  // for UUID columns.
   if (q) {
-    const safe = q.replace(/[%_]/g, "");
+    const safe = q.replace(/[%_]/g, "").trim();
+
     const { data: matchProfiles } = await supabase
       .from("profiles")
       .select("id")
@@ -193,10 +201,62 @@ export async function GET(request: NextRequest) {
       .limit(50);
     const nameUserIds = (matchProfiles ?? []).map((p) => p.id);
 
-    const orClauses: string[] = [`id.ilike.${safe}%`];
+    const looksLikeFullUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        safe,
+      );
+    const looksLikeIdPrefix = /^[0-9a-f-]{4,}$/i.test(safe);
+
+    let idMatchIds: string[] = [];
+    if (looksLikeFullUuid) {
+      // Full UUID — exact eq. Confirm it actually exists so the .in()
+      // clause below has a valid id to filter by; if it doesn't exist
+      // we'll fall through to name matches only.
+      const { data: idHit } = await supabase
+        .from("wallet_transactions")
+        .select("id")
+        .eq("id", safe)
+        .limit(1);
+      idMatchIds = ((idHit ?? []) as { id: string }[]).map((r) => r.id);
+    } else if (looksLikeIdPrefix) {
+      // Partial UUID prefix (e.g. "dc9ac4b3"). Fetch a bounded window
+      // of recent-transaction ids and filter client-side — this is
+      // O(500) once per search, cheaper than a Postgres text-cast
+      // scan, and covers the "admin pastes the short id off the UI"
+      // path since that id is almost always a recent transaction.
+      const { data: recent } = await supabase
+        .from("wallet_transactions")
+        .select("id, created_at")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      const prefix = safe.toLowerCase();
+      idMatchIds = ((recent ?? []) as { id: string }[])
+        .filter((r) => r.id.toLowerCase().startsWith(prefix))
+        .map((r) => r.id);
+    }
+
+    const orClauses: string[] = [];
+    if (idMatchIds.length > 0) {
+      orClauses.push(`id.in.(${idMatchIds.join(",")})`);
+    }
     if (nameUserIds.length > 0) {
       orClauses.push(`user_id.in.(${nameUserIds.join(",")})`);
     }
+
+    if (orClauses.length === 0) {
+      // No name or id match anywhere — short-circuit with an empty
+      // page. Sending an empty `.or()` to PostgREST would 400 anyway.
+      return NextResponse.json({
+        totals,
+        dailySeries,
+        topSpenders,
+        topEarners,
+        transactions: [],
+        pagination: { hasMore: false },
+        usersById: {},
+      });
+    }
+
     listQuery = listQuery.or(orClauses.join(","));
   }
 

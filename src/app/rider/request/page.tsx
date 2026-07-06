@@ -17,6 +17,7 @@ import { useIsMobile } from "@/lib/use-is-mobile";
 import { MapPinPicker } from "@/components/map-pin-picker";
 import { SavedPlaceChips } from "@/components/saved-place-chips";
 import { Skeleton } from "@/components/skeleton";
+import { DepositBottomSheet } from "@/components/deposit-bottom-sheet";
 import { InsufficientFundsDialog } from "@/components/insufficient-funds-dialog";
 import { loadGoogleMaps } from "@/lib/google-maps";
 import { useFleet } from "@/lib/use-fleet";
@@ -120,6 +121,15 @@ export default function RiderRequestPage() {
   // breakdown in the modal — set together from the API response so
   // the dialog doesn't have to fetch the balance again.
   const [insufficientFunds, setInsufficientFunds] = useState<{
+    fareJmd: number;
+    balanceJmd: number;
+  } | null>(null);
+  // Separate flag for the inline DepositBottomSheet so the center
+  // dialog can close while the sheet takes over. `depositSheetContext`
+  // is a snapshot of the same fare/balance figures — persisted so the
+  // sheet can still show the short-by strip after the center dialog
+  // has already cleared `insufficientFunds`.
+  const [depositSheetContext, setDepositSheetContext] = useState<{
     fareJmd: number;
     balanceJmd: number;
   } | null>(null);
@@ -2282,15 +2292,29 @@ export default function RiderRequestPage() {
       )}
 
       {/* Insufficient-funds modal — fires when the booking API returns
-         402. CTA inside the modal navigates to /rider/wallet?deposit=open
-         so the rider lands directly on the deposit composer. Rendered
-         at the page root so the modal sits above both mobile + desktop
-         layouts. */}
+         402. Two-step surface:
+           1. InsufficientFundsDialog (centre modal) — informs the
+              rider of the shortfall with a clear breakdown.
+           2. On "Deposit now" the dialog closes and hands off to the
+              DepositBottomSheet, which lets the rider top up inline
+              without leaving the request page. */}
       <InsufficientFundsDialog
         open={insufficientFunds != null}
         fareJmd={insufficientFunds?.fareJmd ?? 0}
         balanceJmd={insufficientFunds?.balanceJmd ?? 0}
         onClose={() => setInsufficientFunds(null)}
+        onDeposit={() => {
+          // Snapshot the context BEFORE clearing insufficientFunds so
+          // the bottom sheet still knows the fare + balance to render
+          // its "Short by" strip and pre-fill the amount.
+          if (insufficientFunds) setDepositSheetContext(insufficientFunds);
+          setInsufficientFunds(null);
+        }}
+      />
+      <DepositBottomSheet
+        open={depositSheetContext != null}
+        onClose={() => setDepositSheetContext(null)}
+        context={depositSheetContext ?? undefined}
       />
 
       {/* Anonymous-visitor login prompt. Renders only when we've

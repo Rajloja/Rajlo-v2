@@ -6,10 +6,16 @@ import { logAdminAction, requireAdmin } from "@/lib/admin-auth";
  * POST /api/admin/users     (invite a new user)
  *
  * GET supports search + filter:
- *   ?role=rider|driver|admin    (default = all)
- *   ?status=active|deactivated  (only meaningful for drivers)
- *   ?q=<search>                 (matches name / email / external_id)
+ *   ?role=rider|driver|admin        (default = all)
+ *   ?status=active|deactivated|deleted (only meaningful for drivers /
+ *                                       soft-deleted users)
+ *   ?q=<search>                     (matches name / email / external_id)
  *   ?limit=50 (max 200) ?offset=0
+ *
+ * DELETED USERS: retained (anonymised) in the profiles table for the
+ * audit / safety / finance trail — see /api/admin/users/[id] DELETE.
+ * They are HIDDEN from the default list so day-to-day admin work isn't
+ * cluttered by them; pass ?status=deleted to see them explicitly.
  *
  * The list merges three data sources:
  *   - profiles (full_name, role)
@@ -234,16 +240,26 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  // Apply driver-only status filter post-hoc (cheap; small page).
-  if (status === "active") {
-    users = users.filter((u) => {
-      if (u.role !== "driver") return true;
-      return u.driverActivated === true && !u.deactivatedAt && !u.banned;
-    });
-  } else if (status === "deactivated") {
-    users = users.filter(
-      (u) => u.banned || (u.role === "driver" && u.deactivatedAt),
-    );
+  // Apply status filter post-hoc (cheap; small page).
+  if (status === "deleted") {
+    // Explicit "show me the audit-trail retention" mode.
+    users = users.filter((u) => u.deletedAt !== null);
+  } else {
+    // Every other status filter (all / active / deactivated) hides
+    // soft-deleted users. They live in the DB for the audit trail —
+    // but they don't belong in the day-to-day admin list.
+    users = users.filter((u) => u.deletedAt === null);
+
+    if (status === "active") {
+      users = users.filter((u) => {
+        if (u.role !== "driver") return true;
+        return u.driverActivated === true && !u.deactivatedAt && !u.banned;
+      });
+    } else if (status === "deactivated") {
+      users = users.filter(
+        (u) => u.banned || (u.role === "driver" && u.deactivatedAt),
+      );
+    }
   }
 
   // Apply email/external-id search post-hoc since we couldn't ILIKE

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 import { useActiveCall } from "./active-call-provider";
 
@@ -41,6 +42,12 @@ export function CallButton({
   const { active, setActive } = useActiveCall();
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Gate the portal call so it only fires on the client — createPortal
+  // reads document.body which doesn't exist during SSR.
+  const [portalReady, setPortalReady] = useState(false);
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   const start = async () => {
     setError(null);
@@ -112,11 +119,46 @@ export function CallButton({
         <Icon name="phone" className="h-4 w-4" />
         {starting ? "Calling…" : label}
       </button>
-      {error && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
-          {error}
-        </p>
-      )}
+      {/* Error toast — rendered through a body-portal at z-[110] so it
+          sits above the chat sheet (z-70) and the in-call sheet (z-100).
+          The previous inline paragraph was placed inside the chat
+          header's flex row, where it got clipped by the fixed-height
+          black bar and the caller never saw why the call didn't
+          connect (voice_calls_unavailable, trip_not_callable, etc.).
+          A top-of-viewport pill guarantees visibility regardless of
+          where CallButton is embedded. */}
+      {portalReady &&
+        error &&
+        createPortal(
+          <div
+            role="alert"
+            aria-live="polite"
+            className="pointer-events-none fixed inset-x-0 top-4 z-[110] flex justify-center px-4"
+          >
+            <div className="pointer-events-auto flex max-w-sm items-start gap-3 rounded-2xl border border-rajlo-red/30 bg-white px-4 py-3 text-sm shadow-2xl ring-1 ring-black/5">
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-soft text-rajlo-red">
+                <Icon name="phone-off" className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-foreground">
+                  Couldn&rsquo;t start the call
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                  {error}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Dismiss"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-soft hover:text-foreground"
+              >
+                <Icon name="x" className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

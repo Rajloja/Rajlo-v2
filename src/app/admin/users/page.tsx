@@ -49,7 +49,7 @@ type UserRow = {
 // Role filter is hardcoded — drivers live on /admin/drivers now,
 // admins are separate. This page is rider-focused only.
 type RoleFilter = "rider";
-type StatusFilter = "all" | "active" | "deactivated";
+type StatusFilter = "all" | "active" | "deactivated" | "deleted";
 
 export default function AdminUsersPage() {
   const [roleFilter] = useState<RoleFilter>("rider");
@@ -292,6 +292,7 @@ export default function AdminUsersPage() {
                   { key: "all", label: "Any status" },
                   { key: "active", label: "Active" },
                   { key: "deactivated", label: "Deactivated" },
+                  { key: "deleted", label: "Deleted" },
                 ] as const
               ).map((t) => (
                 <button
@@ -527,33 +528,43 @@ function UserRowItem({
         >
           View
         </Link>
-        {isDeactivated ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDeactivate(user, true)}
-            className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[11px] font-extrabold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-          >
-            Reactivate
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDeactivate(user, false)}
-            className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-extrabold text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
-          >
-            Deactivate
-          </button>
+        {/* Deleted users are terminal — no reactivate, no re-delete. The
+            audit trail is intact; the only meaningful action left is
+            "View" (which opens the anonymised profile + retained
+            rides/wallet/audit history). Suppress Deactivate + Delete
+            so the admin isn't offered actions that would either fail
+            or make no sense. */}
+        {!user.deletedAt && (
+          <>
+            {isDeactivated ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onDeactivate(user, true)}
+                className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[11px] font-extrabold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+              >
+                Reactivate
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onDeactivate(user, false)}
+                className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-extrabold text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
+              >
+                Deactivate
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDelete(user)}
+              className="rounded-full border border-rajlo-red/30 bg-primary-soft px-3 py-1.5 text-[11px] font-extrabold text-rajlo-red transition-colors hover:bg-rajlo-red hover:text-white disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </>
         )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onDelete(user)}
-          className="rounded-full border border-rajlo-red/30 bg-primary-soft px-3 py-1.5 text-[11px] font-extrabold text-rajlo-red transition-colors hover:bg-rajlo-red hover:text-white disabled:opacity-50"
-        >
-          Delete
-        </button>
       </div>
     </li>
   );

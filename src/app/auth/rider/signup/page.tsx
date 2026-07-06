@@ -15,6 +15,7 @@ import {
 import { LegalConsent } from "@/components/legal-consent";
 import { documentsForRole } from "@/lib/legal-documents";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { shortenLink } from "@/lib/short-link";
 
 const RIDER_LEGAL_DOCS = documentsForRole("rider");
 
@@ -91,11 +92,18 @@ function RiderSignupInner() {
     }
 
     const supabase = createSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signUp({
+    // Build the callback URL, then run it through the Rajlo shortener
+    // so the confirmation email's `redirect_to` blob is under 40 chars
+    // instead of 1 KB of double-encoded trip context. The helper is a
+    // no-op if the URL is already short, and gracefully falls back to
+    // the raw URL when the shortener is unreachable.
+    const rawCallback = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    const emailRedirectTo = await shortenLink(rawCallback);
+    const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        emailRedirectTo,
         data: {
           full_name: name,
           phone,
@@ -107,6 +115,24 @@ function RiderSignupInner() {
     if (authError) {
       setError(authError.message);
       setIsLoading(false);
+      return;
+    }
+
+    // Instant-session path — Supabase project has "Confirm email" off,
+    // so signUp returned a live session and the visitor is already
+    // signed in. Drop them back on the exact URL they were on before
+    // (typically /rider/request with a fresh trip pre-filled from the
+    // landing widget) so their first ride is one tap away — no email
+    // round-trip, no context loss.
+    //
+    // The confirmation email STILL fires in the background as a nudge
+    // + password-recovery anchor (the "Verify your email" banner on
+    // the dashboard picks up the slack until they click it). If the
+    // Supabase project ever flips back to requiring confirmation,
+    // signUp returns `session: null` and the old check-email screen
+    // takes over unchanged.
+    if (data.session) {
+      window.location.assign(next);
       return;
     }
 

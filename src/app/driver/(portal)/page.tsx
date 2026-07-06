@@ -420,10 +420,25 @@ export default function DriverHomePage() {
   /* ─── Auto-offline on location revoke ───
    *
    * Once online, watch for the user disabling location at the OS
-   * level. If permission flips to "denied" mid-session, drop them
-   * offline immediately so they don't keep receiving ride pings
-   * they can't fulfil. They'll see the error message and have to
-   * fix permission before going online again. */
+   * level. If permission flips to "denied" mid-session AND we're
+   * NOT mid-trip, drop them offline immediately so they don't keep
+   * receiving ride pings they can't fulfil.
+   *
+   * Critical: skip the auto-offline entirely if `hasActiveTrip` is
+   * true. The driver in full-screen navigation on Android can trigger
+   * a spurious Permissions API "denied" event during WebView state
+   * changes / quick-settings interactions / background suspension —
+   * yanking the driver offline mid-trip strands the rider, freezes
+   * the live map, and forces support to scramble. `/api/driver/online`
+   * already refuses to flip offline during an active trip (returns
+   * 409), so a call here would fail server-side anyway — but the
+   * client's optimistic setOnlineState(false) still flashes the
+   * toggle to OFF for the duration of the round-trip. Bypassing the
+   * whole branch means the toggle never moves at all.
+   *
+   * <DriverOnlinePresence> already surfaces a location-off modal in
+   * this case, so the driver is still informed and prompted to fix
+   * the permission — we just don't touch the online flag. */
   React.useEffect(() => {
     if (online !== true) return;
     if (typeof navigator === "undefined" || !("permissions" in navigator))
@@ -432,12 +447,21 @@ export default function DriverHomePage() {
     let permStatus: PermissionStatus | null = null;
     const onChange = () => {
       if (!permStatus || cancelled) return;
-      if (permStatus.state === "denied") {
+      if (permStatus.state !== "denied") return;
+      if (hasActiveTrip) {
+        // Mid-trip permission flicker (Android quick-settings, full-
+        // screen nav mode, WebView state change). Surface the message
+        // so the driver knows to re-enable location, but DO NOT touch
+        // the online toggle — the trip must keep going.
         setOnlineError(
-          "Location was turned off — you've been taken offline. Re-enable location, then go online again.",
+          "Location was turned off — please re-enable it to keep your rider's live map working. You'll stay online for this trip.",
         );
-        void setOnline(false);
+        return;
       }
+      setOnlineError(
+        "Location was turned off — you've been taken offline. Re-enable location, then go online again.",
+      );
+      void setOnline(false);
     };
     void (navigator.permissions as Permissions)
       .query({ name: "geolocation" as PermissionName })
@@ -451,7 +475,7 @@ export default function DriverHomePage() {
       cancelled = true;
       permStatus?.removeEventListener("change", onChange);
     };
-  }, [online, setOnline]);
+  }, [online, setOnline, hasActiveTrip]);
 
   // Fleet broadcasting now lives in <DriverOnlinePresence /> mounted
   // at the portal layout so the GPS stream stays alive across every

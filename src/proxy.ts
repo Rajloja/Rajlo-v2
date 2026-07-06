@@ -43,6 +43,7 @@ const SHARED_PATH_PREFIXES = [
   "/support",
   "/403",
   "/trip/", // public trip-share link
+  "/l/", // Rajlo short-link redirect surface
 ];
 
 /** Rider-portal pages that anonymous visitors are allowed to load.
