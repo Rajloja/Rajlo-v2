@@ -1,9 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { shortenLink } from "@/lib/short-link";
+
+/**
+ * Pathnames the nudge skips. These are the "map takes the whole
+ * viewport, a bottom-sheet handles the interaction" pages where a
+ * top-of-viewport amber banner would either overlap the map controls
+ * or be hidden behind the RiderBottomSheet's own overlay. Riders on
+ * these pages are mid-task and shouldn't be nudged; they'll see it
+ * next time they land on a content page (dashboard, wallet, history).
+ */
+const SUPPRESSED_PATHS = new Set<string>([
+  "/rider/request",
+  "/rider/live-trip",
+]);
+const SUPPRESSED_PREFIXES: string[] = [
+  "/rider/route-taxi/live",
+  "/rider/route-taxi/hail",
+];
 
 /**
  * EmailVerifyNudge — soft banner shown to signed-in users whose email
@@ -45,12 +63,22 @@ export function EmailVerifyNudge({
 }: {
   callbackNext?: string;
 } = {}) {
+  const pathname = usePathname();
   const [status, setStatus] = useState<Status>("loading");
   const [email, setEmail] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
   const [lastResendAt, setLastResendAt] = useState<number>(0);
+
+  // Route suppression check — done in render (not in the fetch effect)
+  // so the component reacts to client-side navigation. A rider who
+  // dismisses the sheet on the map page and pushes to /rider/wallet
+  // needs the banner to appear there without a remount.
+  const suppressed =
+    pathname != null &&
+    (SUPPRESSED_PATHS.has(pathname) ||
+      SUPPRESSED_PREFIXES.some((p) => pathname.startsWith(p)));
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +187,7 @@ export function EmailVerifyNudge({
     }
   };
 
+  if (suppressed) return null;
   if (status !== "unverified") return null;
 
   return (

@@ -5,6 +5,7 @@ import { LegalConsentGate } from "@/components/legal-consent-gate";
 import { DeviceFingerprintBeacon } from "@/components/device-fingerprint-beacon";
 import { IncomingCallProvider } from "@/components/incoming-call-provider";
 import { ActiveCallProvider } from "@/components/active-call-provider";
+import { EmailVerifyNudge } from "@/components/email-verify-nudge";
 import { riderNav } from "@/lib/mock-data";
 
 export default function RiderLayout({ children }: { children: React.ReactNode }) {
@@ -29,6 +30,15 @@ export default function RiderLayout({ children }: { children: React.ReactNode })
         {/* Full-screen ringer for incoming calls. Accepts route
            into the ActiveCallProvider on tap. */}
         <IncomingCallProvider />
+        {/* Soft "verify your email" banner. Rider signup no longer
+           gates on confirmation, so this is the ONLY nudge riders
+           see. Component self-suppresses on bottom-sheet routes
+           (/rider/request, /rider/live-trip, route-taxi live pages)
+           and while email_confirmed_at is populated — so it's safe
+           to mount unconditionally at the layout level. */}
+        <div className="mb-3 empty:hidden">
+          <EmailVerifyNudge />
+        </div>
         {children}
       </ActiveCallProvider>
     </PortalLayout>
