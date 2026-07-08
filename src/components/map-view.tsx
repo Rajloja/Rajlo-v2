@@ -1527,7 +1527,20 @@ export function MapView({
     // them) instead of a zoomed-out cross-island route overview. Used on
     // the `requested` view. Skipped once a liveRoute is engaged (a driver
     // has accepted; the route view takes over).
-    if (focusRadiusKm && focusRadiusKm > 0 && pickup && !liveRoute) {
+    //
+    // Focus mode DOES its own fitBounds and records the overview frame,
+    // but no longer short-circuits the rest of this effect — the
+    // DirectionsService call further down still fires so the pickup→
+    // dropoff polyline draws even while we're framed on the pickup
+    // area. Previously this branch `return`ed, so a rider staring at
+    // "Finding your driver" saw only two disconnected pins and no
+    // route line at all. The fitBounds guards in the .then() +
+    // drawStraightLineFallback (below) skip the second fitBounds so
+    // the focus framing isn't yanked back to a full route overview.
+    const usingFocusFrame = Boolean(
+      focusRadiusKm && focusRadiusKm > 0 && pickup && !liveRoute,
+    );
+    if (usingFocusFrame && pickup && focusRadiusKm) {
       const latDelta = focusRadiusKm / 111; // ~111 km per degree of lat
       const lngDelta =
         focusRadiusKm /
@@ -1543,7 +1556,7 @@ export function MapView({
         left: 56,
       });
       recordOverviewFrame(map, bounds);
-      return;
+      // NOTE: no `return` — keep going so the polyline still draws.
     }
 
     if (points.length === 1) {
@@ -1583,6 +1596,11 @@ export function MapView({
         points.map((p) => ({ lat: p.place.lat, lng: p.place.lng })),
         5,
       );
+      // Focus mode has already framed the pickup area — don't yank the
+      // camera out to fit the whole A→B extent. Just leave the polyline
+      // draped across the framed region (it'll extend off-screen and
+      // the rider can pan if they want to see the far end).
+      if (usingFocusFrame) return;
       const bounds = new google.maps.LatLngBounds();
       points.forEach((p) =>
         bounds.extend({ lat: p.place.lat, lng: p.place.lng }),
@@ -1652,6 +1670,11 @@ export function MapView({
           fullRoutePath(route),
           5,
         );
+        // Focus mode already framed the pickup area — keep that framing
+        // instead of re-fitting to the whole A→B route (which would zoom
+        // WAY out and hide the nearby-driver detail the rider is
+        // actually looking at while waiting).
+        if (usingFocusFrame) return;
         // Use the route's own bounds — tighter than fitting to stops alone.
         if (route.bounds) {
           map.fitBounds(route.bounds, {

@@ -114,10 +114,21 @@ export const metadata: Metadata = {
     title: `${SITE_NAME} — ${SITE_TAGLINE}`,
     description: SITE_DESCRIPTION,
   },
-  // Next.js auto-detects `app/icon.png` + `app/apple-icon.png` and
-  // attaches them as <link rel="icon"> + <link rel="apple-touch-icon">
-  // so we don't need to declare them here. The manifest link drives
-  // PWA install (which iOS web push needs).
+  // Next.js auto-attaches `app/icon.svg` + `app/apple-icon.svg`, BUT we
+  // ALSO declare them explicitly + add a PNG variant. Reason: Google's
+  // favicon crawler for search results specifically wants at least one
+  // icon whose `sizes` is a multiple of 48 (48, 96, 144, 192…). It
+  // will happily skip an SVG-only site and fall back to the generic
+  // globe. Providing /favicon.png at 192×192 gives it what it needs
+  // AND the SVG stays as the crisp browser-tab render.
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.png", type: "image/png", sizes: "192x192" },
+    ],
+    apple: [{ url: "/apple-icon.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/favicon.png", type: "image/png" }],
+  },
   manifest: "/manifest.webmanifest",
   // themeColor lives on the `viewport` export below — it moved out
   // of `metadata` in Next.js 14+ and Next will warn about it here.

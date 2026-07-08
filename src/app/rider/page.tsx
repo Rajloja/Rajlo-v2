@@ -15,6 +15,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { formatJMD } from "@/lib/jamaica";
 import { useT } from "@/lib/i18n";
 import { RiderWeatherStrip } from "@/components/rider-weather-strip";
+import { EmailVerifyNudge } from "@/components/email-verify-nudge";
 
 /**
  * Rider home / dashboard. All sections are backed by real endpoints —
@@ -258,6 +259,12 @@ export default function RiderDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Verify-your-email nudge — soft amber banner shown only when the
+         signed-in user's email_confirmed_at is still null. Hides itself
+         the moment they click through, and is per-session dismissable
+         so it doesn't heckle a rider who deferred the ask. */}
+      <EmailVerifyNudge />
+
       {/* ============== HERO ============== */}
       <FadeUp>
         <section className="relative overflow-hidden rounded-3xl bg-rajlo-black p-7 text-white shadow-xl shadow-rajlo-black/30 md:p-10">

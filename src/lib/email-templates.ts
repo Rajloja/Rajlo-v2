@@ -28,10 +28,28 @@ const JMD = (n: number) =>
 const firstNameOf = (full?: string | null) =>
   (full ?? "").trim().split(/\s+/)[0] || "there";
 
+/**
+ * Format an ISO / Date value for a transactional email in Jamaica local
+ * time — 100% of Rajlo's audience is in Jamaica, so the times riders
+ * and drivers see in their receipts should read the wall-clock time
+ * they actually rode.
+ *
+ * `timeZone: "America/Jamaica"` is CRITICAL. Without it, this runs on
+ * whatever timezone the render environment defaults to — Vercel
+ * serverless is currently UTC (or EDT / UTC-4 during US summer,
+ * depending on the runtime region), which produced the 1-hour-off
+ * completion times riders were seeing on their trip receipts.
+ *
+ * The `en-JM` locale controls the LANGUAGE ("Mon", "Jul", 12h clock),
+ * never the timezone — that's a separate config that always has to be
+ * pinned explicitly. Jamaica has no DST so `America/Jamaica` is a hard
+ * UTC-5 all year, no seasonal drift to worry about.
+ */
 const fmtDateTime = (iso?: string | Date | null) => {
   if (!iso) return "";
   const d = typeof iso === "string" ? new Date(iso) : iso;
   return d.toLocaleString("en-JM", {
+    timeZone: "America/Jamaica",
     weekday: "short",
     month: "short",
     day: "numeric",

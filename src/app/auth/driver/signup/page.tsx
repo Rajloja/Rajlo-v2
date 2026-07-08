@@ -89,7 +89,7 @@ export default function DriverSignupPage() {
     }
 
     const supabase = createSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signUp({
+    const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -109,6 +109,16 @@ export default function DriverSignupPage() {
     if (authError) {
       setError(authError.message);
       setIsLoading(false);
+      return;
+    }
+
+    // Instant-session path — same shape as the rider signup. When the
+    // Supabase project has "Confirm email" off, signUp returns a live
+    // session and we can drop the driver straight onto the onboarding
+    // wizard instead of parking them on a "check your inbox" screen
+    // they'd otherwise ignore during a long verification queue.
+    if (data.session) {
+      window.location.assign("/driver/onboarding");
       return;
     }
 

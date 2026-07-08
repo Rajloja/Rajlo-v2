@@ -23,6 +23,11 @@ function tripLabel(
 ): string {
   const date = at
     ? new Date(at).toLocaleDateString("en-JM", {
+        // Pin to Jamaica — server-rendered, so absent this the string
+        // would fall back to the server's local timezone (Vercel = UTC
+        // or EDT depending on runtime region), shifting the date by 4-5
+        // hours around midnight and mis-labelling late-evening trips.
+        timeZone: "America/Jamaica",
         month: "short",
         day: "numeric",
       })

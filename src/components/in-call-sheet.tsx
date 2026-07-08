@@ -92,6 +92,16 @@ export function InCallSheet({
   const localTrackRef = useRef<LocalAudioTrack | null>(null);
   const acceptedAtRef = useRef<number | null>(null);
   const remoteGraceTimerRef = useRef<number | null>(null);
+  // True once we've successfully made it past the initial connect and
+  // into ringing / in_call. Used by the Disconnected handler to decide
+  // whether a disconnect event is a "the call is over, close the sheet"
+  // signal (call was actually in flight) or a "the call never connected"
+  // signal (LiveKit rejected the token, room hadn't been provisioned,
+  // network died during connect). In the latter case we keep the sheet
+  // mounted with the error state so the caller can SEE what happened
+  // instead of the sheet vanishing silently — that "flash and disappear"
+  // is the exact failure the user has been reporting.
+  const wasLiveRef = useRef(false);
   // Caller-side ringback tone — plays in a 2s-on/4s-off loop while
   // we're waiting for the callee to pick up. Lives in a ref so the
   // various lifecycle hooks (remote join, hangup, unmount) can stop
@@ -139,6 +149,7 @@ export function InCallSheet({
           playConnectTone();
           void haptics.medium();
         }
+        wasLiveRef.current = true;
         setPhase("in_call");
       }
     };
@@ -163,7 +174,25 @@ export function InCallSheet({
     const onDisconnected = (reason?: unknown) => {
       log("room disconnected", reason);
       setPhase("ended");
-      onClose();
+      // Only tear the sheet down when the call was actually live at
+      // some point (ringing on the caller side counts as live — we've
+      // hit the LiveKit room successfully). Otherwise, this Disconnected
+      // event is signalling a FAILED CONNECT — bad token, room not
+      // provisioned, network blip during connect — and calling
+      // onClose() here makes the sheet vanish silently. Keeping it
+      // mounted lets the user actually see the "ended" state + the
+      // error string, and dismiss it via the hangup button.
+      if (wasLiveRef.current) {
+        onClose();
+      } else if (!error) {
+        // Set a generic error so the "ended" state has something to
+        // display instead of the fallback "Call ended" (which is what
+        // the subtitle renders when `error` is null — misleading for
+        // "we couldn't even connect" cases).
+        setError(
+          "We couldn't reach the call. Check your connection or try again.",
+        );
+      }
     };
 
     const onReconnecting = () => log("room reconnecting…");
@@ -339,6 +368,10 @@ export function InCallSheet({
             }
           }
         }
+        // We hit the LiveKit room. Anything after this point is
+        // "live" — a subsequent Disconnected is a real end-of-call
+        // and should tear the sheet down normally.
+        wasLiveRef.current = true;
         if (room.remoteParticipants.size > 0) {
           acceptedAtRef.current = Date.now();
           setPhase("in_call");
