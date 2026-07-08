@@ -142,6 +142,14 @@ export default function RiderRequestPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("deposit") !== "success") return;
     setDepositSuccessBanner(true);
+    // Jump straight to the Summary step. The rider left this page from
+    // Summary (the Book button lives there — that's what triggered the
+    // 402 → deposit flow), so landing them back on Choose-your-ride
+    // (which is what the fast-forward URL detection would otherwise
+    // do) forces an unnecessary "tap Next" to get back to Book. This
+    // runs BEFORE any of the other mount effects settle so the initial
+    // paint already has step="summary".
+    setStep("summary");
     // Strip the deposit params from the URL so a page refresh or a
     // deep-link share doesn't re-trigger the banner. Keep every other
     // query param intact (trip context lives in `to_name` / `mode` /
@@ -265,9 +273,30 @@ export default function RiderRequestPage() {
         }
         if (!rideRes.ok) return;
         const json = (await rideRes.json()) as {
-          ride: { id: string } | null;
+          ride: { id: string; status: string } | null;
         };
-        if (!cancelled && json.ride) {
+        // Only redirect to /rider/live-trip for a ride that's ACTUALLY
+        // in flight. The API deliberately also returns rides that were
+        // just auto-cancelled with `expired_no_driver` for a 60-second
+        // window so the live-trip page can render the "no driver
+        // found" screen — but that same window was previously trapping
+        // a rider who had just failed a match and immediately tried to
+        // book a fresh ride from the landing page: request page
+        // mounts → API returns the just-expired ride → this redirect
+        // fires → rider sees "no driver found" again instead of the
+        // empty request form. Filtering on live statuses only lets
+        // them start over cleanly.
+        const IN_FLIGHT_STATUSES = new Set([
+          "requested",
+          "accepted",
+          "arrived",
+          "in_progress",
+        ]);
+        if (
+          !cancelled &&
+          json.ride &&
+          IN_FLIGHT_STATUSES.has(json.ride.status)
+        ) {
           router.replace("/rider/live-trip");
           return;
         }
@@ -2344,12 +2373,15 @@ export default function RiderRequestPage() {
       {/* Post-deposit success toast — set when the payment-gateway
          callback landed the rider back here with `?deposit=success`.
          Sits top-of-viewport at z-[85] (above the map + sheet, below
-         the in-call sheet at z-[100]). Auto-dismisses after 8s. */}
+         the in-call sheet at z-[100]).
+         `top-[72px]` clears the sticky Rajlo navbar (56px + a small
+         breathing gap) so the banner is fully visible instead of
+         being hidden behind the header. Auto-dismisses after 8s. */}
       {depositSuccessBanner && (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 top-4 z-[85] flex justify-center px-4"
+          className="pointer-events-none fixed inset-x-0 top-[72px] z-[85] flex justify-center px-4"
         >
           <div className="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 shadow-2xl ring-1 ring-emerald-200/60">
             <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-500 text-white">
