@@ -94,7 +94,20 @@ export function DepositBottomSheet({
       const res = await fetch("/api/wallet/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amountJmd }),
+        body: JSON.stringify({
+          amountJmd,
+          // Send the rider back to this exact URL after the gateway
+          // finishes — same page they opened the sheet from, complete
+          // with the trip context query params. The API validates it's
+          // a same-origin path before letting it through, so this
+          // can't be used to sneak in an off-origin redirect.
+          returnTo:
+            typeof window !== "undefined"
+              ? window.location.pathname +
+                window.location.search +
+                window.location.hash
+              : undefined,
+        }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;

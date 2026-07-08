@@ -107,7 +107,17 @@ export function RiderBottomSheet({
     html.style.overflow = "hidden";
     html.style.overscrollBehavior = "none";
     body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
+    // Pin the body to top: 0, NOT -scrollY. The RiderBottomSheet fills
+    // the viewport — there's no "scrolled page underneath" to preserve.
+    // Locking at `-scrollY` was silently hiding the navbar whenever the
+    // effect captured a non-zero scrollY (which happens on iOS Safari
+    // when the bottom URL bar reveals/hides during a route change, and
+    // when Next 16's soft-nav scroll restoration races the mount). The
+    // original scroll position is still remembered in the closure so
+    // the unmount restore below sends the visitor back to where they
+    // were on the previous page — the only surface where preserving
+    // scroll matters.
+    body.style.top = "0";
     body.style.left = "0";
     body.style.right = "0";
     body.style.width = "100%";

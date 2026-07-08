@@ -156,14 +156,46 @@ function redirectToWalletReturn(
   errorMsg?: string,
 ) {
   // After IPN POSTs we just return JSON for the gateway to ack;
-  // browser-redirect callers (GET) get sent back to the wallet UI
-  // with a status flag in the URL so the page can show a toast.
+  // browser-redirect callers (GET) get sent back into the app.
   if (request.method === "POST") {
     return NextResponse.json({ ok: true, status });
   }
-  const url = new URL("/rider/wallet", request.url);
-  url.searchParams.set("deposit_id", depositId);
-  url.searchParams.set("deposit_status", status);
-  if (errorMsg) url.searchParams.set("deposit_error", errorMsg.slice(0, 200));
-  return NextResponse.redirect(url);
+
+  // Prefer the caller-supplied `return_to` (e.g. /rider/request with
+  // trip params intact) so a rider who topped up mid-booking lands
+  // right back where they were — the exact "faster booking" flow the
+  // deposit sheet was built for. Fall back to /rider/wallet if it's
+  // absent or turns out to be off-origin (validated by URL parsing
+  // against the request origin, mirroring the deposit-start guard).
+  const requestOrigin = new URL(request.url).origin;
+  const rawReturnTo = request.nextUrl.searchParams.get("return_to");
+  let target: URL;
+  if (rawReturnTo) {
+    try {
+      const resolved = new URL(rawReturnTo, requestOrigin);
+      target =
+        resolved.origin === requestOrigin
+          ? resolved
+          : new URL("/rider/wallet", request.url);
+    } catch {
+      target = new URL("/rider/wallet", request.url);
+    }
+  } else {
+    target = new URL("/rider/wallet", request.url);
+  }
+
+  // Success flag reads simply as `deposit=success` on the request page
+  // (which is where the sheet was opened from). The wallet-page fall-
+  // back still reads the legacy `deposit_status`/`deposit_id` params it
+  // already knows about, so nothing over there breaks.
+  target.searchParams.set("deposit_id", depositId);
+  target.searchParams.set("deposit_status", status);
+  target.searchParams.set(
+    "deposit",
+    status === "completed" ? "success" : status,
+  );
+  if (errorMsg) {
+    target.searchParams.set("deposit_error", errorMsg.slice(0, 200));
+  }
+  return NextResponse.redirect(target);
 }

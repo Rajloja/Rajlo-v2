@@ -133,6 +133,30 @@ export default function RiderRequestPage() {
     fareJmd: number;
     balanceJmd: number;
   } | null>(null);
+  // Post-deposit success toast. Set on mount when we detect the
+  // callback landed the rider back here with `?deposit=success`. Auto-
+  // dismisses after 8s but the rider can nudge it away sooner.
+  const [depositSuccessBanner, setDepositSuccessBanner] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("deposit") !== "success") return;
+    setDepositSuccessBanner(true);
+    // Strip the deposit params from the URL so a page refresh or a
+    // deep-link share doesn't re-trigger the banner. Keep every other
+    // query param intact (trip context lives in `to_name` / `mode` /
+    // etc. and MUST survive so the rider's booking form stays filled).
+    params.delete("deposit");
+    params.delete("deposit_id");
+    params.delete("deposit_status");
+    params.delete("deposit_error");
+    const remaining = params.toString();
+    const cleanUrl =
+      window.location.pathname + (remaining ? `?${remaining}` : "");
+    window.history.replaceState({}, "", cleanUrl);
+    const t = window.setTimeout(() => setDepositSuccessBanner(false), 8_000);
+    return () => window.clearTimeout(t);
+  }, []);
   // While we're checking on mount whether the user already has an active
   // ride (and should be sent to the live-trip view instead of the booking
   // form), hide the form to avoid a flash of "book a ride" UI.
@@ -2316,6 +2340,42 @@ export default function RiderRequestPage() {
         onClose={() => setDepositSheetContext(null)}
         context={depositSheetContext ?? undefined}
       />
+
+      {/* Post-deposit success toast — set when the payment-gateway
+         callback landed the rider back here with `?deposit=success`.
+         Sits top-of-viewport at z-[85] (above the map + sheet, below
+         the in-call sheet at z-[100]). Auto-dismisses after 8s. */}
+      {depositSuccessBanner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed inset-x-0 top-4 z-[85] flex justify-center px-4"
+        >
+          <div className="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 shadow-2xl ring-1 ring-emerald-200/60">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-500 text-white">
+              <Icon name="check-circle" className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold leading-tight text-emerald-950">
+                Wallet funded — you can book this ride
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-emerald-900/85">
+                Your deposit landed. Tap{" "}
+                <span className="font-bold">Book ride</span> below to
+                confirm the trip.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDepositSuccessBanner(false)}
+              aria-label="Dismiss"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-emerald-900 transition-colors hover:bg-emerald-200"
+            >
+              <Icon name="x" className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Anonymous-visitor login prompt. Renders only when we've
          confirmed the visitor isn't signed in. The page stays

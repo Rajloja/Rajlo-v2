@@ -21,7 +21,34 @@ import { initiateDeposit } from "@/lib/wipay";
 const MIN_DEPOSIT = 100;
 const MAX_DEPOSIT = 200_000;
 
-type Body = { amountJmd?: unknown };
+type Body = { amountJmd?: unknown; returnTo?: unknown };
+
+/**
+ * Guard against open-redirect abuse via the deposit flow. Only accept
+ * a `returnTo` that lands on the SAME origin the request came from —
+ * anything cross-origin is silently dropped. Also strip anything that
+ * isn't a plausible in-app path (no scheme, no host) so a caller can't
+ * sneak a full https URL past by URL-encoding it. The callback later
+ * appends its own success flag; we keep query strings intact so a
+ * request-page deep link with trip context survives the round trip.
+ */
+function safeReturnPath(raw: unknown, requestOrigin: string): string | null {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 2048) {
+    return null;
+  }
+  try {
+    // Resolve against the request origin. If `raw` was absolute-with-
+    // a-different-origin, the URL constructor's origin field will
+    // disagree with requestOrigin and we drop it.
+    const resolved = new URL(raw, requestOrigin);
+    if (resolved.origin !== requestOrigin) return null;
+    // Return the path+search+hash. The callback rebuilds the URL
+    // against the request origin, so we never store the full URL.
+    return resolved.pathname + resolved.search + resolved.hash;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(request: Request) {
   const auth = await createSupabaseAuthServerClient();
@@ -80,12 +107,14 @@ export async function POST(request: Request) {
   }
 
   const origin = new URL(request.url).origin;
+  const returnTo = safeReturnPath(body.returnTo, origin);
   const init = await initiateDeposit({
     depositId: deposit.id,
     amountJmd: amount,
     email: user.email,
     customerName,
     origin,
+    returnTo,
   });
 
   if (!init.ok) {

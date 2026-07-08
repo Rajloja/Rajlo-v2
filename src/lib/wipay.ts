@@ -39,6 +39,13 @@ export type InitiateDepositArgs = {
   customerName: string;
   /** Origin (https://app.rajlo.com) — used to build the return URL. */
   origin: string;
+  /** Where the user should land AFTER the callback completes. Piggy-
+   *  backed onto the return_url as `?return_to=<encoded>` so the
+   *  callback can bounce them straight back to the surface they
+   *  started from (e.g. /rider/request with trip context intact)
+   *  rather than the wallet page. Only same-origin paths are honoured
+   *  — the deposit API validates before passing it in. */
+  returnTo?: string | null;
 };
 
 export type InitiateDepositResult =
@@ -57,10 +64,13 @@ export async function initiateDeposit(
   // user's wallet exactly as if WiPay had paid out, so the wallet
   // UI works end-to-end during dev / demo.
   if (!apiKey || !accountNumber) {
-    const simulatedRedirect = `${args.origin}/api/wallet/deposit/callback?deposit_id=${encodeURIComponent(args.depositId)}&simulate=success`;
+    const cb = new URL(`${args.origin}/api/wallet/deposit/callback`);
+    cb.searchParams.set("deposit_id", args.depositId);
+    cb.searchParams.set("simulate", "success");
+    if (args.returnTo) cb.searchParams.set("return_to", args.returnTo);
     return {
       ok: true,
-      redirectUrl: simulatedRedirect,
+      redirectUrl: cb.toString(),
       gatewayReference: `stub-${args.depositId}`,
     };
   }
