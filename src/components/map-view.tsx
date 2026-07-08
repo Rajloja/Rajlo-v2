@@ -507,6 +507,7 @@ export function MapView({
   recenterToken = 0,
   floatingControlsBottomPx = 0,
   mapBottomInsetPx = 0,
+  mapTopInsetPx = 0,
   className = "h-72 w-full",
 }: {
   pickup: Place | null;
@@ -627,6 +628,15 @@ export function MapView({
    *  upward so the focus point stays inside the VISIBLE map area
    *  instead of being hidden behind the overlay. Defaults to 0. */
   mapBottomInsetPx?: number;
+  /** Pixels of map at the top that are offscreen or occluded (used by
+   *  RiderBottomSheet's map offset trick — the map container extends
+   *  ABOVE the visible area by the collapsed sheet height so setCenter
+   *  targets the visible middle without a panBy dance, and this prop
+   *  tells fitBounds to skip that offscreen top slice too). Without
+   *  this, fitBounds fits into the whole (much taller) container and
+   *  the resulting zoom is far too tight — only the middle third of
+   *  the route ends up inside the visible slice. Defaults to 0. */
+  mapTopInsetPx?: number;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1550,7 +1560,7 @@ export function MapView({
         { lat: pickup.lat + latDelta, lng: pickup.lng + lngDelta },
       );
       map.fitBounds(bounds, {
-        top: 56,
+        top: 56 + mapTopInsetPx,
         right: 56,
         bottom: 56 + mapBottomInsetPx,
         left: 56,
@@ -1606,7 +1616,7 @@ export function MapView({
         bounds.extend({ lat: p.place.lat, lng: p.place.lng }),
       );
       map.fitBounds(bounds, {
-        top: 56,
+        top: 56 + mapTopInsetPx,
         right: 56,
         bottom: 56 + mapBottomInsetPx,
         left: 56,
@@ -1678,7 +1688,7 @@ export function MapView({
         // Use the route's own bounds — tighter than fitting to stops alone.
         if (route.bounds) {
           map.fitBounds(route.bounds, {
-            top: 56,
+            top: 56 + mapTopInsetPx,
             right: 56,
             bottom: 56 + mapBottomInsetPx,
             left: 56,

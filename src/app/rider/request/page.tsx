@@ -2235,13 +2235,12 @@ export default function RiderRequestPage() {
               alighting={journeyMapOverlays.alighting}
               corridorLines={journeyMapOverlays.corridorLines}
               floatingControlsBottomPx={floatingControlsOffset}
-              // No fitBounds inset — the RiderBottomSheet's map
-              // container is positioned with a `top: -snaps.collapsed`
-              // offset so the map's geometric center already coincides
-              // with the visible map area's center. Adding bottom
-              // padding here would double-compensate and push the
-              // route's fitBounds center off the visible area entirely.
-              mapBottomInsetPx={0}
+              // fitBounds insets are injected by RiderBottomSheet via
+              // cloneElement (mapTopInsetPx + mapBottomInsetPx both set
+              // to snaps.collapsed) so the fit lands in the VISIBLE map
+              // slice — not the taller offset container. The sheet's
+              // offset trick keeps setCenter correct on its own; the
+              // insets only affect fitBounds camera moves.
               suppressStaticRoute={
                 mode === "route_taxi" &&
                 !!journeyMapOverlays.corridorLines &&

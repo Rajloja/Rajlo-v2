@@ -1,10 +1,13 @@
 "use client";
 
 import {
+  cloneElement,
+  isValidElement,
   useCallback,
   useEffect,
   useRef,
   useState,
+  type ReactElement,
   type ReactNode,
   type TouchEvent as ReactTouchEvent,
 } from "react";
@@ -498,7 +501,29 @@ export function RiderBottomSheet({
               height: `${wrapperHeight + snaps.collapsed}px`,
             }}
           >
-            {map}
+            {/* Inject the offset amount into the map as top+bottom
+                fitBounds insets. The map container is `snaps.collapsed`
+                pixels TALLER than the visible slice on EACH side (the
+                top edge is offscreen above the wrapper, the bottom edge
+                is behind the sheet). Google Maps' fitBounds fits into
+                the CONTAINER's dimensions, not the visible slice, so
+                without this correction fitBounds zooms in ~1.5 levels
+                too tight — the route ends up cropped to just its
+                middle third. The prop is opt-in and defaults to 0, so
+                MapView instances that don't get this treatment (desktop
+                sidebar, admin surfaces) keep their existing behaviour. */}
+            {isValidElement(map)
+              ? cloneElement(
+                  map as ReactElement<{
+                    mapTopInsetPx?: number;
+                    mapBottomInsetPx?: number;
+                  }>,
+                  {
+                    mapTopInsetPx: snaps.collapsed,
+                    mapBottomInsetPx: snaps.collapsed,
+                  },
+                )
+              : map}
           </div>
         ) : (
           <div className="absolute inset-0">{map}</div>
