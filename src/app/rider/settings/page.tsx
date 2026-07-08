@@ -37,6 +37,12 @@ type ProfileInfo = {
   fullName: string;
   email: string;
   avatarUrl: string | null;
+  /** Sourced from `auth.users.email_confirmed_at` — populated on
+   *  signup only when the user clicks the confirmation link (or when
+   *  the Confirm-email toggle is on in Supabase, which we leave OFF for
+   *  launch). Drives the trust badge under the profile row so it can't
+   *  claim "verified" for a rider who never actually confirmed. */
+  emailVerified: boolean;
 };
 
 /** Server-shape of the preferences row (snake_case to match DB columns). */
@@ -140,6 +146,7 @@ export default function RiderSettingsPage() {
         // verified TA selfie for drivers). Falls back to OAuth raw
         // metadata only if the endpoint is unreachable.
         avatarUrl: avatarRes?.avatarUrl ?? metaAvatar,
+        emailVerified: Boolean(user?.email_confirmed_at),
       });
       if (prefsRes) {
         const wire = fromServer(prefsRes.preferences);
@@ -348,10 +355,19 @@ export default function RiderSettingsPage() {
                   <Skeleton className="h-3 w-48" rounded="md" />
                 </div>
               )}
-              <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                <Icon name="shield-check" className="h-3 w-3" />
-                Verified email
-              </p>
+              {profile ? (
+                profile.emailVerified ? (
+                  <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                    <Icon name="shield-check" className="h-3 w-3" />
+                    Verified email
+                  </p>
+                ) : (
+                  <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                    <Icon name="alert-triangle" className="h-3 w-3" />
+                    Email not verified
+                  </p>
+                )
+              ) : null}
             </div>
             <Link
               href="/rider/profile"
