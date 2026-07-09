@@ -107,25 +107,14 @@ export function LegalConsent({
         {heading}
       </p>
 
-      {/* The explicit consent checkbox — inline so it's reachable
-          without scrolling. */}
-      <label className="mt-2.5 flex cursor-pointer items-start gap-3 rounded-xl border border-rajlo-red/30 bg-primary-soft/40 p-3 sm:p-3.5">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-          className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border-line accent-rajlo-red focus:ring-2 focus:ring-rajlo-red/20"
-        />
-        <span className="min-w-0 text-xs font-semibold leading-relaxed">
-          I have read, understood, and agree to be legally bound by RAJLO&apos;s{" "}
-          {count} {count === 1 ? "policy" : "policies"} — and I consent to
-          background GPS location, automatic wallet charges, OTP verification,
-          and to RAJLO recording this acceptance.
-        </span>
-      </label>
-
-      {/* Opens the policy detail in a portal modal (see component
-          doc-comment for why a modal, not an inline expander). */}
+      {/* Review comes FIRST — a visitor can't honestly tick "I have
+          read, understood, and agree" until they've had the chance to
+          read. Displaying the checkbox above the review CTA implicitly
+          reversed that order, which reads as "check this box, then
+          maybe review if you feel like it." Legally the click still
+          counted, but the ergonomics were wrong. Opens the policy detail
+          in a portal modal (see component doc-comment for why a modal,
+          not an inline expander). */}
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -140,6 +129,25 @@ export function LegalConsent({
           className="h-4 w-4 shrink-0 text-muted"
         />
       </button>
+
+      {/* The explicit consent checkbox — inline so it's reachable
+          without scrolling, and sits BELOW the review button so the
+          natural top-to-bottom reading order is
+          "review → agree → submit". */}
+      <label className="mt-2.5 flex cursor-pointer items-start gap-3 rounded-xl border border-rajlo-red/30 bg-primary-soft/40 p-3 sm:p-3.5">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border-line accent-rajlo-red focus:ring-2 focus:ring-rajlo-red/20"
+        />
+        <span className="min-w-0 text-xs font-semibold leading-relaxed">
+          I have read, understood, and agree to be legally bound by RAJLO&apos;s{" "}
+          {count} {count === 1 ? "policy" : "policies"} — and I consent to
+          background GPS location, automatic wallet charges, OTP verification,
+          and to RAJLO recording this acceptance.
+        </span>
+      </label>
 
       {open && mounted
         ? createPortal(

@@ -105,10 +105,53 @@ export function CookieConsent() {
     // decision). The randomness keeps every session slightly different
     // so it doesn't look like a scripted "always at 5s" prompt. If the
     // visitor navigates away in that window, the cleanup below cancels
-    // the timer and we never mount the banner at all.
+    // whichever timer is currently scheduled and we never mount the
+    // banner at all.
     const delayMs = 5_000 + Math.random() * 5_000;
-    const t = window.setTimeout(() => setShow(true), delayMs);
-    return () => window.clearTimeout(t);
+    // Tracked with `let` so cleanup can clear WHICHEVER timer is
+    // currently outstanding — the initial 5–10s delay OR the
+    // 300ms keyboard-close buffer that may replace it below.
+    let timer: number | null = null;
+
+    const reveal = () => {
+      // Keyboard-first-then-banner UX. If the visitor is actively
+      // typing (pickup / dropoff on the landing page is the case Raj
+      // flagged), the iOS keyboard covers the bottom of the viewport
+      // — dropping the consent banner in behind it means the visitor
+      // sees a dimmed page with autocomplete chips still floating and
+      // no clear indication anything's changed. Blur the field first,
+      // let iOS finish its ~250ms keyboard-close animation, THEN show
+      // the banner so it lands on a clean, un-covered viewport.
+      //
+      // `document.activeElement` is null on some edge cases (SSR, no
+      // focus, focus on <body>). The instanceof checks tell us the
+      // focus is on a real text field; readonly / disabled inputs also
+      // satisfy instanceof but don't open the keyboard, so at worst we
+      // add a harmless 300ms wait — no visual regression.
+      const active =
+        typeof document !== "undefined"
+          ? (document.activeElement as HTMLElement | null)
+          : null;
+      const isTextField =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        Boolean(active?.isContentEditable);
+      if (isTextField && active) {
+        active.blur();
+        // 320ms comfortably clears iOS Safari's 250-280ms keyboard
+        // slide-down; slightly longer than the native animation so
+        // visualViewport has fully settled to full height before the
+        // banner's fixed-bottom layout kicks in — no jitter.
+        timer = window.setTimeout(() => setShow(true), 320);
+      } else {
+        setShow(true);
+      }
+    };
+
+    timer = window.setTimeout(reveal, delayMs);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [isLegalPage]);
 
   // Belt-and-braces: if the visitor was on a non-legal page when the

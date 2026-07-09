@@ -214,3 +214,159 @@ export const DEFAULT_COUNTRY: Country = COUNTRIES[0]; // Jamaica
 export function findCountry(code: string): Country {
   return COUNTRIES.find((c) => c.code === code) ?? DEFAULT_COUNTRY;
 }
+
+/**
+ * Per-country phone number metadata used by AuthPhoneField (spacing,
+ * length validation, placeholder). Kept as a SEPARATE lookup (not fields
+ * on `Country`) so the primary COUNTRIES table stays pure data — the
+ * format table is opinionated (each country needs its national number
+ * plan researched) and I've only populated the entries that Rajlo
+ * actually needs: Jamaica + the countries a Jamaican rider or their
+ * diaspora is realistically going to sign up from.
+ *
+ * `nsn` is the National Significant Number length (digits AFTER the
+ * dial code), either exact or a range for countries with variable-length
+ * numbering plans (Germany, Brazil, etc.).
+ *
+ * `template` is a spacing template — `#` marks a digit slot, everything
+ * else is inserted verbatim. e.g. `"### ### ####"` for +1-region 10-digit
+ * numbers renders 876 555 0123.
+ *
+ * Countries NOT in this table fall through to a generic path: no length
+ * validation, generic placeholder from the caller, no reformatting. That
+ * matches the previous behaviour for every country — we only *add*
+ * strictness for the countries we know.
+ */
+export type PhoneFormat = {
+  nsn: number | { min: number; max: number };
+  template: string;
+};
+
+const PHONE_FORMATS: Record<string, PhoneFormat> = {
+  // NANP (North American Numbering Plan) — every +1 country uses the
+  // same 10-digit "### ### ####" layout, so they're all populated the
+  // same way. Not just US/CA — the Caribbean +1 territories (JM/BS/BB/
+  // TT/etc.) share the same plan.
+  JM: { nsn: 10, template: "### ### ####" },
+  US: { nsn: 10, template: "### ### ####" },
+  CA: { nsn: 10, template: "### ### ####" },
+  BS: { nsn: 10, template: "### ### ####" },
+  BB: { nsn: 10, template: "### ### ####" },
+  TT: { nsn: 10, template: "### ### ####" },
+  DO: { nsn: 10, template: "### ### ####" },
+  PR: { nsn: 10, template: "### ### ####" },
+  AG: { nsn: 10, template: "### ### ####" },
+  GD: { nsn: 10, template: "### ### ####" },
+  LC: { nsn: 10, template: "### ### ####" },
+  VC: { nsn: 10, template: "### ### ####" },
+  KN: { nsn: 10, template: "### ### ####" },
+  DM: { nsn: 10, template: "### ### ####" },
+  // UK — mobiles are 10 digits after the +44 (leading `0` dropped).
+  // "7911 123456" style: 4-6 split.
+  GB: { nsn: 10, template: "#### ######" },
+  // Ireland mobile is 9 digits after +353 (leading 0 dropped).
+  IE: { nsn: 9, template: "## ### ####" },
+  // Common diaspora + tourist source countries.
+  NG: { nsn: 10, template: "### ### ####" },
+  GH: { nsn: 9, template: "## ### ####" },
+  KE: { nsn: 9, template: "### ### ###" },
+  ZA: { nsn: 9, template: "## ### ####" },
+  IN: { nsn: 10, template: "##### #####" },
+  AU: { nsn: 9, template: "### ### ###" },
+  NZ: { nsn: 9, template: "## ### ####" },
+  DE: { nsn: { min: 10, max: 11 }, template: "### #######" },
+  FR: { nsn: 9, template: "# ## ## ## ##" },
+  ES: { nsn: 9, template: "### ### ###" },
+  IT: { nsn: 10, template: "### ### ####" },
+  NL: { nsn: 9, template: "# ## ## ## ##" },
+  BR: { nsn: { min: 10, max: 11 }, template: "## #####-####" },
+  MX: { nsn: 10, template: "### ### ####" },
+  CN: { nsn: 11, template: "### #### ####" },
+  JP: { nsn: 10, template: "## #### ####" },
+  KR: { nsn: { min: 9, max: 10 }, template: "## #### ####" },
+  PH: { nsn: 10, template: "### ### ####" },
+  ID: { nsn: { min: 9, max: 12 }, template: "### ### ####" },
+  SG: { nsn: 8, template: "#### ####" },
+  MY: { nsn: { min: 9, max: 10 }, template: "## ### ####" },
+  HK: { nsn: 8, template: "#### ####" },
+  AE: { nsn: 9, template: "## ### ####" },
+  SA: { nsn: 9, template: "## ### ####" },
+  EG: { nsn: 10, template: "### ### ####" },
+  TR: { nsn: 10, template: "### ### ####" },
+};
+
+export function getPhoneFormat(country: Country): PhoneFormat | null {
+  return PHONE_FORMATS[country.code] ?? null;
+}
+
+/** Min/max National Significant Number length for `country`. Returns
+ *  null for countries without a registered format — callers should
+ *  treat that as "any length ≥ 4 acceptable" (loose validation). */
+export function nsnLengthRange(
+  country: Country,
+): { min: number; max: number } | null {
+  const f = PHONE_FORMATS[country.code];
+  if (!f) return null;
+  return typeof f.nsn === "number"
+    ? { min: f.nsn, max: f.nsn }
+    : f.nsn;
+}
+
+/** Cap length used to trim the input as the user types. Falls back to
+ *  E.164's max (15 digits) for unknown countries so we don't silently
+ *  cut off a valid number just because we don't recognise the plan. */
+export function maxNsnLength(country: Country): number {
+  return nsnLengthRange(country)?.max ?? 15;
+}
+
+/** Apply `country`'s spacing template to a raw digits string. Extra
+ *  digits beyond the template's `#` slots are appended without spacing
+ *  (defensive — the input cap should prevent this, but if it happens we
+ *  don't want to drop characters silently). Digits shorter than the
+ *  template just render whatever's typed so far — no phantom spaces
+ *  hanging off the end. Countries without a format return raw digits. */
+export function formatNSN(country: Country, digits: string): string {
+  const format = PHONE_FORMATS[country.code];
+  if (!format) return digits;
+  let out = "";
+  let di = 0;
+  for (
+    let ti = 0;
+    ti < format.template.length && di < digits.length;
+    ti++
+  ) {
+    if (format.template[ti] === "#") {
+      out += digits[di++];
+    } else {
+      out += format.template[ti];
+    }
+  }
+  if (di < digits.length) out += digits.slice(di);
+  return out;
+}
+
+/** Placeholder shown in the input for a given country. We render the
+ *  template with `#` characters instead of example digits — visually
+ *  communicates "N digit slots with THIS spacing pattern" without
+ *  implying a specific-looking real number the visitor might mistake
+ *  for a required prefix. Returns null for unknown countries so the
+ *  caller can fall back to whatever generic placeholder it wants. */
+export function phonePlaceholder(country: Country): string | null {
+  return PHONE_FORMATS[country.code]?.template ?? null;
+}
+
+export type PhoneValidity = "empty" | "short" | "long" | "ok";
+
+/** Validate a raw-digits NSN against `country`'s format. */
+export function validatePhoneDigits(
+  country: Country,
+  digits: string,
+): PhoneValidity {
+  if (digits.length === 0) return "empty";
+  const range = nsnLengthRange(country);
+  // Unknown-format countries: only reject truly implausible short input.
+  if (!range) return digits.length >= 4 ? "ok" : "short";
+  if (digits.length < range.min) return "short";
+  if (digits.length > range.max) return "long";
+  return "ok";
+}

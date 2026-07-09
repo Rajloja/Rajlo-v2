@@ -32,7 +32,16 @@ import {
   ComplianceScreen,
 } from "./phone-mockup";
 import { FadeUp, FloatY, Stagger, StaggerItem, Typewriter } from "./anim";
-import { COUNTRIES, DEFAULT_COUNTRY, type Country } from "@/lib/countries";
+import {
+  COUNTRIES,
+  DEFAULT_COUNTRY,
+  formatNSN,
+  maxNsnLength,
+  nsnLengthRange,
+  phonePlaceholder,
+  validatePhoneDigits,
+  type Country,
+} from "@/lib/countries";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type AuthShellProps = {
@@ -393,18 +402,61 @@ export function AuthPhoneField({
   defaultCountry?: Country;
 }) {
   const [country, setCountry] = useState<Country>(defaultCountry);
+  // Raw digits ONLY — spacing/dashes from the country template are
+  // rendered by formatNSN() at display time so `digits` stays cleanly
+  // machine-comparable and the onChange payload stays `${dial}${digits}`.
   const [digits, setDigits] = useState(() => {
     if (value.startsWith(defaultCountry.dial)) {
       return value.slice(defaultCountry.dial.length).replace(/\D/g, "");
     }
     return value.replace(/\D/g, "");
   });
+  // Whether the visitor has interacted with the field. We only surface
+  // the "too short / too long" error AFTER they've either blurred it or
+  // typed enough characters to plausibly be done — nagging someone with
+  // "wrong length" the moment they type the first digit is hostile UX.
+  const [touched, setTouched] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const update = (c: Country, d: string) => {
+    // Trim to the country's max NSN length so we don't render extra
+    // digits the format template can't accommodate. On a country
+    // change with existing digits, this may DROP trailing digits if
+    // the visitor switched to a country with a shorter numbering plan
+    // — that's fine, they'll re-enter what's actually correct for
+    // their new country.
+    const capped = d.slice(0, maxNsnLength(c));
     setCountry(c);
-    setDigits(d);
-    onChange(`${c.dial}${d}`);
+    setDigits(capped);
+    onChange(`${c.dial}${capped}`);
   };
+
+  // Compute validity + placeholder from the country. Placeholder always
+  // uses the country's template when known ("### ### ####" for JM/US/CA
+  // etc.) — the prop-supplied string is the fallback for countries
+  // without a registered format.
+  const validity = validatePhoneDigits(country, digits);
+  const range = nsnLengthRange(country);
+  const derivedPlaceholder = phonePlaceholder(country);
+  const activePlaceholder = derivedPlaceholder ?? placeholder;
+
+  // "Too short / too long" error text. Only shown when the visitor has
+  // touched the field AND typed at least one digit (empty state is
+  // handled by the parent form's own required check).
+  let errorText: string | null = null;
+  if (touched && digits.length > 0 && range) {
+    if (validity === "short") {
+      const need = range.min - digits.length;
+      errorText =
+        range.min === range.max
+          ? `Enter ${range.min} digits (${need} more to go).`
+          : `Enter at least ${range.min} digits (${need} more).`;
+    } else if (validity === "long") {
+      errorText = `Too many digits — ${country.name} numbers are ${
+        range.min === range.max ? range.min : `${range.min}–${range.max}`
+      } digits.`;
+    }
+  }
 
   return (
     <StaggerItem>
@@ -413,20 +465,62 @@ export function AuthPhoneField({
         <div className="flex gap-2">
           <CountryPicker
             selected={country}
-            onChange={(c) => update(c, digits)}
+            onChange={(c) => {
+              update(c, digits);
+              // Auto-focus the number input after the visitor picks a
+              // country. Fires in a rAF so the picker's own state
+              // updates (setOpen(false) + setSearch("")) finish their
+              // teardown first — mobile browsers can drop a
+              // programmatic focus() call if it lands mid-unmount of
+              // the previously-focused element (the picker's search
+              // box). Also flips `touched` so the picker acting as a
+              // "commit" gesture makes any format error immediately
+              // visible against the newly-selected country.
+              requestAnimationFrame(() => {
+                inputRef.current?.focus();
+              });
+              setTouched(true);
+            }}
           />
           <input
+            ref={inputRef}
             type="tel"
-            value={digits}
-            onChange={(e) =>
-              update(country, e.target.value.replace(/[^\d\s-]/g, ""))
-            }
-            placeholder={placeholder}
+            // Formatted display value — the raw digits get run through
+            // the country's template on every render, so the visitor
+            // sees "876 555 0123" (JM) or "555 123 4567" (US) as they
+            // type. Unknown-format countries fall through to raw
+            // digits, which is what the field did before.
+            value={formatNSN(country, digits)}
+            onChange={(e) => {
+              // Strip everything that isn't a digit — the visitor's
+              // browser may auto-insert dashes / spaces (iOS
+              // suggests formatted phone numbers), but we only care
+              // about the underlying digits.
+              const raw = e.target.value.replace(/\D/g, "");
+              update(country, raw);
+            }}
+            onBlur={() => setTouched(true)}
+            placeholder={activePlaceholder}
+            inputMode="tel"
             autoComplete="tel-national"
             required={required}
-            className="w-full min-w-0 flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition-all focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
+            aria-invalid={errorText !== null}
+            aria-describedby={errorText ? "phone-error" : undefined}
+            className={`w-full min-w-0 flex-1 rounded-xl border bg-surface px-4 py-3 text-sm outline-none transition-all focus:ring-2 ${
+              errorText
+                ? "border-rajlo-red/70 focus:border-rajlo-red focus:ring-rajlo-red/25"
+                : "border-line focus:border-rajlo-red focus:ring-rajlo-red/15"
+            }`}
           />
         </div>
+        {errorText && (
+          <p
+            id="phone-error"
+            className="mt-1.5 text-xs font-semibold text-rajlo-red"
+          >
+            {errorText}
+          </p>
+        )}
       </label>
     </StaggerItem>
   );
@@ -615,6 +709,39 @@ export function GoogleAuthButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Un-stick "Redirecting…" when the visitor comes back from the OAuth
+  // page without completing (usually a back-tap). Supabase's OAuth call
+  // triggers an in-tab navigation to Google — we deliberately never
+  // reset `loading` in handleClick's success path because there's
+  // nothing to render (the tab is about to unmount). But iOS Safari and
+  // most modern browsers RESTORE the page from BFCache on back-nav,
+  // React state included, so `loading` stays true and the button stays
+  // disabled with "Redirecting…" — the exact bug Raj reported. We
+  // listen for two independent signals so either kind of "returned to
+  // this page" resets the button:
+  //   - pageshow with persisted=true → BFCache restore (iOS Safari back)
+  //   - visibilitychange → covers cases where the OAuth surface was a
+  //     popup / SFSafariViewController the visitor dismissed without
+  //     a page navigation ever happening
+  useEffect(() => {
+    const reset = () => setLoading(false);
+    const onPageShow = (e: PageTransitionEvent) => {
+      // On a fresh navigation `pageshow` also fires but `persisted` is
+      // false and the component just mounted, so setLoading(false) is
+      // a no-op anyway. Gating on persisted keeps the intent explicit.
+      if (e.persisted) reset();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reset();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const handleClick = async () => {
     setLoading(true);
     setError(null);
@@ -688,6 +815,27 @@ export function AppleAuthButton({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Same BFCache-restore + return-to-tab handling as GoogleAuthButton —
+  // without this, an aborted Apple flow leaves the button stuck on
+  // "Redirecting…" and the visitor can't retry without a full refresh.
+  // Hook is declared BEFORE the feature-flag return so React's hook
+  // order stays stable across renders regardless of the env flag.
+  useEffect(() => {
+    const reset = () => setLoading(false);
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) reset();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reset();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   // Hidden until Apple Sign In is wired up end-to-end: the Apple
   // Services ID configured at developer.apple.com AND the Apple
