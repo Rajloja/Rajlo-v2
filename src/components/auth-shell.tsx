@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Logo } from "./logo";
 
 /**
@@ -417,6 +417,16 @@ export function AuthPhoneField({
   // "wrong length" the moment they type the first digit is hostile UX.
   const [touched, setTouched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Stable id for the label ↔ input association. Needed because the
+  // CountryPicker CANNOT be nested inside the <label> — label-click
+  // semantics redirect focus to the associated form control BEFORE the
+  // country button's onClick handler runs, so tapping a country in the
+  // picker would either land focus on the tel input WITHOUT closing the
+  // picker (bug the user reported) or, on iOS Safari, get the tap eaten
+  // entirely. Splitting the label into an htmlFor-bound heading keeps
+  // the a11y association intact while letting the picker button live
+  // as a plain sibling that fires its onClick uninterrupted.
+  const inputId = useId();
 
   const update = (c: Country, d: string) => {
     // Trim to the country's max NSN length so we don't render extra
@@ -460,8 +470,13 @@ export function AuthPhoneField({
 
   return (
     <StaggerItem>
-      <label className="block">
-        <span className="mb-2 block text-sm font-semibold">{label}</span>
+      <div className="block">
+        <label
+          htmlFor={inputId}
+          className="mb-2 block text-sm font-semibold"
+        >
+          {label}
+        </label>
         <div className="flex gap-2">
           <CountryPicker
             selected={country}
@@ -483,6 +498,7 @@ export function AuthPhoneField({
             }}
           />
           <input
+            id={inputId}
             ref={inputRef}
             type="tel"
             // Formatted display value — the raw digits get run through
@@ -521,7 +537,7 @@ export function AuthPhoneField({
             {errorText}
           </p>
         )}
-      </label>
+      </div>
     </StaggerItem>
   );
 }

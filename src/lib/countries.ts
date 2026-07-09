@@ -240,59 +240,69 @@ export function findCountry(code: string): Country {
 export type PhoneFormat = {
   nsn: number | { min: number; max: number };
   template: string;
+  /** Example phone number shown as the input placeholder. Uses
+   *  real-looking, formatted digits — visitors immediately parse it
+   *  as "an example of what my number should look like". Never
+   *  begins with 0 (a leading 0 is a national trunk prefix that gets
+   *  stripped in international format — showing 0 in the placeholder
+   *  reads as "type your local number, prefix intact" and confuses
+   *  people who then submit an 11-digit number for a 10-digit plan). */
+  example: string;
 };
 
 const PHONE_FORMATS: Record<string, PhoneFormat> = {
   // NANP (North American Numbering Plan) — every +1 country uses the
   // same 10-digit "### ### ####" layout, so they're all populated the
   // same way. Not just US/CA — the Caribbean +1 territories (JM/BS/BB/
-  // TT/etc.) share the same plan.
-  JM: { nsn: 10, template: "### ### ####" },
-  US: { nsn: 10, template: "### ### ####" },
-  CA: { nsn: 10, template: "### ### ####" },
-  BS: { nsn: 10, template: "### ### ####" },
-  BB: { nsn: 10, template: "### ### ####" },
-  TT: { nsn: 10, template: "### ### ####" },
-  DO: { nsn: 10, template: "### ### ####" },
-  PR: { nsn: 10, template: "### ### ####" },
-  AG: { nsn: 10, template: "### ### ####" },
-  GD: { nsn: 10, template: "### ### ####" },
-  LC: { nsn: 10, template: "### ### ####" },
-  VC: { nsn: 10, template: "### ### ####" },
-  KN: { nsn: 10, template: "### ### ####" },
-  DM: { nsn: 10, template: "### ### ####" },
+  // TT/etc.) share the same plan. The example uses each territory's own
+  // area code so the placeholder feels local (876 for JM, 246 for
+  // Barbados, etc.).
+  JM: { nsn: 10, template: "### ### ####", example: "876 555 0123" },
+  US: { nsn: 10, template: "### ### ####", example: "415 555 0123" },
+  CA: { nsn: 10, template: "### ### ####", example: "416 555 0123" },
+  BS: { nsn: 10, template: "### ### ####", example: "242 555 0123" },
+  BB: { nsn: 10, template: "### ### ####", example: "246 555 0123" },
+  TT: { nsn: 10, template: "### ### ####", example: "868 555 0123" },
+  DO: { nsn: 10, template: "### ### ####", example: "809 555 0123" },
+  PR: { nsn: 10, template: "### ### ####", example: "787 555 0123" },
+  AG: { nsn: 10, template: "### ### ####", example: "268 555 0123" },
+  GD: { nsn: 10, template: "### ### ####", example: "473 555 0123" },
+  LC: { nsn: 10, template: "### ### ####", example: "758 555 0123" },
+  VC: { nsn: 10, template: "### ### ####", example: "784 555 0123" },
+  KN: { nsn: 10, template: "### ### ####", example: "869 555 0123" },
+  DM: { nsn: 10, template: "### ### ####", example: "767 555 0123" },
   // UK — mobiles are 10 digits after the +44 (leading `0` dropped).
-  // "7911 123456" style: 4-6 split.
-  GB: { nsn: 10, template: "#### ######" },
+  // 7XXX example is Ofcom's reserved "drama use" range.
+  GB: { nsn: 10, template: "#### ######", example: "7911 123456" },
   // Ireland mobile is 9 digits after +353 (leading 0 dropped).
-  IE: { nsn: 9, template: "## ### ####" },
+  IE: { nsn: 9, template: "## ### ####", example: "87 123 4567" },
   // Common diaspora + tourist source countries.
-  NG: { nsn: 10, template: "### ### ####" },
-  GH: { nsn: 9, template: "## ### ####" },
-  KE: { nsn: 9, template: "### ### ###" },
-  ZA: { nsn: 9, template: "## ### ####" },
-  IN: { nsn: 10, template: "##### #####" },
-  AU: { nsn: 9, template: "### ### ###" },
-  NZ: { nsn: 9, template: "## ### ####" },
-  DE: { nsn: { min: 10, max: 11 }, template: "### #######" },
-  FR: { nsn: 9, template: "# ## ## ## ##" },
-  ES: { nsn: 9, template: "### ### ###" },
-  IT: { nsn: 10, template: "### ### ####" },
-  NL: { nsn: 9, template: "# ## ## ## ##" },
-  BR: { nsn: { min: 10, max: 11 }, template: "## #####-####" },
-  MX: { nsn: 10, template: "### ### ####" },
-  CN: { nsn: 11, template: "### #### ####" },
-  JP: { nsn: 10, template: "## #### ####" },
-  KR: { nsn: { min: 9, max: 10 }, template: "## #### ####" },
-  PH: { nsn: 10, template: "### ### ####" },
-  ID: { nsn: { min: 9, max: 12 }, template: "### ### ####" },
-  SG: { nsn: 8, template: "#### ####" },
-  MY: { nsn: { min: 9, max: 10 }, template: "## ### ####" },
-  HK: { nsn: 8, template: "#### ####" },
-  AE: { nsn: 9, template: "## ### ####" },
-  SA: { nsn: 9, template: "## ### ####" },
-  EG: { nsn: 10, template: "### ### ####" },
-  TR: { nsn: 10, template: "### ### ####" },
+  NG: { nsn: 10, template: "### ### ####", example: "802 123 4567" },
+  GH: { nsn: 9, template: "## ### ####", example: "24 123 4567" },
+  KE: { nsn: 9, template: "### ### ###", example: "712 345 678" },
+  ZA: { nsn: 9, template: "## ### ####", example: "82 123 4567" },
+  IN: { nsn: 10, template: "##### #####", example: "98765 43210" },
+  AU: { nsn: 9, template: "### ### ###", example: "412 345 678" },
+  NZ: { nsn: 9, template: "## ### ####", example: "21 123 4567" },
+  DE: { nsn: { min: 10, max: 11 }, template: "### #######", example: "151 2345678" },
+  FR: { nsn: 9, template: "# ## ## ## ##", example: "6 12 34 56 78" },
+  ES: { nsn: 9, template: "### ### ###", example: "612 345 678" },
+  IT: { nsn: 10, template: "### ### ####", example: "312 345 6789" },
+  NL: { nsn: 9, template: "# ## ## ## ##", example: "6 12 34 56 78" },
+  BR: { nsn: { min: 10, max: 11 }, template: "## #####-####", example: "11 91234-5678" },
+  MX: { nsn: 10, template: "### ### ####", example: "551 234 5678" },
+  CN: { nsn: 11, template: "### #### ####", example: "138 1234 5678" },
+  JP: { nsn: 10, template: "## #### ####", example: "90 1234 5678" },
+  KR: { nsn: { min: 9, max: 10 }, template: "## #### ####", example: "10 1234 5678" },
+  PH: { nsn: 10, template: "### ### ####", example: "917 123 4567" },
+  ID: { nsn: { min: 9, max: 12 }, template: "### ### ####", example: "812 345 6789" },
+  SG: { nsn: 8, template: "#### ####", example: "8123 4567" },
+  MY: { nsn: { min: 9, max: 10 }, template: "## ### ####", example: "12 345 6789" },
+  HK: { nsn: 8, template: "#### ####", example: "5123 4567" },
+  AE: { nsn: 9, template: "## ### ####", example: "50 123 4567" },
+  SA: { nsn: 9, template: "## ### ####", example: "50 123 4567" },
+  EG: { nsn: 10, template: "### ### ####", example: "100 123 4567" },
+  TR: { nsn: 10, template: "### ### ####", example: "532 123 4567" },
 };
 
 export function getPhoneFormat(country: Country): PhoneFormat | null {
@@ -345,14 +355,15 @@ export function formatNSN(country: Country, digits: string): string {
   return out;
 }
 
-/** Placeholder shown in the input for a given country. We render the
- *  template with `#` characters instead of example digits — visually
- *  communicates "N digit slots with THIS spacing pattern" without
- *  implying a specific-looking real number the visitor might mistake
- *  for a required prefix. Returns null for unknown countries so the
- *  caller can fall back to whatever generic placeholder it wants. */
+/** Placeholder shown in the input for a given country. Returns a
+ *  formatted example number ("876 555 0123" for JM, "7911 123456" for
+ *  UK mobile) — real digits communicate length + spacing at a glance
+ *  without the visitor mistaking a `###` template for something they're
+ *  meant to type. Returns null for countries without a registered
+ *  format so the caller can fall back to whatever generic placeholder
+ *  it wants. */
 export function phonePlaceholder(country: Country): string | null {
-  return PHONE_FORMATS[country.code]?.template ?? null;
+  return PHONE_FORMATS[country.code]?.example ?? null;
 }
 
 export type PhoneValidity = "empty" | "short" | "long" | "ok";

@@ -771,7 +771,21 @@ export default function RiderLiveTripPage() {
             </p>
             <Link
               href="/rider/request"
-              onClick={() => dismissedEndedTrips.add(ended.id)}
+              onClick={(e) => {
+                dismissedEndedTrips.add(ended.id);
+                // Force a full-page navigation instead of Next.js
+                // client-side routing. The rider likely landed on
+                // /rider/request initially with pickup/dropoff params
+                // in the URL (from the landing widget or a deep link),
+                // and Next's client-side back to that route can
+                // BFCache-restore the earlier page WITH those params
+                // still on the URL — dropping the rider onto
+                // Choose-your-ride pre-filled with the trip they just
+                // cancelled. Forcing a fresh navigation guarantees a
+                // clean URL, clean component state, and step 1.
+                e.preventDefault();
+                window.location.assign("/rider/request");
+              }}
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
             >
               Book another ride
@@ -791,6 +805,14 @@ export default function RiderLiveTripPage() {
             </p>
             <Link
               href="/rider/request"
+              onClick={(e) => {
+                // Same reason as the ended-trip card above — force a
+                // full navigation so BFCache can't restore an earlier
+                // /rider/request page that still had the previous
+                // trip's params on its URL.
+                e.preventDefault();
+                window.location.assign("/rider/request");
+              }}
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white hover:bg-primary-hover"
             >
               Book a ride
@@ -806,7 +828,11 @@ export default function RiderLiveTripPage() {
           <CompletionDialog
             snapshot={completed}
             onDismiss={() => setCompleted(null)}
-            onBookAgain={() => router.push("/rider/request")}
+            onBookAgain={() => {
+              // Full-page assign, not router.push — same reason as the
+              // buttons above: forces a clean URL, fresh state, step 1.
+              window.location.assign("/rider/request");
+            }}
           />
         )}
       </>
@@ -1180,6 +1206,12 @@ export default function RiderLiveTripPage() {
         <FadeUp delay={0.2}>
           <Link
             href="/rider/request"
+            onClick={(e) => {
+              // Force hard-nav. See the other Book buttons in this file
+              // for the full BFCache/URL-leak reasoning.
+              e.preventDefault();
+              window.location.assign("/rider/request");
+            }}
             className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-bold text-white shadow-lg shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
           >
             Book another ride
