@@ -65,10 +65,37 @@ export function AuthFetchGuard() {
         return;
       }
 
-      // Pick the right login page based on the portal the user is in.
-      const loginPath = path.startsWith("/admin")
+      // Portal-path checks are BOUNDED (exact match OR trailing-slash
+      // subpath) instead of a loose `startsWith`. `startsWith("/driver")`
+      // used to match `/driver-join`, `/driver-jobs-in/kingston`, and
+      // every future /driver-* marketing route — so an anonymous
+      // visitor clicking "Become a driver" on the login page landed
+      // briefly on /driver-join, its SiteHeader fired an /api/* call
+      // that 401'd, and this guard bounced them right back to
+      // /auth/driver/login because it thought they were in the driver
+      // portal. The proxy had the same bug on its own gate at
+      // src/proxy.ts:220-227 and was already fixed; this was the
+      // second occurrence. Same treatment for /admin so any future
+      // /admin-* marketing page won't repeat this.
+      const isAdminPath = path === "/admin" || path.startsWith("/admin/");
+      const isDriverPath =
+        path === "/driver" || path.startsWith("/driver/");
+      const isRiderPath = path === "/rider" || path.startsWith("/rider/");
+
+      // Public marketing pages (/, /how-it-works, /driver-join,
+      // /driver-jobs-in/*, /fare-estimator, etc.) don't belong to any
+      // portal, so a 401 from a stray /api/* call on them isn't a
+      // signal that the visitor needs to sign in — they weren't
+      // required to be signed in in the first place. Swallow it. This
+      // is the actual fix for the "Become a driver bounces back" bug:
+      // even with the bounded portal check above, a fallback to the
+      // rider login would still ricochet the visitor away from the
+      // marketing page they legitimately opened.
+      if (!isAdminPath && !isDriverPath && !isRiderPath) return;
+
+      const loginPath = isAdminPath
         ? "/auth/admin/login"
-        : path.startsWith("/driver")
+        : isDriverPath
           ? "/auth/driver/login"
           : "/auth/rider/login";
 
