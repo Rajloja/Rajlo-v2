@@ -190,17 +190,21 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
     };
   }, []);
 
-  // Photo carousel — cycles through PHOTOS.hero (4 images) so the
-  // hero feels alive without being noisy. Paused entirely when the
-  // visitor prefers reduced motion.
+  // Photo carousel — cycles through the slides HEADLINES defines,
+  // one photo per headline. HEADLINES is the source of truth for the
+  // slide count so the runtime never accesses HEADLINES[activePhoto]
+  // where `activePhoto` outruns the array (client-side crash caused
+  // by exactly this after the July 2026 pass dropped frame 4 from
+  // HEADLINES but PHOTOS.hero still had 4 images).
+  const SLIDE_COUNT = Math.min(HEADLINES.length, PHOTOS.hero.length);
   const [activePhoto, setActivePhoto] = useState(0);
   useEffect(() => {
     if (reduce) return;
     const id = window.setInterval(() => {
-      setActivePhoto((i) => (i + 1) % PHOTOS.hero.length);
+      setActivePhoto((i) => (i + 1) % SLIDE_COUNT);
     }, 10000);
     return () => window.clearInterval(id);
-  }, [reduce]);
+  }, [reduce, SLIDE_COUNT]);
 
   // Typing animation for the headline top line. Two-phase cycle:
   //
@@ -500,7 +504,7 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
           className="absolute inset-0"
           style={{ background: BRAND_FALLBACK_BG }}
         >
-          {PHOTOS.hero.map((src, i) => (
+          {PHOTOS.hero.slice(0, SLIDE_COUNT).map((src, i) => (
             <Image
               key={src}
               src={src}
@@ -626,12 +630,12 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                 className="mt-5 flex items-center gap-2"
                 aria-label="Hero photo carousel"
               >
-                {PHOTOS.hero.map((_, i) => (
+                {PHOTOS.hero.slice(0, SLIDE_COUNT).map((_, i) => (
                   <button
                     key={i}
                     type="button"
                     onClick={() => setActivePhoto(i)}
-                    aria-label={`Show photo ${i + 1} of ${PHOTOS.hero.length}`}
+                    aria-label={`Show photo ${i + 1} of ${SLIDE_COUNT}`}
                     aria-current={i === activePhoto}
                     className={`h-1.5 rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white ${
                       i === activePhoto
