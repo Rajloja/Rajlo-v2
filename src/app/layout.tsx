@@ -10,6 +10,7 @@ import { NativeBottomNav } from "@/components/native-bottom-nav";
 import { NativeBackButton } from "@/components/native-back-button";
 import { NativePageTransition } from "@/components/native-page-transition";
 import { CookieConsent, ConsentedAnalytics } from "@/components/cookie-consent";
+import { StagingBanner } from "@/components/staging-banner";
 import {
   SITE_DESCRIPTION,
   SITE_EMAIL,
@@ -313,6 +314,9 @@ export default function RootLayout({
             <div className="min-h-screen">{children}</div>
           </NativePageTransition>
         </MotionProvider>
+        {/* "STAGING" pill in the top-center — renders ONLY when
+            NEXT_PUBLIC_APP_ENV === "staging". Invisible in prod + dev. */}
+        <StagingBanner />
         {/* Cookie-consent banner (web only). */}
         <CookieConsent />
         {/* Vercel Web Analytics — gated behind cookie consent: only
