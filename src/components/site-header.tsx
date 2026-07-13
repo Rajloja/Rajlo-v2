@@ -11,18 +11,19 @@ type NavItem = NavLink | { label: string; menu: NavLink[] };
 /** Burger-menu items. The primary nav simplified in the July 2026
  *  redesign — every deep link moved into the burger, leaving only a
  *  single central "audience swap" link ("Drive with us" on the rider
- *  variant, "Ride with us" on the driver variant) beside the logo. */
+ *  variant, "Ride with us" on the driver variant) beside the logo.
+ *
+ *  Support is intentionally a FLAT link (not a submenu) so a tap
+ *  goes straight to /support — which is the routing hub that fans
+ *  out to Rider support, Driver help & safety, Help Center, Contact,
+ *  and the fare estimator. Prior to July 2026 the drawer had a
+ *  Support submenu that expanded in place; that hid the hub itself
+ *  behind a two-tap gesture even though the hub is exactly what
+ *  most visitors are hunting for. */
 const BURGER_ITEMS: NavItem[] = [
   { label: "How it works", href: "/how-it-works" },
   { label: "Fare estimator", href: "/fare-estimator" },
-  {
-    label: "Support",
-    menu: [
-      { label: "Help & FAQs", href: "/help" },
-      { label: "Safety policy", href: "/legal/safety-disclaimer-emergency-policy" },
-      { label: "Contact", href: "/contact" },
-    ],
-  },
+  { label: "Support", href: "/support" },
   {
     label: "Legal",
     menu: [

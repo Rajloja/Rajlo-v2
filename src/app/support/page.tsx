@@ -186,6 +186,45 @@ export default function SupportPage() {
         </div>
       </section>
 
+      {/* ─── Fare estimator strip ───
+         Rendered as its own row (not fifth card in the routing grid)
+         because it's a TOOL, not a support-routing option, and slotting
+         it in with the four routing cards produces an odd hanging
+         column on desktop. Compact horizontal card, links out to the
+         dedicated /fare-estimator page. */}
+      <section className="mx-auto max-w-6xl px-4 pb-4">
+        <Link
+          href="/fare-estimator"
+          className="group flex flex-col items-start justify-between gap-4 rounded-3xl border border-line bg-surface p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-rajlo-red hover:shadow-lg sm:flex-row sm:items-center"
+        >
+          <div className="flex items-start gap-4">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary-soft text-rajlo-red">
+              <Icon name="trending-up" className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="font-secondary text-[11px] font-bold uppercase tracking-wider text-rajlo-red">
+                Tools
+              </p>
+              <h2 className="mt-1 text-xl font-extrabold tracking-tight">
+                Fare estimator
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm text-muted">
+                Know what you&apos;ll pay before you book. Live TA-anchored
+                tariff for route taxi, same base + per-km formula the rider
+                app uses for private rides.
+              </p>
+            </div>
+          </div>
+          <p className="inline-flex items-center gap-1.5 text-sm font-bold text-rajlo-red">
+            Estimate a fare
+            <Icon
+              name="arrow-right"
+              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+            />
+          </p>
+        </Link>
+      </section>
+
       {/* ─── Direct contact fallback ─── */}
       <section className="mx-auto max-w-6xl px-4 pb-16">
         <div className="rounded-3xl border border-dashed border-line bg-surface-soft p-6 text-center">
