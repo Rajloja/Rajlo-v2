@@ -1137,16 +1137,23 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
 
           {/* Secondary actions row */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3 text-xs text-muted md:text-sm">
-            <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {/* Trust-chip row — three chips on ONE line at every
+               breakpoint. On tight mobile widths this scrolls
+               horizontally instead of wrapping (a single wrapped
+               "Transparent fares" on its own row read as three
+               unbalanced siblings, not one row). Scrollbar is
+               hidden aesthetically since the chips are decorative
+               and the important nav lives elsewhere. */}
+            <span className="flex flex-nowrap items-center gap-x-3 gap-y-1 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
               <span className="inline-flex items-center gap-1.5">
-                <Icon name="wallet" className="h-3.5 w-3.5 text-rajlo-red" />
+                <Icon name="wallet" className="h-3.5 w-3.5 shrink-0 text-rajlo-red" />
                 Cashless wallet
               </span>
               <span aria-hidden className="text-line">·</span>
               <span className="inline-flex items-center gap-1.5">
                 <Icon
                   name="shield-check"
-                  className="h-3.5 w-3.5 text-rajlo-red"
+                  className="h-3.5 w-3.5 shrink-0 text-rajlo-red"
                 />
                 TA-verified drivers
               </span>
@@ -1154,7 +1161,7 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
               <span className="inline-flex items-center gap-1.5">
                 <Icon
                   name="trending-up"
-                  className="h-3.5 w-3.5 text-rajlo-red"
+                  className="h-3.5 w-3.5 shrink-0 text-rajlo-red"
                 />
                 Transparent fares
               </span>

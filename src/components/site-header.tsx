@@ -138,32 +138,43 @@ export function SiteHeader({
             variant={isGlass ? "white" : "default"}
           />
 
-          {/* Central audience-swap link — desktop only. Single link
-             ("Drive with us" or "Ride with us") replaces the older
-             6-item horizontal nav. Deep links moved into the burger
-             on the right. */}
-          <nav
-            className="hidden items-center gap-6 md:flex"
-            aria-label="Primary"
-          >
+          {/* Right side — desktop: audience-swap link + sign-in
+             (outlined pill) + primary CTA + burger. Mobile: only the
+             burger; every other action moves into the drawer.
+             Layout logic:
+               - Audience-swap link (Drive with us / Ride with us)
+                 sits FIRST in the right group so the header reads
+                 logo — spacer — audience — sign-in — CTA — burger.
+                 That's more balanced than a central nav with three
+                 tightly-packed buttons on the far right, and it
+                 groups the audience swap with the auth actions
+                 (which is where a visitor mentally is when they're
+                 hunting for it).
+               - Sign in is now an OUTLINED pill (border + subtle
+                 fill on hover) so it reads as a button rather than
+                 a plain text link, but is visually distinct from
+                 the solid-red "Book a ride" primary CTA.
+               - Driver variant: no separate "Sign in" outlined
+                 button — the primary red CTA already says "Sign in"
+                 because there's no "Book a ride" concept on that
+                 audience. Rendering both would be duplicative. */}
+          <div className="flex items-center gap-2 md:gap-3">
             <Link
               href={audienceLink.href}
-              className={`text-sm font-semibold ${
+              className={`hidden text-sm font-semibold md:inline-flex md:px-2 ${
                 pathname === audienceLink.href ? activeLinkTone : linkTone
               }`}
             >
               {audienceLink.label}
             </Link>
-          </nav>
-
-          {/* Right side — desktop: sign-in (rider variant only) + CTA
-             button + burger. Mobile: only the burger; the CTA moves
-             into the drawer. */}
-          <div className="flex items-center gap-2">
             {variant === "rider" && (
               <Link
                 href={signInHref}
-                className={`hidden rounded-full px-3 py-2 text-sm font-medium md:inline-flex ${signInTone}`}
+                className={`hidden rounded-full border px-4 py-2 text-sm font-semibold transition-colors md:inline-flex ${
+                  isGlass
+                    ? "border-white/25 bg-white/5 text-white/90 hover:bg-white/15"
+                    : "border-line bg-surface text-foreground hover:bg-surface-soft"
+                }`}
               >
                 Sign in
               </Link>
@@ -270,12 +281,15 @@ export function SiteHeader({
              inline links since the user is in a focused menu.
              Items with a `menu` render as an expandable group. */}
           <nav className="mt-5 grid gap-1" aria-label="Mobile primary">
-            {/* Audience-swap link first — same one that appears on
-               desktop centrally. Puts the primary cross-audience
-               action at the top of the drawer for one-tap access. */}
+            {/* Audience-swap link — mobile only. On desktop the same
+               link sits centrally in the top nav bar (rendered from
+               the desktop <nav> above), so surfacing it here again
+               would be duplicated. The `md:hidden` wrap keeps it in
+               the drawer only for phone-width where the desktop nav
+               is hidden and this drawer is the only place to reach it. */}
             <Link
               href={audienceLink.href}
-              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-base font-extrabold tracking-tight transition-colors ${
+              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-base font-extrabold tracking-tight transition-colors md:hidden ${
                 pathname === audienceLink.href
                   ? "bg-white text-rajlo-red"
                   : "text-white/90 hover:bg-white/10 hover:text-white"
