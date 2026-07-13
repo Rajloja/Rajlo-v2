@@ -4,6 +4,7 @@ import { LandingV3Hero } from "./landing-v3-hero";
 import { LandingV3Modes } from "./landing-v3-modes";
 import { LandingV3How } from "./landing-v3-how";
 import { LandingV3Why } from "./landing-v3-why";
+import { LandingV3Driver } from "./landing-v3-driver";
 import { LandingV3Founding } from "./landing-v3-founding";
 import { LandingV3Final } from "./landing-v3-final";
 import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
@@ -53,28 +54,34 @@ export function LandingV3({ cta }: { cta: LandingCtaTargets }) {
       {/* §1 Hero — client island (search input + filtered suggestions) */}
       <LandingV3Hero cta={cta} />
 
-      {/* §2 Modes — Private ride / Route taxi magazine spreads.
-         The design's July 2026 pass removed the "Two ways to ride /
-         One way to drive" summary section that used to bracket this
-         (handled inside landing-v3-modes.tsx). */}
+      {/* §2 Modes — Private ride / Route taxi magazine spreads. */}
       <LandingV3Modes cta={cta} />
 
-      {/* §3 How it works — three-step flow, no numbered chrome */}
+      {/* §3 How it works — three-step flow, no numbered chrome.
+         The old §3 "TA tariff" pull-quote section was removed from
+         the landing in the July 2026 pass — the full fare estimator
+         lives at /fare-estimator (linked from the site header burger
+         menu). */}
       <LandingV3How />
 
       {/* §4 Why Rajlo — the "Four promises" section, restructured
          with a new intro block + five bulleted promises. */}
       <LandingV3Why />
 
-      {/* §5 For riders / Route taxi — two equal panels bearing the
-         two ride-mode CTAs. The old rider/driver panel pair here was
-         reworked to Private ride / Route taxi in the July 2026 pass
-         since driver recruiting moved to /driver. */}
+      {/* §5 Driver recruitment — full-bleed "Your car. Your hours."
+         section. Its primary CTA resolves via cta.driverHref:
+         anonymous → /drive (the driver marketing page), signed-in
+         driver → /driver (dashboard). The section stays on the
+         landing as a pitch; the /drive page carries the deeper
+         driver-audience marketing content and links onward into
+         /driver-join for the actual application. */}
+      <LandingV3Driver cta={cta} />
+
+      {/* §6 For riders / Route taxi — two equal panels bearing the
+         two ride-mode CTAs. */}
       <LandingV3Founding cta={cta} />
 
-      {/* §6 Final CTA — single brand-red drench. The old §6 Driver
-         recruitment section moved to /driver (marketing) and
-         /driver-join (deep-dive) per the same pass. */}
+      {/* §7 Final CTA — single brand-red drench. */}
       <LandingV3Final cta={cta} />
 
       <SiteFooter />

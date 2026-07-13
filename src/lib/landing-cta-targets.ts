@@ -52,7 +52,12 @@ const DEFAULTS: LandingCtaTargets = {
   // gracefully handles unauthenticated visitors with a sticky sign-in
   // prompt, so this is the right "default" landing for any rider CTA.
   riderHref: "/rider/request",
-  driverHref: "/driver-join",
+  // Anonymous "Drive with Rajlo" CTAs land on the marketing page
+  // (/drive) first, not the doc-heavy /driver-join wizard. /drive
+  // itself carries the "Start your application" button that then
+  // moves the visitor into /driver-join. Two-step funnel:
+  // curiosity → pitch → wizard.
+  driverHref: "/drive",
   riderIsDashboard: false,
   driverIsDashboard: false,
 };
