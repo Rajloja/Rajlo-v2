@@ -132,42 +132,52 @@ export function SiteHeader({
   return (
     <>
       <header className={headerClass}>
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3.5 md:gap-4">
+        <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3.5 md:gap-4">
           <Logo
             size="sm"
             tagline
             variant={isGlass ? "white" : "default"}
           />
 
-          {/* Right side — desktop: audience-swap link + sign-in
-             (outlined pill) + primary CTA + burger. Mobile: only the
-             burger; every other action moves into the drawer.
-             Layout logic:
-               - Audience-swap link (Drive with us / Ride with us)
-                 sits FIRST in the right group so the header reads
-                 logo — spacer — audience — sign-in — CTA — burger.
-                 That's more balanced than a central nav with three
-                 tightly-packed buttons on the far right, and it
-                 groups the audience swap with the auth actions
-                 (which is where a visitor mentally is when they're
-                 hunting for it).
-               - Sign in is now an OUTLINED pill (border + subtle
-                 fill on hover) so it reads as a button rather than
-                 a plain text link, but is visually distinct from
-                 the solid-red "Book a ride" primary CTA.
-               - Driver variant: no separate "Sign in" outlined
-                 button — the primary red CTA already says "Sign in"
-                 because there's no "Book a ride" concept on that
-                 audience. Rendering both would be duplicative. */}
-          <div className="flex items-center gap-2 md:gap-3">
+          {/* Center-of-viewport audience-swap link — desktop only.
+             Absolute-positioned + translate so it's anchored to the
+             navbar's visual center regardless of how wide the logo
+             or the right-side action group grow. Sits under the
+             right-side group in DOM order because keyboard-tab
+             expectation is logo → central link → right actions,
+             which requires this to come BEFORE the right group in
+             the DOM tree even though visually it's between them. */}
+          <nav
+            aria-label="Audience"
+            className="pointer-events-none absolute inset-x-0 top-1/2 hidden -translate-y-1/2 justify-center md:flex"
+          >
             <Link
               href={audienceLink.href}
-              className={`hidden text-sm font-semibold md:inline-flex md:px-2 ${
+              className={`pointer-events-auto text-sm font-semibold ${
                 pathname === audienceLink.href ? activeLinkTone : linkTone
               }`}
             >
               {audienceLink.label}
             </Link>
+          </nav>
+
+          {/* Right side — desktop: sign-in (outlined pill, rider
+             variant only) + primary CTA + burger. Mobile: only the
+             burger; every other action moves into the drawer.
+             Layout logic:
+               - The audience-swap link (Drive with us / Ride with
+                 us) sits centered in the viewport via the absolutely-
+                 positioned nav above, not here — so this group is
+                 pure "sign-in + primary CTA + burger" on the right.
+               - Sign in is an OUTLINED pill (border + subtle fill
+                 on hover) so it reads as a button rather than a
+                 plain text link, but is visually distinct from the
+                 solid-red "Book a ride" primary CTA.
+               - Driver variant: no separate "Sign in" outlined
+                 button — the primary red CTA already says "Sign in"
+                 because there's no "Book a ride" concept on that
+                 audience. Rendering both would be duplicative. */}
+          <div className="flex items-center gap-2 md:gap-3">
             {variant === "rider" && (
               <Link
                 href={signInHref}

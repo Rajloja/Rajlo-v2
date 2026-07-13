@@ -30,7 +30,7 @@ import { requiredPermissionForAdminPath } from "@/lib/admin-route-permissions";
  * Static assets, API routes, and public marketing pages are not gated.
  */
 
-type Portal = "rider" | "driver" | "admin" | "employer";
+type Portal = "rider" | "driver" | "admin";
 
 /** Pages that any subdomain may serve — auth helpers, legal text,
  *  Supabase OAuth callback, common public pages. */
@@ -61,8 +61,17 @@ const ANONYMOUS_FRIENDLY_RIDER_PATHS = new Set<string>([
 const PORTAL_PATH_PREFIXES: Record<Portal, string[]> = {
   rider: ["/rider", "/auth/rider"],
   driver: ["/driver", "/auth/driver"],
-  admin: ["/admin", "/auth/admin"],
-  employer: ["/employer", "/auth/employer"],
+  // Admin subdomain owns BOTH the admin surface AND the employer
+  // surface. Employers are Rajlo internal staff (field agents doing
+  // taxi-hub onboarding) — same audience as admin operationally, so
+  // they live under admin.rajlo.com rather than a separate
+  // employer.rajlo.com. The role check inside the auth+role gating
+  // below still restricts /employer/* to role='employer' and
+  // /admin/* to role IN ('admin', 'safety_officer'), so an admin
+  // can't accidentally reach the employer's driver-onboarded list
+  // and an employer can't reach the admin verification queue —
+  // they're two paths on one subdomain, not a single shared surface.
+  admin: ["/admin", "/auth/admin", "/employer", "/auth/employer"],
 };
 
 /** Determine which portal (if any) this request's host is scoped to.
@@ -74,7 +83,12 @@ function portalForHost(host: string | null): Portal | null {
   if (hostname.startsWith("rider.")) return "rider";
   if (hostname.startsWith("driver.")) return "driver";
   if (hostname.startsWith("admin.")) return "admin";
-  if (hostname.startsWith("employer.")) return "employer";
+  // employer.rajlo.com deliberately not routed — employers live under
+  // the admin subdomain (see PORTAL_PATH_PREFIXES). If someone visits
+  // the historic employer.* host after DNS is decommissioned they
+  // should not accidentally match another portal; returning null
+  // sends them to the "marketing on subdomain" bounce below, which
+  // will redirect to the apex.
   return null;
 }
 
@@ -118,7 +132,6 @@ export async function proxy(request: NextRequest) {
         rider: "/auth/rider/login",
         driver: "/auth/driver/login",
         admin: "/auth/admin/login",
-        employer: "/auth/employer/login",
       };
       const url = request.nextUrl.clone();
       url.pathname = loginByPortal[portal];
@@ -134,7 +147,7 @@ export async function proxy(request: NextRequest) {
       //   admin.rajlo.com/admin/safety/abc
       const url = new URL(request.url);
       const baseDomain = (host ?? "").replace(
-        /^(rider|driver|admin|employer)\./i,
+        /^(rider|driver|admin)\./i,
         "",
       );
       url.host = `${owner}.${baseDomain}`;
@@ -165,7 +178,7 @@ export async function proxy(request: NextRequest) {
       const looksLikeFile = (path.split("/").pop() ?? "").includes(".");
       if (!isSharedPath && !isApiPath && !looksLikeFile) {
         const baseDomain = (host ?? "").replace(
-          /^(rider|driver|admin|employer)\./i,
+          /^(rider|driver|admin)\./i,
           "",
         );
         const url = new URL(request.url);
