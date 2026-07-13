@@ -45,6 +45,12 @@ function SetPasswordInner() {
   const [tokenValid, setTokenValid] = useState(false);
   const [tokenReason, setTokenReason] = useState<string | null>(null);
   const [driverEmail, setDriverEmail] = useState<string | null>(null);
+  // Role tells us what portal to tailor the copy for — driver copy
+  // mentions "your documents are under review" (matches the driver
+  // onboarding flow that produced the token); employer / admin copy
+  // skips that footnote because they can start using the platform
+  // immediately after setting a password.
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -68,10 +74,12 @@ function SetPasswordInner() {
           valid?: boolean;
           reason?: string;
           driverEmail?: string;
+          role?: string;
         };
         setTokenValid(Boolean(json.valid));
         setTokenReason(json.reason ?? null);
         setDriverEmail(json.driverEmail ?? null);
+        setUserRole(json.role ?? null);
       } catch {
         setTokenValid(false);
         setTokenReason("Couldn't check the link. Try again or ask the Rajlo team to resend.");
@@ -85,6 +93,20 @@ function SetPasswordInner() {
   const matches = password === confirm;
   const canSubmit = tokenValid && passwordOk && matches && !submitting;
 
+  // Where should the "sign in here" fallback link land the user?
+  // Route them to the right portal login based on their role — an
+  // employer clicking a stale link should not be dumped on
+  // /auth/driver/login. Default to /auth/driver/login since drivers
+  // are the majority case and the flow's original consumer.
+  const signInHref =
+    userRole === "employer"
+      ? "/auth/employer/login"
+      : userRole === "admin" || userRole === "safety_officer"
+        ? "/auth/admin/login"
+        : userRole === "rider"
+          ? "/auth/rider/login"
+          : "/auth/driver/login";
+
   const submit = async () => {
     if (!canSubmit || !token) return;
     setSubmitting(true);
@@ -95,11 +117,16 @@ function SetPasswordInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
       });
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        redirectTo?: string;
+      };
       if (!res.ok) throw new Error(json.error ?? `Server returned ${res.status}`);
-      // Redirect to driver portal. The server auto-signs them in via
-      // the response cookies.
-      router.push("/driver");
+      // Server tells us where to send the user based on their profile
+      // role — driver → /driver, employer → /employer, admin → /admin.
+      // Fallback to /driver for defensive compatibility if the API
+      // response somehow omits redirectTo (older bundle in flight, etc.).
+      router.push(json.redirectTo ?? "/driver");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't set your password.");
@@ -113,7 +140,7 @@ function SetPasswordInner() {
       subtitle={
         driverEmail
           ? `for ${driverEmail}`
-          : "one last step before you can drive"
+          : "one last step before you can sign in"
       }
       audience="driver"
     >
@@ -128,11 +155,11 @@ function SetPasswordInner() {
               "This password link isn't valid anymore. It may have already been used or replaced."}
           </div>
           <p className="text-sm text-muted">
-            Ask the Rajlo employee who onboarded you to have Rajlo admin
+            Ask the Rajlo team who onboarded you to have Rajlo admin
             regenerate the link — it takes them 30 seconds. Or, if you
             already set your password from a different device, just{" "}
             <Link
-              href="/auth/driver/login"
+              href={signInHref}
               className="font-semibold text-rajlo-red hover:underline"
             >
               sign in here
@@ -182,12 +209,14 @@ function SetPasswordInner() {
           >
             Set password &amp; sign in
           </AuthSubmit>
-          <p className="text-center text-xs text-muted">
-            Your account is under review — you&apos;ll get a second email once
-            an admin approves your documents (usually within 1–2 business
-            days). Until then you can sign in but won&apos;t be able to
-            accept trips.
-          </p>
+          {userRole === "driver" && (
+            <p className="text-center text-xs text-muted">
+              Your account is under review — you&apos;ll get a second email once
+              an admin approves your documents (usually within 1–2 business
+              days). Until then you can sign in but won&apos;t be able to
+              accept trips.
+            </p>
+          )}
         </div>
       )}
     </AuthShell>

@@ -228,6 +228,66 @@ export async function sendDriverPasswordSetupEmail(
 }
 
 /* ──────────────────────────────────────────────────────────────────────
+   2c. Employer password setup — sent when an admin provisions a new
+   employer account from /admin/employers. Same primitive (single-use
+   token, 365-day server-side TTL, admin-regeneratable) as the driver
+   setup flow. Distinct copy so the recipient reads "you're staff, set
+   your password to sign in" rather than the driver's "you're onboarded,
+   set your password to drive."
+   ────────────────────────────────────────────────────────────────────── */
+
+export function employerPasswordSetupTemplate(args: {
+  fullName?: string | null;
+  setupUrl: string;
+}) {
+  const first = firstNameOf(args.fullName);
+  const subject = "Set your Rajlo employer password";
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, a Rajlo admin created an employer account for you so you can onboard drivers at the taxi hubs. Set your password below to sign in for the first time.`,
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "How this works",
+      text: "Tap the button below to open Rajlo, pick a password, and land on your employer dashboard. From there you can start onboarding drivers straight away.",
+    },
+    { type: "cta", href: args.setupUrl, label: "Set my password" },
+    {
+      type: "footnote",
+      text: "This link works only for you and stops working once you've used it. Never share it — if it doesn't work, ask your Rajlo admin to send a fresh one.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: "Set your Rajlo employer password so you can sign in.",
+    eyebrow: "Welcome to Rajlo",
+    title: `You're in, ${first}. Time to set your password.`,
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, a Rajlo admin created an employer account for you.`,
+    "",
+    `Set your password: ${args.setupUrl}`,
+    "",
+    "This link is single-use. Ask a Rajlo admin to resend it if it stops working.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendEmployerPasswordSetupEmail(
+  to: string,
+  args: Parameters<typeof employerPasswordSetupTemplate>[0],
+) {
+  const t = employerPasswordSetupTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ──────────────────────────────────────────────────────────────────────
    3. Driver onboarding submitted
    ────────────────────────────────────────────────────────────────────── */
 

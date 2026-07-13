@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, logAdminAction } from "@/lib/admin-auth";
+import { sendEmployerPasswordSetupEmail } from "@/lib/email-templates";
+import { APP_URL } from "@/lib/email-render";
 
 /**
  * Admin CRUD for employer accounts.
@@ -146,12 +148,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // Random password — the employer will use "Forgot password" on the
-  // login page to set their own. We deliberately avoid the "invite
-  // link" flow here because Supabase's built-in invite email uses the
-  // Supabase-branded template, and Rajlo has its own visual language
-  // for auth mail. "Sign up, ask them to forgot-password" gives them
-  // the same UX with our own Resend-branded template.
+  // Random unguessable password. The employer never sees or types
+  // this — they set their own via the emailed setup link. We just
+  // need SOMETHING to satisfy Supabase's password policy and keep the
+  // auth row un-usable-by-password until the employer completes
+  // their setup flow (which calls admin.updateUserById with the
+  // password they picked).
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   const tempPassword = Buffer.from(bytes).toString("base64url");
@@ -184,12 +186,50 @@ export async function POST(request: Request) {
     );
   }
 
-  // Fire the password-reset email — Supabase handles the delivery.
-  // The employer clicks "Set password", lands on /auth/reset-password,
-  // and picks their own credentials.
-  await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/auth/employer/login`,
-  }).catch(() => null);
+  // Issue a single-use setup token — same primitive as the driver
+  // employer-onboarding flow. We deliberately do NOT use Supabase's
+  // built-in resetPasswordForEmail here: (a) its default template is
+  // Supabase-branded, (b) clicking that link lands the user on
+  // `/auth/employer/login` with no code-exchange handler to actually
+  // let them set a password (the previous behaviour Raj hit was a
+  // dead-end — link → login page → no way to proceed). Our own token +
+  // /auth/set-password?token=... page handles the whole flow end-to-end
+  // and is already wired for drivers; we just reuse it for employers.
+  //
+  // Note the table is named `driver_password_setup_tokens` for legacy
+  // reasons — it holds tokens for ANY newly-provisioned account that
+  // needs to set its first password (drivers onboarded by employers,
+  // employers provisioned by admin). Renaming the table would need a
+  // migration; the column `driver_user_id` is really just
+  // "the user whose password will be set." Left the name as-is for
+  // MVP; a future rename to `password_setup_tokens` (+ `user_id`) is
+  // a purely cosmetic migration.
+  const { data: tokenRow, error: tokenErr } = await supabase
+    .from("driver_password_setup_tokens")
+    .insert({
+      driver_user_id: employerId,
+      issued_by_employer_id: null,
+    })
+    .select("token")
+    .single();
+  if (tokenErr || !tokenRow) {
+    // Auth user + profile exist but token creation failed. Return
+    // partial success — admin can regenerate the link from the
+    // verification-detail regenerate button. Log the underlying error
+    // so we can spot patterns.
+    console.error(
+      "employer create: token insert failed:",
+      tokenErr?.message ?? "unknown",
+    );
+  } else {
+    const setupUrl = `${APP_URL}/auth/set-password?token=${encodeURIComponent(tokenRow.token as string)}`;
+    await sendEmployerPasswordSetupEmail(email, {
+      fullName,
+      setupUrl,
+    }).catch((err) => {
+      console.error("employer create: email send failed:", err);
+    });
+  }
 
   await logAdminAction(supabase, actor, {
     targetType: "employer",

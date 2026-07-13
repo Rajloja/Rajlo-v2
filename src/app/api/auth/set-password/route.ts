@@ -106,24 +106,46 @@ export async function POST(request: Request) {
     })
     .eq("token", token);
 
-  // ── Auto-sign-in via the cookie-scoped auth client ──
-  // We need the driver's email to sign them in. Fetch from auth.users.
+  // ── Look up the user's role so we can (a) auto-sign them in and
+  // (b) tell the client which portal to land on. The token table is
+  // named `driver_password_setup_tokens` for legacy reasons but is
+  // used by BOTH the driver employer-onboarding flow AND the admin
+  // employer-provisioning flow — the profile row is authoritative for
+  // routing.
   const { data: userLookup } = await supabase.auth.admin.getUserById(
     row.driver_user_id,
   );
   const email = userLookup.user?.email;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", row.driver_user_id)
+    .maybeSingle();
+
+  // Default target: driver portal. Every other role in the setup
+  // flow maps to its own portal; unknown roles fall through to the
+  // rider home, which is the same "you've signed in but you don't
+  // have an obvious portal, go start booking" default the rest of
+  // the app uses.
+  let redirectTo = "/driver";
+  if (profile?.role === "employer") redirectTo = "/employer";
+  else if (profile?.role === "admin" || profile?.role === "safety_officer") {
+    redirectTo = "/admin";
+  } else if (profile?.role === "rider") redirectTo = "/rider";
+
+  // ── Auto-sign-in via the cookie-scoped auth client ──
   if (email) {
     const cookieAuth = await createSupabaseAuthServerClient();
     // signInWithPassword through the cookie client SETS the Supabase
     // session cookies on the response — that's what the browser needs
-    // to arrive at /driver already logged in.
+    // to arrive at the portal already logged in.
     const { error: signInErr } = await cookieAuth.auth.signInWithPassword({
       email,
       password,
     });
     if (signInErr) {
       // Password IS set — the auto-sign-in failed for some other reason.
-      // Return success so the driver can sign in manually on the next screen.
+      // Return success so the user can sign in manually on the next screen.
       console.error(
         "set-password: auto sign-in failed after password set",
         signInErr.message,
@@ -131,5 +153,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, redirectTo });
 }

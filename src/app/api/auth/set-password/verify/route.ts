@@ -68,15 +68,21 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Fetch the driver's email so the landing page can render "for
-  // driver@example.com" — helps the driver confirm they're setting
-  // the right account's password.
-  const { data: authData } = await supabase.auth.admin.getUserById(
-    row.driver_user_id,
-  );
+  // Fetch the user's email + role so the landing page can render
+  // "for user@example.com" and tailor its copy (drivers get a
+  // "documents under review" footnote; employers don't need that).
+  const [{ data: authData }, { data: profile }] = await Promise.all([
+    supabase.auth.admin.getUserById(row.driver_user_id),
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", row.driver_user_id)
+      .maybeSingle(),
+  ]);
 
   return NextResponse.json({
     valid: true,
     driverEmail: authData.user?.email ?? null,
+    role: profile?.role ?? null,
   });
 }
