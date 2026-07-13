@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getAverageRating } from "@/lib/ratings";
 import { getDriverSelfieUrl } from "@/lib/driver-selfie";
+import { getActiveHoldForRide, releaseHold } from "@/lib/wallet-holds";
 
 /**
  * 
@@ -80,6 +81,16 @@ export async function GET() {
         actor_role: "system",
         metadata: { reason: "no driver accepted within timeout window" },
       });
+      // Release the booking-time hold. The rider never actually
+      // took a trip and no fee applies for no-match expiries —
+      // pure refund of the reserved fare. Idempotent: releaseHold
+      // on an already-terminal hold is a no-op, so if the
+      // expire_stale_ride RPC ever grows this behaviour there's
+      // no double-release risk.
+      const hold = await getActiveHoldForRide(supabase, ride.id);
+      if (hold) {
+        await releaseHold(supabase, hold.id, "expired_no_driver");
+      }
     }
   }
 

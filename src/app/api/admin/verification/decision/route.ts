@@ -149,7 +149,17 @@ export async function POST(request: Request) {
     }
   }
 
-  const allApproved = body.docs.every((d) => d.status === "approved");
+  // Zero-docs guard. `[].every(...)` returns TRUE in JS — meaning a
+  // decision request that passed an empty docs array would satisfy
+  // `allApproved` and, if the admin also had activateDriver=true
+  // checked, flip the driver's activated flag on WITHOUT any actual
+  // verification. Requiring at least one doc row makes the check
+  // honest. Real reviews always have every required TA doc in the
+  // array (the client builds it from driver_documents); this guard
+  // catches malformed / probing requests + a UI regression that
+  // dropped the docs before submit.
+  const allApproved =
+    body.docs.length > 0 && body.docs.every((d) => d.status === "approved");
 
   const willActivate = body.activateDriver && allApproved;
   const { error: driverUpdateError } = await supabase

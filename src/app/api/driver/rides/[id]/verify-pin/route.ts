@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { notifyRider } from "@/lib/notify";
 import { PIN_MAX_ATTEMPTS } from "@/lib/pin-verify";
+import { getActiveHoldForRide, releaseHold } from "@/lib/wallet-holds";
 
 /**
  * POST /api/driver/rides/[id]/verify-pin
@@ -147,6 +148,13 @@ export async function POST(
         attempts: nextAttempts,
       },
     });
+    // PIN safety cancel — rider never boarded, no fee, pure refund.
+    // Release the booking-time hold so the rider can immediately
+    // request a fresh ride with the same funds.
+    const hold = await getActiveHoldForRide(supabase, ride.id);
+    if (hold) {
+      await releaseHold(supabase, hold.id, "pin_mismatch_cancel");
+    }
     // Tell the rider their PIN protection cancelled the ride — that's
     // actually a working safety system, not a failure mode they should
     // feel surprised by.

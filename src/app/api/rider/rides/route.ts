@@ -8,7 +8,7 @@ import { notifyRider, notifyAllAvailableDrivers } from "@/lib/notify";
 import { resolveRidePin } from "@/lib/pin-verify";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
 import { FEE_UNCOLLECTED_STATUS } from "@/lib/cancellation-fees";
-import { getBalanceWithLock } from "@/lib/wallet-holds";
+import { getBalanceWithLock, placeHold, releaseHold } from "@/lib/wallet-holds";
 import { nearestParish } from "@/lib/jamaica";
 
 /**
@@ -263,6 +263,47 @@ export async function POST(request: Request) {
     );
   }
 
+  // Wallet HOLD for the estimated fare. Reserves the money on the
+  // rider's wallet so any subsequent spend (withdrawal, transfer, or
+  // another ride) sees it as unavailable — closes the "book, then
+  // withdraw the fare, then trip completes, driver gets zero" race
+  // that used to sit at status/route.ts:393-410. The hold is captured
+  // by the on-complete debit and released on cancellation.
+  //
+  // Rollback ordering: if the hold fails (a concurrent spend slipped
+  // through between the balance gate above and this insert), we DELETE
+  // the ride row we just created rather than leaving an orphan
+  // 'requested' ride the dispatcher would try to fan out. The rider
+  // sees a 402 identical in shape to the pre-insert balance check
+  // rejection — same client-side handling wraps this and the earlier
+  // path so no UI branch is needed.
+  const holdResult = await placeHold(supabase, {
+    userId: user.id,
+    amountJmd: estimatedFareJmd,
+    rideId: ride.id,
+    reason: "private_ride",
+  });
+  if (!holdResult.ok) {
+    await supabase.from("rides").delete().eq("id", ride.id);
+    if (holdResult.insufficientFunds) {
+      return NextResponse.json(
+        {
+          error: `Top up your wallet to book this trip — fare is JMD ${estimatedFareJmd.toLocaleString("en-JM")}, you have JMD ${(holdResult.availableJmd ?? 0).toLocaleString("en-JM")} available.`,
+          insufficientFunds: true,
+          balanceJmd,
+          availableJmd: holdResult.availableJmd ?? 0,
+          lockedJmd,
+          requiredJmd: estimatedFareJmd,
+        },
+        { status: 402 },
+      );
+    }
+    return NextResponse.json(
+      { error: `Failed to place wallet hold: ${holdResult.error}` },
+      { status: 500 },
+    );
+  }
+
   // Insert intermediate stops, position-ordered.
   if (stops.length > 0) {
     const stopRows = stops.map((s, i) => ({
@@ -279,8 +320,11 @@ export async function POST(request: Request) {
       .from("ride_stops")
       .insert(stopRows);
     if (stopsError) {
-      // Cascading delete will clean up if we ever need to rollback. For now
-      // surface the error — the ride row exists but is missing its stops.
+      // Release the hold we just placed so the rider isn't stuck with
+      // locked funds for a ride that never actually formed. Delete the
+      // ride row too — leaving it around would trip the dispatcher.
+      await releaseHold(supabase, holdResult.hold.id, "ride_setup_failed");
+      await supabase.from("rides").delete().eq("id", ride.id);
       return NextResponse.json(
         { error: `Ride created but stops failed: ${stopsError.message}` },
         { status: 500 },

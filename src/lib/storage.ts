@@ -53,6 +53,46 @@ export async function removeDriverDocument(path: string) {
 }
 
 /**
+ * Employer-portal variant of uploadDriverDocument. Files land in the
+ * `employer-drafts/<employer_user_id>/<session_uuid>/<docKey>` subtree
+ * of the same `driver-documents` bucket. The employer-scoped RLS
+ * policies (see supabase/employers-migration.sql) let an authenticated
+ * employer INSERT / SELECT / DELETE within their own subtree only.
+ *
+ * On employer submit, the server moves these files into the newly-
+ * created driver's own folder using service_role — see
+ * /api/employer/drivers/submit/route.ts. Orphaned drafts (employer
+ * bailed on the wizard) are pruned by a periodic sweep; for now
+ * they're small and rare so we leave them until an actual purge is
+ * needed.
+ */
+export async function uploadEmployerDraftDocument({
+  employerUserId,
+  sessionId,
+  docKey,
+  file,
+}: {
+  employerUserId: string;
+  sessionId: string;
+  docKey: string;
+  file: File;
+}): Promise<{ path: string } | { error: string }> {
+  const supabase = createSupabaseBrowserClient();
+  const compressed = await compressImage(file, DOCUMENT_COMPRESS);
+  const ext = compressed.name.split(".").pop()?.toLowerCase() || "bin";
+  const path = `employer-drafts/${employerUserId}/${sessionId}/${docKey}-${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage.from(BUCKET).upload(path, compressed, {
+    cacheControl: IMMUTABLE_CACHE_SECONDS,
+    upsert: false,
+    contentType: compressed.type || undefined,
+  });
+
+  if (error) return { error: error.message };
+  return { path };
+}
+
+/**
  * Returns a short-lived signed URL for previewing/downloading a file. Used
  * server-side from admin verification routes. `expiresIn` is in seconds.
  */

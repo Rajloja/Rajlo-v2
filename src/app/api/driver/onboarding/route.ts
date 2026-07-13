@@ -215,6 +215,88 @@ export async function POST(request: Request) {
     }
   }
 
+  // Payout method — save the driver's bank details captured on step 7.
+  // Same validation surface as PUT /api/driver/payout-method so we
+  // reject the same shapes here (garbage account numbers, missing
+  // fields). On resubmission we overwrite whatever the driver saved
+  // last time so an edit on the review screen actually sticks. Not
+  // fatal to the submission overall — the driver row + docs already
+  // landed. A payout-method failure surfaces as a non-blocking log +
+  // an admin-note flag so ops can chase the driver for correction
+  // instead of losing the whole application.
+  const payoutBankName = body.form.payoutBankName?.trim() ?? "";
+  const payoutBranch = body.form.payoutBranch?.trim() ?? "";
+  const payoutAccountNumber = body.form.payoutAccountNumber?.trim() ?? "";
+  const payoutAccountHolderName =
+    body.form.payoutAccountHolderName?.trim() ?? "";
+  const payoutRoutingNumber = body.form.payoutRoutingNumber?.trim() ?? "";
+  const payoutAccountType =
+    body.form.payoutAccountType === "chequing" ? "chequing" : "savings";
+
+  if (
+    payoutBankName &&
+    payoutBranch &&
+    payoutAccountNumber &&
+    payoutAccountHolderName &&
+    // Mirror the /api/driver/payout-method PUT validator so we don't
+    // silently accept a bogus number that the admin would only catch at
+    // the weekly bank-batch CSV export.
+    /^[0-9\- ]{6,24}$/.test(payoutAccountNumber)
+  ) {
+    const payoutRow = {
+      user_id: user.id,
+      bank_name: payoutBankName,
+      branch: payoutBranch,
+      account_number: payoutAccountNumber,
+      account_holder_name: payoutAccountHolderName,
+      account_type: payoutAccountType,
+      routing_number: payoutRoutingNumber || null,
+    };
+    const { data: existingPayout } = await supabase
+      .from("payout_methods")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const { error: payoutErr } = existingPayout
+      ? await supabase
+          .from("payout_methods")
+          .update(payoutRow)
+          .eq("id", existingPayout.id)
+      : await supabase.from("payout_methods").insert(payoutRow);
+
+    if (payoutErr) {
+      console.error(
+        "Driver onboarding payout-method upsert failed:",
+        payoutErr.message,
+      );
+      // Non-fatal — flag it on the driver's admin_note so ops sees it
+      // in the verification queue and can request the correction.
+      await supabase
+        .from("drivers")
+        .update({
+          admin_note: `Payout method save failed at onboarding: ${payoutErr.message.slice(0, 200)}. Ask driver to re-enter bank details before approval.`,
+        })
+        .eq("id", driverId);
+    }
+  } else if (
+    payoutBankName ||
+    payoutBranch ||
+    payoutAccountNumber ||
+    payoutAccountHolderName
+  ) {
+    // Partial payout data — some fields filled, some blank, or account
+    // number failed the format check. Don't upsert (would create an
+    // unusable half-record) but flag it so the admin knows to chase.
+    await supabase
+      .from("drivers")
+      .update({
+        admin_note:
+          "Payout method incomplete — driver started but didn't fill in every required field (bank name / branch / account number / account holder name), or account number failed validation. Ask them to complete this before approval.",
+      })
+      .eq("id", driverId);
+  }
+
   // Sync the user's profile display name to the name they typed on
   // the onboarding form. Drivers who signed up via Google OAuth have
   // their full_name pre-populated from their Google account, but the

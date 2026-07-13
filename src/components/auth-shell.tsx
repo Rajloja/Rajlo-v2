@@ -50,7 +50,7 @@ type AuthShellProps = {
   /** One-line context shown under the title */
   subtitle?: string;
   /** Branding cue: "rider" or "driver" — drives accent on the side panel */
-  audience?: "rider" | "driver" | "admin";
+  audience?: "rider" | "driver" | "admin" | "employer";
   /** Form / card content */
   children: React.ReactNode;
   /** Optional footer (e.g. "Forgot password?") */
@@ -93,6 +93,16 @@ const AUDIENCE_COPY: Record<
     ],
     mockup: () => <DriverMatchScreen />,
   },
+  employer: {
+    eyebrow: "Field ops",
+    quotes: [
+      "Onboard drivers at the hub.",
+      "5 minutes, one driver, done.",
+      "You capture the docs, we do the rest.",
+      "Every submission traces back to you.",
+    ],
+    mockup: () => <ComplianceScreen />,
+  },
 };
 
 /**
@@ -121,7 +131,7 @@ export function AuthShell({
   // single-column page with the wordmark up top and the form below it.
   // The rider + driver sign-ins still ship the full two-pane marketing
   // shell because those screens are first impressions for outside users.
-  const minimal = audience === "admin";
+  const minimal = audience === "admin" || audience === "employer";
 
   return (
     <div

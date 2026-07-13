@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { getOutstandingLegalDocuments } from "@/lib/legal-consent";
+import {
+  checkDriverOperationEligibility,
+  eligibilityErrorPayload,
+} from "@/lib/driver-eligibility";
 
 /**
  * GET / PATCH /api/driver/online
@@ -113,6 +117,29 @@ export async function PATCH(request: Request) {
         },
         { status: 409 },
       );
+    }
+  }
+
+  // Document-expiry gate: the daily cron sweeps expired docs to the
+  // 'expired' status + auto-suspends, but there's a window (up to
+  // ~24 h) between a doc's midnight expiry and the next cron pass
+  // where the driver row is still activated=true. Real-time check
+  // here closes that window — if any required doc has expires_on
+  // before today, we auto-suspend the driver inline (mirroring the
+  // cron's behaviour) and reject the online-toggle with a structured
+  // error the client can route to /driver/renew from.
+  //
+  // Skipped for `desired=false` (going offline is safety-neutral —
+  // no reason to block a driver from stopping just because a doc
+  // lapsed while they were signed in).
+  if (desired) {
+    const eligibility = await checkDriverOperationEligibility(supabase, {
+      driverId: driver.id,
+    });
+    if (!eligibility.eligible) {
+      return NextResponse.json(eligibilityErrorPayload(eligibility), {
+        status: 403,
+      });
     }
   }
 

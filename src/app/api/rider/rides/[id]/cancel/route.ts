@@ -8,6 +8,7 @@ import {
   chargeFee,
   FEE_UNCOLLECTED_STATUS,
 } from "@/lib/cancellation-fees";
+import { getActiveHoldForRide, releaseHold } from "@/lib/wallet-holds";
 
 /**
  * POST /api/rider/rides/[id]/cancel
@@ -103,6 +104,17 @@ export async function POST(
       },
       { status: 409 },
     );
+  }
+
+  // Release the booking-time wallet hold. The rider doesn't owe the
+  // full estimated fare anymore (they cancelled) — the cancellation-fee
+  // debit below runs against raw balance and doesn't need the hold to
+  // still be in place. Releasing here (rather than after the fee)
+  // makes sure any downstream failure — email, notify, etc. — can't
+  // leave a phantom lock on the rider's wallet.
+  const hold = await getActiveHoldForRide(supabase, cancelled.id);
+  if (hold) {
+    await releaseHold(supabase, hold.id, "ride_cancelled_by_rider");
   }
 
   // Resolve the assigned driver's user id once — needed both to credit

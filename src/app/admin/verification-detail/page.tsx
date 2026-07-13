@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -90,6 +90,10 @@ function VerificationDetailInner() {
   }>({ make: null, model: null, year: null });
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [activated, setActivated] = useState(false);
+  const [onboardedByEmployer, setOnboardedByEmployer] = useState<{
+    id: string;
+    fullName: string;
+  } | null>(null);
   const [docs, setDocs] = useState<ReviewedDoc[]>([]);
   const [empty, setEmpty] = useState(false);
   const [emptyMessage, setEmptyMessage] = useState<string>("");
@@ -141,6 +145,7 @@ function VerificationDetailInner() {
           };
           docs: ReviewedDoc[];
           auditTrail: string[];
+          onboardedByEmployer?: { id: string; fullName: string } | null;
         };
         if (!mounted) return;
 
@@ -153,6 +158,7 @@ function VerificationDetailInner() {
         setDriverId(payload.driverId ?? null);
         setDriverName(payload.driverName ?? "");
         setPlateNumber(payload.plateNumber ?? "");
+        setOnboardedByEmployer(payload.onboardedByEmployer ?? null);
         setSubmittedAt(payload.submittedAt ?? null);
         setActivated(payload.activated ?? false);
         setContact({
@@ -220,6 +226,74 @@ function VerificationDetailInner() {
 
   const hasChanges =
     changeStats.changed > 0 || (adminNote.trim().length > 0 && !saving);
+
+  /* ─── Silent live-refresh (~30 s) ───
+   *
+   * Before this poll the detail page fetched once on mount and never
+   * again. If a driver resubmitted documents while an admin had the
+   * page open, the admin saw the STALE pre-resubmission state — and
+   * would only discover the fresh docs on a hard reload.
+   *
+   * Ground rules:
+   *   - Skip the poll if the admin has unsaved changes OR is mid-save.
+   *     Clobbering their in-flight review is worse than a slightly
+   *     stale view — the queue's own poll will surface the resubmission
+   *     for a fresh open.
+   *   - Skip while the initial load is in flight — spinner covers it.
+   *   - Silent: no loading spinner, no status message flip. If the
+   *     fetch fails, we swallow it; the next tick tries again.
+   *   - Refs for hasChanges / saving so a mid-edit toggle doesn't
+   *     tear down + rebuild the interval on every keystroke.
+   */
+  const hasChangesRef = useRef(false);
+  const savingRef = useRef(false);
+  useEffect(() => {
+    hasChangesRef.current = hasChanges;
+  }, [hasChanges]);
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
+
+  useEffect(() => {
+    if (loading || empty || !queryDriverId) return;
+    let cancelled = false;
+    const refresh = async () => {
+      if (cancelled) return;
+      if (hasChangesRef.current || savingRef.current) return;
+      try {
+        const res = await fetch(
+          `/api/admin/verification?driverId=${encodeURIComponent(queryDriverId)}`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const payload = (await res.json()) as {
+          empty?: boolean;
+          activated?: boolean;
+          docs?: ReviewedDoc[];
+          auditTrail?: string[];
+        };
+        if (cancelled) return;
+        // Re-check the guards — the admin may have started typing
+        // between our fetch fire and the response landing.
+        if (hasChangesRef.current || savingRef.current) return;
+        if (payload.empty) return;
+        setActivated(payload.activated ?? false);
+        const cleanDocs = (payload.docs ?? []).filter(
+          (d) => !NON_DOCUMENT_KEYS.has(d.id) && VALID_DOC_KEYS.has(d.id),
+        );
+        setDocs(cleanDocs);
+        setInitialDocs(cleanDocs.map((d) => ({ ...d })));
+        setAuditTrail(payload.auditTrail ?? []);
+      } catch {
+        /* silent — next tick tries again */
+      }
+    };
+    const timer = setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [loading, empty, queryDriverId]);
 
   const updateStatus = (id: string, status: ReviewState) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)));
@@ -414,6 +488,15 @@ function VerificationDetailInner() {
             {driverId ?? "—"}
             {plateNumber ? ` · Red plate ${plateNumber}` : ""}
           </p>
+          {onboardedByEmployer && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <p className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-rajlo-red">
+                <Icon name="users" className="h-3 w-3" />
+                Onboarded by {onboardedByEmployer.fullName}
+              </p>
+              <RegeneratePasswordLinkButton driverExternalId={driverId} />
+            </div>
+          )}
         </div>
         <span
           className={`shrink-0 self-start rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${
@@ -1308,6 +1391,81 @@ function FilePreviewModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Regenerate password link — admin escape hatch when an employer-
+ * onboarded driver never used their setup email (deleted, spam-
+ * filtered, wrong address). Supersedes all existing tokens for the
+ * driver and emails a fresh one. Only rendered for employer-onboarded
+ * drivers because a self-onboarded driver has a password by
+ * definition (they set it during signup).
+ */
+function RegeneratePasswordLinkButton({
+  driverExternalId,
+}: {
+  driverExternalId: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const regenerate = async () => {
+    if (!driverExternalId) return;
+    if (
+      !confirm(
+        "Send this driver a fresh set-password link? Any previous links stop working immediately.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        "/api/admin/employers/regenerate-password-link",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ driverExternalId }),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Couldn't regenerate.");
+      setMessage("Fresh link sent.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't regenerate.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={regenerate}
+        disabled={busy || !driverExternalId}
+        className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[11px] font-bold hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Icon name="mail" className="h-3 w-3" />
+        {busy ? "Sending…" : "Regenerate password link"}
+      </button>
+      {message && (
+        <span className="text-[11px] font-semibold text-emerald-700">
+          {message}
+        </span>
+      )}
+      {error && (
+        <span className="text-[11px] font-semibold text-rajlo-red">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

@@ -32,32 +32,17 @@ import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
 export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
   return (
     <section className="relative overflow-hidden bg-background py-20 md:py-28 lg:py-32">
-      {/* Section framing — one direct sentence, no eyebrow. Carries
-         the "two modes are equals" principle (PRODUCT.md #3) by
-         actually saying it in plain language. */}
+      {/* Section framing removed in the July 2026 pass. The section
+         used to open with a "Two ways to ride. One way to drive."
+         H2 + sublede; per the design doc, the ride-mode framing now
+         gets carried entirely by the two mode rows below and the
+         section closer at Founding, and the driver-recruiting row
+         moved to /driver. */}
       <div className="mx-auto max-w-7xl px-6 lg:px-12">
-        <m.div
-          initial="initial"
-          whileInView="animate"
-          viewport={{ once: true, amount: 0.4 }}
-          variants={reveal}
-          transition={revealTransition}
-        >
-          <h2 className="max-w-3xl text-[clamp(2rem,3vw+1rem,3.5rem)] font-extrabold leading-[1.05] tracking-[-0.025em] text-foreground [text-wrap:balance]">
-            Two ways to ride.
-            <br />
-            <span className="text-rajlo-red">One way to drive.</span>
-          </h2>
-          <p className="mt-5 max-w-xl text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg">
-            Pick the trip that fits the run. Both ride modes settle the same
-            way — straight out of your wallet, at the fare the law says.
-          </p>
-        </m.div>
-
-        {/* Three rows. Spacing between them deliberately wider than
-           the section pad above so each row reads as its own
-           magazine page rather than a continuous list. */}
-        <div className="mt-16 space-y-20 md:mt-20 md:space-y-28 lg:space-y-32">
+        {/* Two rows — Private ride + Route taxi. Removed row: the
+           dark "Drive with Rajlo · Your car. Your hours." block that
+           lived below Route taxi. That block lives on /driver now. */}
+        <div className="space-y-20 md:space-y-28 lg:space-y-32">
           <ModeRow
             tone="light"
             imageSide="left"
@@ -65,7 +50,7 @@ export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
             imageAlt="A rider meeting her verified Rajlo driver beside a private ride"
             kicker="Private ride"
             title="Door-to-door, just you."
-            body="Pin your pickup and dropoff, see the fare upfront, pay from your wallet. Add stops mid-trip without paying twice. PIN-verify your driver before every trip."
+            body="Pin your pickup and dropoff, secure the fare upfront and pay from your wallet. Verify every trip with a PIN."
             ctaLabel="Book a private ride"
             ctaHref={cta.riderHref}
           />
@@ -76,20 +61,9 @@ export function LandingV3Modes({ cta }: { cta: LandingCtaTargets }) {
             imageAlt="A route taxi and a private ride on a busy Jamaican high street"
             kicker="Route taxi"
             title="Hop the corridor."
-            body="The official TA-anchored fare, paid by leg. Find the next driver running your route, board where you're standing, alight at your stop. Same fare you'd pay roadside — cashless."
+            body="Same local fare. No waiting at stops, your next route taxi comes to you, and drops you off at your exact location along the route. Cashless."
             ctaLabel="Find a route"
             ctaHref={cta.riderHref}
-          />
-          <ModeRow
-            tone="dark"
-            imageSide="left"
-            image={PHOTOS.modeDrive}
-            imageAlt="A Rajlo driver checking their phone at the dashboard"
-            kicker="Drive with Rajlo"
-            title="Your car. Your hours."
-            body="Use your own car, set your own hours, take both private rides and shared route-taxi trips from one app. Transparent commission. Weekly payouts to your Jamaican bank."
-            ctaLabel="Drive with Rajlo"
-            ctaHref={cta.driverHref}
           />
         </div>
       </div>

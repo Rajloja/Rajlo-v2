@@ -7,6 +7,10 @@ import {
 } from "@/lib/email-templates";
 import { notifyRider } from "@/lib/notify";
 import { resolveDriverEmail } from "@/lib/driver-email-resolver";
+import {
+  checkDriverOperationEligibility,
+  eligibilityErrorPayload,
+} from "@/lib/driver-eligibility";
 
 /**
  * POST /api/driver/rides/[id]/accept
@@ -38,10 +42,17 @@ export async function POST(
     );
   }
 
-  // 1. Caller must be an activated, non-deactivated driver.
+  // 1. Caller must be an activated, non-deactivated, currently-ONLINE
+  // driver. `is_online` is the crucial addition here — before it, a
+  // driver could go online, receive the push for a hail, toggle
+  // themselves offline BEFORE tapping Accept, and still successfully
+  // claim the ride via a stale push notification tap. The rider would
+  // then get a driver who no longer intended to drive. The check runs
+  // at the accept moment (not just at push-time) so state changes
+  // during the offer's ~30s validity window are respected.
   const { data: driver } = await supabase
     .from("drivers")
-    .select("id, external_id, activated, deactivated_at")
+    .select("id, external_id, activated, deactivated_at, is_online")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -53,6 +64,38 @@ export async function POST(
       { error: "Your driver account isn't currently active" },
       { status: 403 },
     );
+  }
+  if (!driver.is_online) {
+    return NextResponse.json(
+      {
+        error: "not_online",
+        message:
+          "You went offline before this trip was claimed. Go online again to accept new rides.",
+      },
+      { status: 409 },
+    );
+  }
+
+  // 1a. Real-time operating-eligibility gate. The `activated` check
+  // above only reads the row flag — a driver whose TA badge, licence,
+  // COF, insurance or red-plate reg has expired since the last cron
+  // sweep could still slip past. This helper joins the required-doc
+  // list against expires_on TODAY and — critically — auto-suspends
+  // the driver row if any doc has lapsed. Belt-and-braces with the
+  // same check on the online-toggle endpoint: a driver could have
+  // been safely online at 23:59 with a doc expiring at 00:00, and
+  // the accept-time check catches that even if the online-toggle
+  // check never re-fired.
+  //
+  // Rider safety per the "trust-critical" memory note — this MUST
+  // execute before we ever mutate ride.driver_id.
+  const eligibility = await checkDriverOperationEligibility(supabase, {
+    driverId: driver.id,
+  });
+  if (!eligibility.eligible) {
+    return NextResponse.json(eligibilityErrorPayload(eligibility), {
+      status: 403,
+    });
   }
 
   // 2. Look up the ride to find out if it's part of a carpool group.

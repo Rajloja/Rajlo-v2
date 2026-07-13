@@ -164,6 +164,70 @@ export async function sendWelcomeDriverEmail(to: string, args: { fullName?: stri
 }
 
 /* ──────────────────────────────────────────────────────────────────────
+   2b. Driver password setup — sent when a Rajlo employer onboards a
+   driver at a taxi hub. The driver hasn't set a password (the employer
+   never captured one), so this email is the ONLY way they can access
+   their account. Token lives in driver_password_setup_tokens with
+   consume-once semantics and a 365-day server-side TTL; admin can
+   regenerate if the driver loses it.
+   ────────────────────────────────────────────────────────────────────── */
+
+export function driverPasswordSetupTemplate(args: {
+  fullName?: string | null;
+  setupUrl: string;
+  onboardedByEmployerName?: string | null;
+}) {
+  const first = firstNameOf(args.fullName);
+  const subject = "Set your Rajlo password — you're almost on the road.";
+
+  const sections: EmailSection[] = [
+    {
+      type: "intro",
+      text: `Hi ${first}, ${args.onboardedByEmployerName ? `${args.onboardedByEmployerName}` : "a Rajlo team member"} just onboarded you to Rajlo Driver. All that's left is for you to set your password — that way only you can access your account.`,
+    },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "How this works",
+      text: "Tap the button below to open Rajlo, pick a password, and sign in. Your documents go to our verification team automatically — you'll get another email once you're approved (usually 1–2 business days).",
+    },
+    { type: "cta", href: args.setupUrl, label: "Set my password" },
+    {
+      type: "footnote",
+      text: "This link works only for you and stops working once you've used it. Never share it — if it doesn't work, reply to this email and we'll send you a fresh one.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: "Set your Rajlo Driver password so you can sign in.",
+    eyebrow: "Welcome to Rajlo",
+    title: `You're in, ${first}. Time to set your password.`,
+    sections,
+  });
+
+  const text = plaintext([
+    `Hi ${first}, welcome to Rajlo Driver.`,
+    args.onboardedByEmployerName
+      ? `${args.onboardedByEmployerName} just onboarded you.`
+      : "A Rajlo team member just onboarded you.",
+    "",
+    `Set your password: ${args.setupUrl}`,
+    "",
+    "This link is single-use. Verification takes 1–2 business days.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendDriverPasswordSetupEmail(
+  to: string,
+  args: Parameters<typeof driverPasswordSetupTemplate>[0],
+) {
+  const t = driverPasswordSetupTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+/* ──────────────────────────────────────────────────────────────────────
    3. Driver onboarding submitted
    ────────────────────────────────────────────────────────────────────── */
 

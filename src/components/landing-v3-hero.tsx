@@ -14,7 +14,7 @@ import {
   hoverLiftTransition,
   tapDown,
 } from "@/lib/animations";
-import { calculateRouteFare, getRouteTaxiTariff } from "@/lib/fare-engine";
+import { calculateRouteFare } from "@/lib/fare-engine";
 import { formatJMD, JAMAICA_BOUNDS, detectParish, type Place } from "@/lib/jamaica";
 import { loadGoogleMaps } from "@/lib/google-maps";
 import { PHOTOS, BRAND_FALLBACK_BG } from "./landing-assets";
@@ -71,24 +71,19 @@ const HEADLINES: ReadonlyArray<{
   sub: string;
 }> = [
   {
-    top: "Move across Jamaica,",
-    pill: "your way.",
-    sub: "Two ride modes, one app — private cars and shared route taxis. Pick the trip, we handle the rest.",
+    top: "Two ride options.",
+    pill: "One app.",
+    sub: "Private cars and shared route taxis. Pick your destination and secure fare upfront.",
   },
   {
-    top: "Pay from your wallet,",
-    pill: "no cash.",
-    sub: "Top up once, ride for weeks. Every fare settles straight from your Rajlo wallet — no change, no haggling, no cash at the curb.",
+    top: "Top up once,",
+    pill: "ride for weeks.",
+    sub: "Transparent pricing — no haggling, no cash, no change.",
   },
   {
     top: "Drivers vetted by",
     pill: "the law.",
-    sub: "Every Rajlo driver is TA-licensed, background-checked, and verified on a red plate. The people who move you, on record.",
-  },
-  {
-    top: "Two ways to ride,",
-    pill: "one app.",
-    sub: "Private rides priced by the kilometre, route taxis anchored to the TA tariff. Same wallet, same screen, same wait time.",
+    sub: "Every Rajlo driver is TA-licensed, background-checked and verified on a red plate for your safety.",
   },
 ];
 
@@ -268,8 +263,6 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePhoto, reduce]);
-
-  const tariff = getRouteTaxiTariff();
 
   // Popular-routes list, query-filtered. Drives the TO popover
   // whenever the active mode is Route taxi.
@@ -1153,6 +1146,14 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
                 />
                 TA-verified drivers
               </span>
+              <span aria-hidden className="text-line">·</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon
+                  name="trending-up"
+                  className="h-3.5 w-3.5 text-rajlo-red"
+                />
+                Transparent fares
+              </span>
             </span>
             <Link
               href={cta.driverHref}
@@ -1165,32 +1166,26 @@ export function LandingV3Hero({ cta }: { cta: LandingCtaTargets }) {
         </m.div>
       </div>
 
-      {/* LIVE TARIFF STRIP */}
+      {/* PAYMENT METHODS STRIP — replaces the older TA tariff strip
+         per the July 2026 landing redesign. Simple typography, no
+         card-brand logos (which would fight the brand palette and
+         drag in third-party trademarks). */}
       <div className="relative mt-24 border-t border-line bg-surface-soft md:mt-32">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-6 gap-y-2 px-6 py-4 text-[11px] font-bold uppercase tracking-[0.2em] text-muted md:tracking-[0.3em] lg:justify-between lg:px-12">
-          <span className="flex items-center gap-2">
-            <span
-              className={`h-1.5 w-1.5 rounded-full bg-emerald-500 ${reduce ? "" : "animate-pulse"}`}
-            />
-            <span className="text-foreground">{tariff.label}</span>
-            <span className="text-line">·</span>
-            <span className="tabular-nums">
-              Base ${tariff.baseRateJmd.toFixed(2)} · ${tariff.perKmRateJmd.toFixed(2)}/km
-            </span>
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-6 gap-y-2 px-6 py-4 text-[11px] font-bold uppercase tracking-[0.2em] text-muted md:tracking-[0.3em]">
+          <span className="text-foreground">Accepted payment methods:</span>
+          <span className="flex items-center gap-1.5">
+            <Icon name="credit-card" className="h-3.5 w-3.5 text-rajlo-red" />
+            VISA
           </span>
-          <span className="hidden items-center gap-6 md:flex">
-            <span className="flex items-center gap-2">
-              <Icon name="map-pin" className="h-3.5 w-3.5 text-rajlo-red" />
-              Island-wide
-            </span>
-            <span className="flex items-center gap-2">
-              <Icon name="shield-check" className="h-3.5 w-3.5 text-rajlo-red" />
-              Background-checked
-            </span>
-            <span className="flex items-center gap-2">
-              <Icon name="wallet" className="h-3.5 w-3.5 text-rajlo-red" />
-              Wallet-only
-            </span>
+          <span aria-hidden className="text-line">·</span>
+          <span className="flex items-center gap-1.5">
+            <Icon name="credit-card" className="h-3.5 w-3.5 text-rajlo-red" />
+            Mastercard
+          </span>
+          <span aria-hidden className="text-line">·</span>
+          <span className="flex items-center gap-1.5">
+            <Icon name="wallet" className="h-3.5 w-3.5 text-rajlo-red" />
+            Credit top-up
           </span>
         </div>
       </div>

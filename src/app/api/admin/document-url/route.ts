@@ -34,7 +34,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  // Generate a 5-minute signed URL via service_role
+  // Generate a 30-minute signed URL via service_role. Was 5 min; got
+  // bumped after Raj flagged that admins reviewing a driver's PDF for
+  // more than five minutes hit a 403 on the in-page iframe with no
+  // retry logic — the whole preview modal went blank mid-review.
+  // 30 min is well inside a realistic single-driver review session
+  // without being a real security exposure (admin-authenticated to
+  // begin with, and the URL isn't shareable outside the tab it was
+  // fetched in).
   const admin = getSupabaseServerClient();
   if (!admin) {
     return NextResponse.json({ error: "storage unavailable" }, { status: 500 });
@@ -42,7 +49,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await admin.storage
     .from("driver-documents")
-    .createSignedUrl(path, 60 * 5);
+    .createSignedUrl(path, 60 * 30);
 
   if (error || !data) {
     return NextResponse.json({ error: error?.message ?? "failed" }, { status: 500 });

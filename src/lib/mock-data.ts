@@ -93,6 +93,7 @@ export const adminNav: NavItem[] = [
   { label: "Messaging", labelKey: "nav.admin.messages", href: "/admin/messages", icon: "mail" },
   { label: "Contact recipients", labelKey: "nav.admin.contactRecipients", href: "/admin/contact-recipients", icon: "mail" },
   { label: "Verification queue", labelKey: "nav.admin.verification", href: "/admin/verification-queue", icon: "clipboard-check" },
+  { label: "Employers", labelKey: "nav.admin.employers", href: "/admin/employers", icon: "users" },
   { label: "Driver violations", labelKey: "nav.admin.violations", href: "/admin/violations", icon: "shield-alert" },
   { label: "Vehicle changes", labelKey: "nav.admin.vehicle", href: "/admin/vehicle-changes", icon: "car" },
   { label: "Wallets", labelKey: "nav.admin.wallets", href: "/admin/wallets", icon: "wallet" },
@@ -104,6 +105,17 @@ export const adminNav: NavItem[] = [
   { label: "Fraud & risk", labelKey: "nav.admin.fraud", href: "/admin/fraud", icon: "shield-alert" },
   { label: "Moderation", labelKey: "nav.admin.moderation", href: "/admin/moderation", icon: "shield-check" },
   { label: "Admin security", labelKey: "nav.admin.security", href: "/admin/security", icon: "shield" },
+];
+
+/**
+ * Employer portal nav — Rajlo field-agent / taxi-hub staff who
+ * onboard drivers on their behalf. Small surface: dashboard,
+ * onboarding wizard, settings.
+ */
+export const employerNav: NavItem[] = [
+  { label: "Dashboard", labelKey: "nav.employer.dashboard", href: "/employer", icon: "home" },
+  { label: "Onboard a driver", labelKey: "nav.employer.onboard", href: "/employer/onboard", icon: "users" },
+  { label: "Settings", labelKey: "nav.employer.settings", href: "/employer/settings", icon: "settings" },
 ];
 
 /**

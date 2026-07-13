@@ -2,10 +2,8 @@ import { SiteHeader } from "./site-header";
 import { SiteFooter } from "./site-footer";
 import { LandingV3Hero } from "./landing-v3-hero";
 import { LandingV3Modes } from "./landing-v3-modes";
-import { LandingV3Tariff } from "./landing-v3-tariff";
 import { LandingV3How } from "./landing-v3-how";
 import { LandingV3Why } from "./landing-v3-why";
-import { LandingV3Driver } from "./landing-v3-driver";
 import { LandingV3Founding } from "./landing-v3-founding";
 import { LandingV3Final } from "./landing-v3-final";
 import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
@@ -55,25 +53,28 @@ export function LandingV3({ cta }: { cta: LandingCtaTargets }) {
       {/* §1 Hero — client island (search input + filtered suggestions) */}
       <LandingV3Hero cta={cta} />
 
-      {/* §2 Modes — three alternating magazine spreads */}
+      {/* §2 Modes — Private ride / Route taxi magazine spreads.
+         The design's July 2026 pass removed the "Two ways to ride /
+         One way to drive" summary section that used to bracket this
+         (handled inside landing-v3-modes.tsx). */}
       <LandingV3Modes cta={cta} />
 
-      {/* §3 TA tariff editorial moment — surfaces the regulation */}
-      <LandingV3Tariff />
-
-      {/* §4 How it works — three-step flow, no numbered chrome */}
+      {/* §3 How it works — three-step flow, no numbered chrome */}
       <LandingV3How />
 
-      {/* §5 Why Rajlo — bento-asymmetric 4-tile grid */}
+      {/* §4 Why Rajlo — the "Four promises" section, restructured
+         with a new intro block + five bulleted promises. */}
       <LandingV3Why />
 
-      {/* §6 Driver recruitment — full-bleed photographic */}
-      <LandingV3Driver cta={cta} />
-
-      {/* §7 Founding users — two non-identical panels */}
+      {/* §5 For riders / Route taxi — two equal panels bearing the
+         two ride-mode CTAs. The old rider/driver panel pair here was
+         reworked to Private ride / Route taxi in the July 2026 pass
+         since driver recruiting moved to /driver. */}
       <LandingV3Founding cta={cta} />
 
-      {/* §8 Final CTA — single brand-red drench */}
+      {/* §6 Final CTA — single brand-red drench. The old §6 Driver
+         recruitment section moved to /driver (marketing) and
+         /driver-join (deep-dive) per the same pass. */}
       <LandingV3Final cta={cta} />
 
       <SiteFooter />

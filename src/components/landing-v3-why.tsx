@@ -35,10 +35,49 @@ import { PHOTOS, BRAND_FALLBACK_BG } from "./landing-assets";
  * Sizes/aspect ratios are intentionally different across the four
  * tiles. There is no `repeat(4, 1fr)` anywhere in this section.
  */
+/**
+ * The July 2026 redesign replaced the 4-tile bento grid with a
+ * single editorial intro block + a bulleted promises list. Simpler,
+ * shorter, matches the design doc verbatim.
+ *
+ * The old PhotoTile / PanelTile primitives are kept below as unused
+ * exports in case a future variant wants the bento shape back.
+ * Marked internal-only via the `export function LandingV3Why`
+ * signature — nothing else in the app imports the tile primitives.
+ */
+
+const PROMISES: { title: string; body: string; icon: IconName }[] = [
+  {
+    title: "More convenience.",
+    body: "Precise pick-up and drop-off.",
+    icon: "map-pin",
+  },
+  {
+    title: "More choice.",
+    body: "Private rides or shared route taxis.",
+    icon: "car",
+  },
+  {
+    title: "More for drivers.",
+    body: "Fair, transparent commissions.",
+    icon: "trending-up",
+  },
+  {
+    title: "Less stress.",
+    body: "No haggling. No cash.",
+    icon: "wallet",
+  },
+  {
+    title: "More peace of mind.",
+    body: "Verified drivers. Secure payments.",
+    icon: "shield-check",
+  },
+];
+
 export function LandingV3Why() {
   return (
     <section className="relative overflow-hidden bg-background py-24 md:py-32 lg:py-40">
-      <div className="mx-auto max-w-7xl px-6 lg:px-12">
+      <div className="mx-auto max-w-5xl px-6 lg:px-12">
         <m.div
           initial="initial"
           whileInView="animate"
@@ -50,65 +89,50 @@ export function LandingV3Why() {
             transition={revealTransition}
             className="max-w-3xl text-[clamp(2rem,3vw+1rem,3.5rem)] font-extrabold leading-[1.05] tracking-[-0.025em] text-foreground [text-wrap:balance]"
           >
-            Four promises that
-            <br className="hidden md:block" /> <span className="text-rajlo-red">don&apos;t move.</span>
+            Rajlo is{" "}
+            <span className="text-rajlo-red">modernising local transport</span>
+            {" "}— it&apos;s a smarter way to move.
           </m.h2>
           <m.p
             variants={reveal}
             transition={revealTransition}
-            className="mt-5 max-w-xl text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg"
+            className="mt-3 max-w-2xl text-base font-semibold leading-relaxed text-foreground [text-wrap:pretty] md:text-lg"
           >
-            Not pillars we made up to fill a slide. The four constraints we
-            built the platform around — and won&apos;t trade off.
+            Built by Jamaicans, for Jamaica.
+          </m.p>
+          <m.p
+            variants={reveal}
+            transition={revealTransition}
+            className="mt-5 max-w-2xl text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg"
+          >
+            From everyday trips to airport transfers, Rajlo brings
+            Jamaica&apos;s trusted route taxis and private cars into one
+            simpler, safer way to travel.
           </m.p>
 
-          {/* Bento grid. Two rows on lg+. Top row: 2fr / 1fr.
-             Bottom row: 1fr / 2fr. The aspect ratios + the
-             content-treatment swap (photo-overlay vs text-panel)
-             keep the four tiles from reading as identical. */}
-          <div className="mt-14 grid gap-4 md:mt-16 md:gap-5 lg:grid-cols-3 lg:grid-rows-2">
-            {/* Tile 1 — SAFETY (large, top-left, photo-overlay) */}
-            <PhotoTile
-              image={PHOTOS.pillarSafety}
-              imageAlt="A driver showing their TA-issued PPV badge"
-              kicker="Safety first"
-              title="Every driver, verified."
-              body="TA-issued PPV badge, government ID, vehicle inspection. We re-verify every six months — no exceptions."
-              className="lg:col-span-2 lg:row-span-1"
-              aspectClass="aspect-[16/10] md:aspect-[16/8]"
-            />
-
-            {/* Tile 2 — CASHLESS (small, top-right, text-forward panel) */}
-            <PanelTile
-              tone="brand"
-              kicker="Cashless"
-              title="Wallet does the paying."
-              body="Top up via card or a partner QR. Fares auto-settle when the trip ends. No driver-side change. No bus-fare scramble."
-              icon="wallet"
-              className="lg:col-span-1 lg:row-span-1"
-            />
-
-            {/* Tile 3 — LOCAL (small, bottom-left, text-forward panel) */}
-            <PanelTile
-              tone="dark"
-              kicker="Built right here"
-              title="Made for Jamaica."
-              body="Route corridors, TA fare schedule, JMD pricing. Rajlo is shaped around how the island actually moves — not a rebadged template."
-              icon="map-pin"
-              className="lg:col-span-1 lg:row-span-1"
-            />
-
-            {/* Tile 4 — FAIR EARNINGS (large, bottom-right, photo-overlay) */}
-            <PhotoTile
-              image={PHOTOS.pillarFair}
-              imageAlt="A Rajlo driver checking their earnings on their phone"
-              kicker="Fair earnings"
-              title="Drivers keep more."
-              body="Transparent commission. Weekly payouts to any Jamaican bank. What you earn is what you see — no creeping take-rates."
-              className="lg:col-span-2 lg:row-span-1"
-              aspectClass="aspect-[16/10] md:aspect-[16/8]"
-            />
-          </div>
+          {/* Promises list — one row per promise. Icon + bold lead +
+             short body, matches the design doc's bullet format. Gap
+             is generous so each promise reads on its own line
+             rather than blurring into a paragraph. */}
+          <m.ul
+            variants={reveal}
+            transition={revealTransition}
+            className="mt-12 grid gap-6 md:mt-16 md:gap-7"
+          >
+            {PROMISES.map((p) => (
+              <li key={p.title} className="flex items-start gap-4">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-rajlo-red/10 text-rajlo-red">
+                  <Icon name={p.icon} className="h-5 w-5" />
+                </span>
+                <p className="pt-1 text-lg leading-relaxed [text-wrap:pretty] md:text-xl">
+                  <span className="font-extrabold text-foreground">
+                    {p.title}
+                  </span>{" "}
+                  <span className="text-muted">{p.body}</span>
+                </p>
+              </li>
+            ))}
+          </m.ul>
         </m.div>
       </div>
     </section>

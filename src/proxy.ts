@@ -30,7 +30,7 @@ import { requiredPermissionForAdminPath } from "@/lib/admin-route-permissions";
  * Static assets, API routes, and public marketing pages are not gated.
  */
 
-type Portal = "rider" | "driver" | "admin";
+type Portal = "rider" | "driver" | "admin" | "employer";
 
 /** Pages that any subdomain may serve — auth helpers, legal text,
  *  Supabase OAuth callback, common public pages. */
@@ -39,6 +39,7 @@ const SHARED_PATH_PREFIXES = [
   "/auth/reset-password",
   "/auth/callback",
   "/auth/confirm",
+  "/auth/set-password",
   "/legal/",
   "/support",
   "/403",
@@ -61,6 +62,7 @@ const PORTAL_PATH_PREFIXES: Record<Portal, string[]> = {
   rider: ["/rider", "/auth/rider"],
   driver: ["/driver", "/auth/driver"],
   admin: ["/admin", "/auth/admin"],
+  employer: ["/employer", "/auth/employer"],
 };
 
 /** Determine which portal (if any) this request's host is scoped to.
@@ -72,6 +74,7 @@ function portalForHost(host: string | null): Portal | null {
   if (hostname.startsWith("rider.")) return "rider";
   if (hostname.startsWith("driver.")) return "driver";
   if (hostname.startsWith("admin.")) return "admin";
+  if (hostname.startsWith("employer.")) return "employer";
   return null;
 }
 
@@ -115,6 +118,7 @@ export async function proxy(request: NextRequest) {
         rider: "/auth/rider/login",
         driver: "/auth/driver/login",
         admin: "/auth/admin/login",
+        employer: "/auth/employer/login",
       };
       const url = request.nextUrl.clone();
       url.pathname = loginByPortal[portal];
@@ -130,7 +134,7 @@ export async function proxy(request: NextRequest) {
       //   admin.rajlo.com/admin/safety/abc
       const url = new URL(request.url);
       const baseDomain = (host ?? "").replace(
-        /^(rider|driver|admin)\./i,
+        /^(rider|driver|admin|employer)\./i,
         "",
       );
       url.host = `${owner}.${baseDomain}`;
@@ -161,7 +165,7 @@ export async function proxy(request: NextRequest) {
       const looksLikeFile = (path.split("/").pop() ?? "").includes(".");
       if (!isSharedPath && !isApiPath && !looksLikeFile) {
         const baseDomain = (host ?? "").replace(
-          /^(rider|driver|admin)\./i,
+          /^(rider|driver|admin|employer)\./i,
           "",
         );
         const url = new URL(request.url);
@@ -227,7 +231,10 @@ export async function proxy(request: NextRequest) {
   // ambiguity: /driver-anything can never match.
   const isDriverRoute = path === "/driver" || path.startsWith("/driver/");
   const isRiderRoute = path === "/rider" || path.startsWith("/rider/");
-  const isProtectedPage = isAdminPage || isDriverRoute || isRiderRoute;
+  const isEmployerRoute =
+    path === "/employer" || path.startsWith("/employer/");
+  const isProtectedPage =
+    isAdminPage || isDriverRoute || isRiderRoute || isEmployerRoute;
 
   // Shared paths bypass auth entirely.
   if (SHARED_PATH_PREFIXES.some((p) => path.startsWith(p))) {
@@ -257,7 +264,9 @@ export async function proxy(request: NextRequest) {
       ? "/auth/admin/login"
       : isDriverRoute
         ? "/auth/driver/login"
-        : "/auth/rider/login";
+        : isEmployerRoute
+          ? "/auth/employer/login"
+          : "/auth/rider/login";
     const url = request.nextUrl.clone();
     url.pathname = loginPath;
     url.searchParams.set("next", path);
@@ -291,7 +300,8 @@ export async function proxy(request: NextRequest) {
     if (
       (isAdminPage && !adminAllowed) ||
       (isDriverRoute && role !== "driver") ||
-      (isRiderRoute && role !== "rider")
+      (isRiderRoute && role !== "rider") ||
+      (isEmployerRoute && role !== "employer")
     ) {
       const url = request.nextUrl.clone();
       url.pathname = "/403";

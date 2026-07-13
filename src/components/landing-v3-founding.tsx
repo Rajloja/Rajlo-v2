@@ -55,37 +55,16 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
             className="mx-auto max-w-3xl text-center"
           >
             <h2 className="text-[clamp(2rem,3vw+1rem,3.75rem)] font-extrabold leading-[1.05] tracking-[-0.03em] text-foreground [text-wrap:balance]">
-              Be Part of Building{" "}
-              <span className="text-rajlo-red">Jamaica&apos;s Future</span>
+              Be part of building{" "}
+              <span className="text-rajlo-red">Jamaica&apos;s future</span>
             </h2>
-            <div className="mx-auto mt-5 max-w-2xl space-y-4 text-base leading-relaxed text-muted [text-wrap:pretty] md:text-lg">
-              <p>
-                Rajlo is more than a new ride-hailing platform — it&apos;s an
-                opportunity to help shape a service built by Jamaicans, for
-                Jamaicans.
-              </p>
-              <p>
-                As one of our first drivers, your voice matters. Every ride
-                completed, every suggestion shared, and every community served
-                helps shape how Rajlo grows across the island. From routes
-                and service areas to driver features and fare structures,
-                we&apos;re building alongside the people who use the platform
-                every day.
-              </p>
-              <p>
-                By joining early, you&apos;re not just earning income — you&apos;re
-                helping create jobs, improve transportation, and contribute to
-                a stronger, more connected Jamaica. Be among the pioneers
-                helping drive the future forward.
-              </p>
-            </div>
           </m.div>
 
           {/* Two non-identical panels. Grid sizes differ on lg+ —
              rider panel takes 0.9fr, driver panel takes 1.1fr —
              so neither feels like a copy of the other. On mobile
              they stack 1-col, full-width. */}
-          <div className="mt-14 grid gap-5 md:mt-16 md:gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="mt-14 grid gap-5 md:mt-16 md:gap-6 lg:grid-cols-2">
             {/* RIDER panel — light surface, simple typography lead */}
             <m.div
               initial={
@@ -103,15 +82,14 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
               className="relative flex flex-col rounded-3xl border border-line bg-surface p-8 shadow-sm md:p-10 lg:p-12"
             >
               <p className="font-secondary text-[11px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red md:text-xs">
-                For riders
+                Private ride
               </p>
               <h3 className="mt-3 text-[clamp(1.75rem,2vw+1rem,2.5rem)] font-extrabold leading-[1.05] tracking-[-0.025em] text-foreground [text-wrap:balance]">
-                Sign up. Top up. Take your first trip.
+                Door-to-door, just you.
               </h3>
               <p className="mt-4 flex-1 text-base leading-relaxed text-muted [text-wrap:pretty]">
-                It takes a minute to make an account and a few seconds to
-                fund your wallet. Every booking helps us learn which
-                corridors to staff next.
+                Choose your pickup and drop-off, see your fare upfront, and
+                ride with secure wallet payments and PIN verification.
               </p>
               <m.div
                 whileHover={hoverLift}
@@ -123,9 +101,7 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
                   href={cta.riderHref}
                   className="group inline-flex items-center gap-2 rounded-full bg-rajlo-red px-6 py-3 text-sm font-extrabold text-white shadow-md shadow-rajlo-red/30 transition-colors hover:bg-primary-hover hover:shadow-rajlo-red/50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rajlo-red"
                 >
-                  {cta.riderIsDashboard
-                    ? "Open my dashboard"
-                    : "Become a rider"}
+                  Book a ride
                   <Icon
                     name="arrow-right"
                     className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
@@ -162,15 +138,15 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
               }}
             >
               <p className="font-secondary text-[11px] font-extrabold uppercase tracking-[0.3em] text-rajlo-red md:text-xs">
-                For drivers
+                Route taxi
               </p>
               <h3 className="mt-3 text-[clamp(1.75rem,2vw+1rem,2.5rem)] font-extrabold leading-[1.05] tracking-[-0.025em] [text-wrap:balance]">
-                Verify once. Drive on day one.
+                Hop the corridor.
               </h3>
               <p className="mt-4 flex-1 text-base leading-relaxed text-white/80 [text-wrap:pretty]">
-                Submit your TA badge, ID, and vehicle docs. Once you&apos;re
-                approved, both modes — private and route-taxi — unlock from
-                the same dashboard. The first trip can be the same day.
+                Same local fare. No waiting at stops, your next route taxi
+                comes to you, and drops you off at your exact location along
+                the route. Cashless.
               </p>
               <m.div
                 whileHover={hoverLift}
@@ -179,12 +155,10 @@ export function LandingV3Founding({ cta }: { cta: LandingCtaTargets }) {
                 className="mt-8 inline-block"
               >
                 <Link
-                  href={cta.driverHref}
+                  href={`${cta.riderHref}?mode=route_taxi`}
                   className="group inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-extrabold text-rajlo-red shadow-md shadow-black/30 transition-all hover:bg-white/95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
                 >
-                  {cta.driverIsDashboard
-                    ? "Driver dashboard"
-                    : "Become a driver"}
+                  Find a route
                   <Icon
                     name="arrow-right"
                     className="h-4 w-4 transition-transform group-hover:translate-x-0.5"

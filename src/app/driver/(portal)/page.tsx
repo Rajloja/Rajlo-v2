@@ -309,6 +309,57 @@ export default function DriverHomePage() {
   /* ─── Online toggle persistence ─── */
   const [onlineError, setOnlineError] = React.useState<string | null>(null);
 
+  /* ─── Silent location warm-up ───
+   *
+   * Fire a cheap getCurrentPosition() on portal mount so the position
+   * is cached when the driver taps the Go-online toggle. The toggle's
+   * checkLocationReady() call accepts a cached fix up to 60 s old via
+   * `maximumAge: 60_000`, so warming here + tapping within a minute
+   * means the tap resolves in <100 ms instead of the 1–6 s cold-fix
+   * delay that Raj flagged. Only warms when geolocation permission is
+   * already GRANTED — we deliberately never trigger the OS permission
+   * prompt without a user gesture (that reads as "app is spying on
+   * me the second I open it," which kills trust). Best-effort: any
+   * failure is silently swallowed, the toggle path handles the real
+   * check.
+   */
+  React.useEffect(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if ("permissions" in navigator) {
+          const status = await (navigator.permissions as Permissions).query({
+            name: "geolocation" as PermissionName,
+          });
+          if (status.state !== "granted") return;
+        } else {
+          // No Permissions API — safer to skip warm-up than risk a
+          // spontaneous permission prompt. iOS Safari older versions
+          // fall here.
+          return;
+        }
+        if (cancelled) return;
+        // Fire-and-forget. The success/error callbacks are no-ops;
+        // the mere act of calling getCurrentPosition primes the OS's
+        // internal position cache that checkLocationReady() will read
+        // on the driver's tap.
+        navigator.geolocation.getCurrentPosition(
+          () => undefined,
+          () => undefined,
+          { enableHighAccuracy: false, maximumAge: 60_000, timeout: 6_000 },
+        );
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /** Quick pre-flight: does the browser/OS have location enabled?
    *  If not we can't dispatch trips to this driver — the rider's map
    *  would show a frozen marker the moment a hail came in. We refuse
@@ -370,17 +421,31 @@ export default function DriverHomePage() {
   const setOnline = React.useCallback(
     async (next: boolean) => {
       if (online === next || onlineSyncing) return;
+      // Set the syncing flag FIRST so the toggle shows its spinner
+      // the instant the driver taps. Previously the flag was set AFTER
+      // `checkLocationReady()` returned — which awaits a fresh GPS fix
+      // up to 6 seconds. During that window the toggle sat motionless
+      // with zero visual feedback, so a driver on a cold GPS start
+      // (first tap after opening the app) saw "nothing happened" for
+      // several seconds and often tapped again, which the guard on
+      // the first line quietly ignored. Setting `onlineSyncing` up
+      // front means: (a) the spinner fires immediately, (b) the same
+      // guard now bounces the re-tap correctly, and (c) if location
+      // fails we still tear it back down in `finally`.
+      setOnlineSyncing(true);
+      setOnlineError(null);
       // Going online: require location to be live first. Going
       // offline doesn't need this check (a driver should always be
       // able to drop offline regardless of location state).
       if (next) {
         const ok = await checkLocationReady();
-        if (!ok) return;
+        if (!ok) {
+          setOnlineSyncing(false);
+          return;
+        }
       }
       const prev = online;
       setOnlineState(next);
-      setOnlineSyncing(true);
-      setOnlineError(null);
       try {
         const res = await fetch("/api/driver/online", {
           method: "PATCH",

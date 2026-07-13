@@ -81,23 +81,24 @@ export function AuthFetchGuard() {
       const isDriverPath =
         path === "/driver" || path.startsWith("/driver/");
       const isRiderPath = path === "/rider" || path.startsWith("/rider/");
+      const isEmployerPath =
+        path === "/employer" || path.startsWith("/employer/");
 
       // Public marketing pages (/, /how-it-works, /driver-join,
       // /driver-jobs-in/*, /fare-estimator, etc.) don't belong to any
       // portal, so a 401 from a stray /api/* call on them isn't a
       // signal that the visitor needs to sign in — they weren't
-      // required to be signed in in the first place. Swallow it. This
-      // is the actual fix for the "Become a driver bounces back" bug:
-      // even with the bounded portal check above, a fallback to the
-      // rider login would still ricochet the visitor away from the
-      // marketing page they legitimately opened.
-      if (!isAdminPath && !isDriverPath && !isRiderPath) return;
+      // required to be signed in in the first place. Swallow it.
+      if (!isAdminPath && !isDriverPath && !isRiderPath && !isEmployerPath)
+        return;
 
       const loginPath = isAdminPath
         ? "/auth/admin/login"
         : isDriverPath
           ? "/auth/driver/login"
-          : "/auth/rider/login";
+          : isEmployerPath
+            ? "/auth/employer/login"
+            : "/auth/rider/login";
 
       router.replace(`${loginPath}?next=${encodeURIComponent(path)}`);
     };

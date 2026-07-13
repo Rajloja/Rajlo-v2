@@ -176,6 +176,18 @@ export default function DriverActiveTripPage() {
     primaryRideId: string;
     primaryRiderName: string;
     secondary: { rideId: string; riderName: string } | null;
+    // Payment settlement status, echoed back from the /status endpoint.
+    // "settled" is the happy path — money moved cleanly. Any other
+    // value means the ride completed physically but payment needs
+    // admin reconciliation (rider wallet emptied post-hold, credit
+    // trigger failure, etc.) — the flash shows a warning banner so
+    // the driver isn't left thinking they got paid when they didn't.
+    settlementStatus:
+      | "settled"
+      | "rider_debit_failed"
+      | "driver_credit_failed"
+      | "skipped_zero_fare"
+      | "unknown";
   } | null>(null);
   // Per-ride local state for which ratings the driver has already
   // submitted in this session. Avoids the awkward case where they tap
@@ -422,9 +434,23 @@ export default function DriverActiveTripPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
+      // Always parse the body so the settlement payload (on complete)
+      // is available even when the server returned an error.
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        settlements?: Array<{
+          rideId: string;
+          status:
+            | "settled"
+            | "rider_debit_failed"
+            | "driver_credit_failed"
+            | "skipped_zero_fare";
+          earningsJmd: number | null;
+          error: string | null;
+        }>;
+      };
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? `Server returned ${res.status}`);
+        throw new Error(json.error ?? `Server returned ${res.status}`);
       }
       if (action === "complete") {
         // The driver completed this trip themselves — the flash card
@@ -436,6 +462,15 @@ export default function DriverActiveTripPage() {
         const primaryRider = data?.rider?.name ?? "Rider";
         const partner = data?.carpool?.partner ?? null;
         if (primary) {
+          // Pull THIS driver's settlement row — for carpool trips the
+          // response has one row per ride but the driver's flash reads
+          // the primary ride's outcome. If the settlements array is
+          // absent (older server rev, unexpected shape), fall through
+          // to "unknown" so the flash renders a neutral state rather
+          // than lying about a clean settlement.
+          const outcome = json.settlements?.find(
+            (s) => s.rideId === primary.id,
+          );
           setCompleted({
             fare: fareForCompletion,
             primaryRideId: primary.id,
@@ -443,6 +478,7 @@ export default function DriverActiveTripPage() {
             secondary: partner
               ? { rideId: partner.rideId, riderName: partner.riderName }
               : null,
+            settlementStatus: outcome?.status ?? "unknown",
           });
         }
         setData({ ride: null, rider: null, carpool: null });
@@ -548,24 +584,89 @@ export default function DriverActiveTripPage() {
 
   /* ─── Just-completed flash ─── */
   if (completed) {
+    // Payment landed cleanly ONLY when settlementStatus === "settled".
+    // Every other value means the trip physically completed but the
+    // money didn't move end-to-end — either the rider's wallet couldn't
+    // cover the debit (should be rare with the private-ride hold, but
+    // possible if final fare exceeded the estimated hold amount) or the
+    // driver credit itself failed. In those cases we show a warning
+    // banner with the specific state so the driver doesn't leave
+    // thinking they got paid when they didn't. Admin sees the same
+    // status via the reconciliation queue and can adjust manually.
+    const settled = completed.settlementStatus === "settled";
+    const warning = !settled
+      ? completed.settlementStatus === "rider_debit_failed"
+        ? {
+            title: "Payment pending",
+            body: "The trip completed, but the rider's wallet couldn't cover the fare. Admin will follow up to collect and credit you.",
+          }
+        : completed.settlementStatus === "driver_credit_failed"
+          ? {
+              title: "Credit failed — admin notified",
+              body: "The rider paid, but the credit to your wallet didn't post. Admin will manually credit you shortly.",
+            }
+          : completed.settlementStatus === "skipped_zero_fare"
+            ? {
+                title: "Zero-fare trip",
+                body: "This ride recorded a zero fare, so no earnings were credited. Admin will review.",
+              }
+            : {
+                title: "Payment status unknown",
+                body: "The trip is marked complete but the settlement result didn't come back. Check the Earnings screen shortly — admin will step in if the wallet doesn't show it.",
+              }
+      : null;
+
     return (
       <div className="mx-auto max-w-md space-y-6 px-4 py-12">
         <FadeUp>
           <div className="text-center">
-            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-emerald-600 text-white shadow-2xl shadow-emerald-600/40">
-              <Icon name="check-circle" className="h-10 w-10" />
+            <div
+              className={`mx-auto grid h-20 w-20 place-items-center rounded-full text-white shadow-2xl ${
+                settled
+                  ? "bg-emerald-600 shadow-emerald-600/40"
+                  : "bg-amber-500 shadow-amber-500/40"
+              }`}
+            >
+              <Icon
+                name={settled ? "check-circle" : "alert-triangle"}
+                className="h-10 w-10"
+              />
             </div>
             <h1 className="mt-6 text-3xl font-extrabold tracking-tight">
               Trip complete
             </h1>
             <p className="mt-3 text-sm text-muted">
-              Great job. Your earnings for this trip:
+              {settled
+                ? "Great job. Your earnings for this trip:"
+                : "The trip is done — payment status below:"}
             </p>
-            <p className="mt-1 text-4xl font-extrabold tracking-tight text-rajlo-red">
+            <p
+              className={`mt-1 text-4xl font-extrabold tracking-tight ${
+                settled ? "text-rajlo-red" : "text-amber-700"
+              }`}
+            >
               {formatJMD(completed.fare)}
             </p>
           </div>
         </FadeUp>
+
+        {warning && (
+          <FadeUp delay={0.05}>
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-200 text-amber-900">
+                <Icon name="alert-triangle" className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-extrabold leading-tight">
+                  {warning.title}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-900/90">
+                  {warning.body}
+                </p>
+              </div>
+            </div>
+          </FadeUp>
+        )}
 
         {/* Per-rider rating row(s). For a solo trip there's just one;
            for carpool, two cards stacked. Each card calls the rating

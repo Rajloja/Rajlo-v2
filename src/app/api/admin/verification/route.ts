@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
   let driverQuery = supabase
     .from("drivers")
     .select(
-      "id, external_id, first_name, last_name, phone, email, trn, nis, licence_number, licence_expiry, plate_number, vehicle_make, vehicle_model, vehicle_year, franchise_expiry, onboarding_status, activated, admin_note, created_at, submitted_at",
+      "id, external_id, first_name, last_name, phone, email, trn, nis, licence_number, licence_expiry, plate_number, vehicle_make, vehicle_model, vehicle_year, franchise_expiry, onboarding_status, activated, admin_note, created_at, submitted_at, onboarded_by_employer_id",
     );
 
   if (driverIdParam) {
@@ -104,6 +104,25 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false })
     .limit(40);
 
+  // Resolve the onboarding employer, if any. Employer-onboarded drivers
+  // show a badge on the verification-detail page so admin can see WHO
+  // vouched for this application and attribute quality patterns per
+  // employer over time.
+  let onboardedByEmployer: { id: string; fullName: string } | null = null;
+  if (driver.onboarded_by_employer_id) {
+    const { data: employerProfile } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("id", driver.onboarded_by_employer_id)
+      .maybeSingle();
+    if (employerProfile) {
+      onboardedByEmployer = {
+        id: employerProfile.id,
+        fullName: employerProfile.full_name ?? "Unnamed employer",
+      };
+    }
+  }
+
   return NextResponse.json({
     source: "supabase",
     driverId: driver.external_id,
@@ -114,6 +133,7 @@ export async function GET(request: NextRequest) {
     activated: driver.activated,
     submittedAt: driver.submitted_at ?? driver.created_at,
     adminNote: driver.admin_note,
+    onboardedByEmployer,
     contact: {
       email: driver.email,
       phone: driver.phone,

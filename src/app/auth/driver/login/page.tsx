@@ -65,13 +65,28 @@ function DriverLoginInner() {
 
     if (profile?.role !== "driver") {
       await supabase.auth.signOut();
-      const wrongRole =
-        profile?.role === "rider"
-          ? "This is a rider account. Please use the rider sign-in instead."
-          : profile?.role === "admin"
-            ? "This is an admin account. Please use the admin sign-in instead."
-            : "This account isn't authorized for the driver portal.";
-      setError(wrongRole);
+      // Rider-account-typed-into-driver-login is by far the most
+      // common wrong-role case here. Surface the specific redirect
+      // hyperlink so the visitor can jump straight to the rider
+      // sign-in page in one tap. The other wrong-role cases (admin,
+      // employer, unknown) don't get the same treatment — they're
+      // rare enough that a plain text message + the standard
+      // "Forgot password?" link is enough.
+      if (profile?.role === "rider") {
+        setError(
+          "RIDER_ACCOUNT_REDIRECT",
+        );
+      } else if (profile?.role === "admin") {
+        setError(
+          "This is an admin account. Please use the admin sign-in instead.",
+        );
+      } else if (profile?.role === "employer") {
+        setError(
+          "This is an employer account. Please use the employer sign-in instead.",
+        );
+      } else {
+        setError("This account isn't authorized for the driver portal.");
+      }
       setIsLoading(false);
       return;
     }
@@ -104,10 +119,23 @@ function DriverLoginInner() {
       audience="driver"
     >
       <div className="space-y-5">
-        {error && (
+        {error === "RIDER_ACCOUNT_REDIRECT" ? (
           <div className="rounded-xl border border-rajlo-red/20 bg-primary-soft px-4 py-3 text-sm text-rajlo-red">
-            {error}
+            This is a rider account. Please{" "}
+            <Link
+              href="/auth/rider/login"
+              className="font-bold underline underline-offset-2 hover:no-underline"
+            >
+              use the rider sign-in instead
+            </Link>
+            .
           </div>
+        ) : (
+          error && (
+            <div className="rounded-xl border border-rajlo-red/20 bg-primary-soft px-4 py-3 text-sm text-rajlo-red">
+              {error}
+            </div>
+          )
         )}
 
         <GoogleAuthButton intent="driver" next={next} />

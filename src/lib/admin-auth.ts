@@ -198,7 +198,13 @@ export async function logAdminAction(
   supabase: SupabaseClient,
   actor: AdminActor,
   entry: {
-    targetType: "rider" | "driver" | "admin" | "ride" | "system";
+    targetType:
+      | "rider"
+      | "driver"
+      | "admin"
+      | "ride"
+      | "system"
+      | "employer";
     targetId?: string | null;
     targetLabel?: string | null;
     action: string;

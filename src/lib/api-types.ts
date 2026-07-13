@@ -17,6 +17,17 @@ export type OnboardingSubmitRequest = {
     vehicleColor: string;
     franchiseNumber: string;
     franchiseExpiry: string;
+    // Payout method — captured during onboarding so a driver's first
+    // payout can land the very next Monday after approval instead of
+    // stalling on a post-approval "wait, how do I get paid?" step.
+    // The onboarding endpoint upserts these fields into payout_methods
+    // (same table + validation as PUT /api/driver/payout-method).
+    payoutBankName: string;
+    payoutBranch: string;
+    payoutAccountNumber: string;
+    payoutAccountHolderName: string;
+    payoutAccountType: "savings" | "chequing";
+    payoutRoutingNumber: string;
   };
   uploadedDocs: Array<{
     id: string;

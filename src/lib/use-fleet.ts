@@ -133,10 +133,23 @@ function computeBearing(
  * unmounts), tears the watch + channel down so no GPS access is left
  * running.
  *
- * @param driverId  the driver's auth.user.id (or null if unauth'd)
- * @param online    whether the driver has toggled themselves online
+ * @param driverId    the driver's auth.user.id (or null if unauth'd)
+ * @param online      whether the driver has toggled themselves online
+ * @param rearmToken  bump this to force the watchPosition / channel to
+ *                    tear down and re-arm. Used when the browser's
+ *                    permission or the OS location service was OFF and
+ *                    has come back — the existing watch may be stuck
+ *                    reporting stale POSITION_UNAVAILABLE errors even
+ *                    after the driver re-enables location, and only a
+ *                    fresh watchPosition call resumes the stream. Any
+ *                    change (increment, timestamp, whatever) triggers
+ *                    the re-arm; the value itself isn't meaningful.
  */
-export function useFleetBroadcaster(driverId: string | null, online: boolean) {
+export function useFleetBroadcaster(
+  driverId: string | null,
+  online: boolean,
+  rearmToken: number = 0,
+) {
   // Runtime error from the watchPosition callback (denial, timeout, etc).
   // The "browser doesn't support geolocation" message is derived below
   // instead of synced via setState — keeps us out of the cascading-render
@@ -363,7 +376,7 @@ export function useFleetBroadcaster(driverId: string | null, online: boolean) {
       supabase.removeChannel(channel);
       lastFixRef.current = null;
     };
-  }, [driverId, online]);
+  }, [driverId, online, rearmToken]);
 
   return { error };
 }

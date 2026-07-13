@@ -34,6 +34,9 @@ export type WalletHold = {
   id: string;
   userId: string;
   journeyId: string | null;
+  /** Set for private (Mode A) ride holds. XOR with journeyId — the
+   *  `wallet_holds_journey_xor_ride` check constraint enforces that. */
+  rideId: string | null;
   initialAmountJmd: number;
   amountJmd: number;
   status: "active" | "consumed" | "released" | "partial";
@@ -47,6 +50,7 @@ type HoldRow = {
   id: string;
   user_id: string;
   journey_id: string | null;
+  ride_id: string | null;
   initial_amount_jmd: number;
   amount_jmd: number;
   status: "active" | "consumed" | "released" | "partial";
@@ -60,6 +64,7 @@ const toHold = (r: HoldRow): WalletHold => ({
   id: r.id,
   userId: r.user_id,
   journeyId: r.journey_id,
+  rideId: r.ride_id,
   initialAmountJmd: r.initial_amount_jmd,
   amountJmd: r.amount_jmd,
   status: r.status,
@@ -152,14 +157,27 @@ export async function placeHold(
   args: {
     userId: string;
     amountJmd: number;
-    journeyId: string | null;
+    /** XOR with rideId. Route-taxi journeys hold at journey level. */
+    journeyId?: string | null;
+    /** XOR with journeyId. Private rides hold at ride level. */
+    rideId?: string | null;
     reason?: string;
     metadata?: Record<string, unknown> | null;
   },
 ): Promise<PlaceOutcome> {
-  const { userId, amountJmd, journeyId } = args;
+  const { userId, amountJmd } = args;
+  const journeyId = args.journeyId ?? null;
+  const rideId = args.rideId ?? null;
   if (!Number.isInteger(amountJmd) || amountJmd <= 0) {
     return { ok: false, error: "Hold amount must be a positive integer (JMD)." };
+  }
+  // Mirror the DB `wallet_holds_journey_xor_ride` check so a misuse
+  // fails with a clear caller-facing error instead of a Postgres 23514.
+  if (journeyId && rideId) {
+    return {
+      ok: false,
+      error: "Hold cannot reference both a journey and a ride.",
+    };
   }
 
   const available = await getAvailableBalance(supabase, userId);
@@ -177,10 +195,11 @@ export async function placeHold(
     .insert({
       user_id: userId,
       journey_id: journeyId,
+      ride_id: rideId,
       initial_amount_jmd: amountJmd,
       amount_jmd: amountJmd,
       status: "active",
-      reason: args.reason ?? "route_journey",
+      reason: args.reason ?? (rideId ? "private_ride" : "route_journey"),
       metadata: args.metadata ?? {},
     })
     .select("*")
@@ -343,6 +362,36 @@ export async function getHold(
     .from("wallet_holds")
     .select("*")
     .eq("id", holdId)
+    .maybeSingle();
+  return data ? toHold(data as HoldRow) : null;
+}
+
+/**
+ * Find the CURRENTLY-ACTIVE hold for a given private ride, if any.
+ * Backed by the `wallet_holds_ride_active_idx` partial index so this
+ * is O(1) on the hot path.
+ *
+ * Returns null if:
+ *   - No hold was ever placed for this ride (rides created before the
+ *     private-ride-hold migration will hit this — the on-complete
+ *     path treats it as a soft-fallback to the pre-hold flow).
+ *   - The hold was already consumed / released / released-partial
+ *     (only `active` counts for lookup purposes).
+ */
+export async function getActiveHoldForRide(
+  supabase: SupabaseClient,
+  rideId: string,
+): Promise<WalletHold | null> {
+  const { data } = await supabase
+    .from("wallet_holds")
+    .select("*")
+    .eq("ride_id", rideId)
+    .eq("status", "active")
+    // A ride can only ever have ONE active hold at a time under the
+    // current design (placed at booking, consumed at completion, or
+    // released on cancel). maybeSingle() short-circuits at 1 row so
+    // any accidental duplicate would surface as a Postgres error rather
+    // than silently returning the wrong one.
     .maybeSingle();
   return data ? toHold(data as HoldRow) : null;
 }

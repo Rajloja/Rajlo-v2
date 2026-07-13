@@ -15,8 +15,20 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+/**
+ * DSN resolution: env var wins, hardcoded fallback keeps capture
+ * working when NEXT_PUBLIC_SENTRY_DSN isn't set on Vercel. Matches
+ * src/instrumentation.ts — the two files MUST resolve to the same
+ * DSN or the client and server halves of a single user session land
+ * in different Sentry projects. See instrumentation.ts for the
+ * public-key-safe rationale.
+ */
+const DSN =
+  process.env.NEXT_PUBLIC_SENTRY_DSN ??
+  "https://5b2710ffe979b3a0b6c982ce2ead80d9@o4511370874650624.ingest.us.sentry.io/4511370876026880";
+
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dsn: DSN,
 
   // Performance monitoring: sample 10% of full page-loads. Errors are
   // always captured at 100% regardless of this number.

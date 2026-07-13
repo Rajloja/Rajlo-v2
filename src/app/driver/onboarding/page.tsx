@@ -48,7 +48,8 @@ const STEPS: {
   { id: 4, title: "TA Franchise", subtitle: "Franchise certificate", icon: "file-text" },
   { id: 5, title: "Insurance", subtitle: "PPV insurance", icon: "shield" },
   { id: 6, title: "Police record", subtitle: "Good conduct + selfie", icon: "clipboard-check" },
-  { id: 7, title: "Review", subtitle: "Confirm & submit", icon: "check-circle" },
+  { id: 7, title: "Payout method", subtitle: "Bank account for earnings", icon: "credit-card" },
+  { id: 8, title: "Review", subtitle: "Confirm & submit", icon: "check-circle" },
 ];
 
 /* ═══════════════════════════════════════════════════════════════
@@ -275,6 +276,19 @@ const EMPTY_FORM = {
   vehicleColor: "",
   franchiseNumber: "",
   franchiseExpiry: "",
+  // Payout method — where weekly bank-batch earnings land. Collected
+  // at onboarding so a fresh-approved driver never hits "wait, how do
+  // I get paid?" AFTER their first trip. Optional at signup time
+  // (payoutAccountType is enforced to a known value if provided) but
+  // the review step gates on completion so admins don't see phantom
+  // approvals; drivers can save-draft-and-return if they don't have
+  // an account number handy at signup.
+  payoutBankName: "",
+  payoutBranch: "",
+  payoutAccountNumber: "",
+  payoutAccountHolderName: "",
+  payoutAccountType: "savings" as "savings" | "chequing",
+  payoutRoutingNumber: "",
 };
 
 /** Maps a document key (e.g. "drivers_licence_back") to a human label. */
@@ -574,7 +588,21 @@ function isStepComplete(
     case 6:
       return hasFile("police_record") && hasFile("selfie");
     case 7:
-      return [1, 2, 3, 4, 5, 6].every((s) => isStepComplete(s, form, files));
+      // Payout method — bank details required except routing (many
+      // Jamaican banks don't use / expose a routing number the same
+      // way US banks do; the /api/driver/payout-method endpoint
+      // treats it as optional too). Account type is a select that
+      // always has a value, so we don't need to guard it here.
+      return hasText(
+        "payoutBankName",
+        "payoutBranch",
+        "payoutAccountNumber",
+        "payoutAccountHolderName",
+      );
+    case 8:
+      return [1, 2, 3, 4, 5, 6, 7].every((s) =>
+        isStepComplete(s, form, files),
+      );
     default:
       return false;
   }
@@ -791,6 +819,17 @@ function DriverOnboardingWizard() {
           vehicleColor: pick(d.vehicle_color, prev.vehicleColor),
           franchiseNumber: pick(d.franchise_number, prev.franchiseNumber),
           franchiseExpiry: pick(d.franchise_expiry, prev.franchiseExpiry),
+          // Payout fields aren't returned by /api/driver/me (they live
+          // on payout_methods, not drivers) — always preserve whatever
+          // the driver has locally so a mid-onboarding refresh doesn't
+          // blank the bank-details step. If we later expose payout data
+          // on /me, swap these to `pick(d.payout_*, prev.payout*)`.
+          payoutBankName: prev.payoutBankName,
+          payoutBranch: prev.payoutBranch,
+          payoutAccountNumber: prev.payoutAccountNumber,
+          payoutAccountHolderName: prev.payoutAccountHolderName,
+          payoutAccountType: prev.payoutAccountType,
+          payoutRoutingNumber: prev.payoutRoutingNumber,
         };
       });
 
@@ -1489,6 +1528,98 @@ function DriverOnboardingWizard() {
             {step === 7 && (
               <div className="space-y-6">
                 <p className="text-sm leading-relaxed text-muted">
+                  This is where your weekly earnings will land. Rajlo settles driver payouts every Monday via bank batch to the account you save here. You can change this any time from your Wallet in the driver app.
+                </p>
+
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                    Why we ask now
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-900/90">
+                    You could add this later from the Wallet screen, but drivers who set it during onboarding get their first payout on the very next Monday — no delays chasing a missing account after your first trip.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <TextInput
+                    label="Bank name"
+                    placeholder="e.g. National Commercial Bank"
+                    value={form.payoutBankName}
+                    onChange={(v) => setForm((f) => ({ ...f, payoutBankName: v }))}
+                    required
+                  />
+                  <TextInput
+                    label="Branch"
+                    placeholder="e.g. Half Way Tree"
+                    value={form.payoutBranch}
+                    onChange={(v) => setForm((f) => ({ ...f, payoutBranch: v }))}
+                    required
+                  />
+                  <TextInput
+                    label="Account holder name"
+                    placeholder="Must match your driver's licence"
+                    hint="If this doesn't match the name on your driver's licence and TRN exactly, payouts will bounce."
+                    value={form.payoutAccountHolderName}
+                    onChange={(v) =>
+                      setForm((f) => ({ ...f, payoutAccountHolderName: v }))
+                    }
+                    required
+                  />
+                  <TextInput
+                    label="Account number"
+                    placeholder="Digits only"
+                    value={form.payoutAccountNumber}
+                    onChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        payoutAccountNumber: v.replace(/\D/g, ""),
+                      }))
+                    }
+                    required
+                  />
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold">
+                      Account type
+                      <span className="ml-0.5 text-rajlo-red">*</span>
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["savings", "chequing"] as const).map((t) => {
+                        const active = form.payoutAccountType === t;
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() =>
+                              setForm((f) => ({ ...f, payoutAccountType: t }))
+                            }
+                            className={`rounded-xl border px-4 py-3 text-sm font-semibold capitalize transition-colors ${
+                              active
+                                ? "border-rajlo-red bg-primary-soft text-rajlo-red"
+                                : "border-line bg-surface text-foreground hover:bg-surface-soft"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </label>
+                  <TextInput
+                    label="Routing / ABM number"
+                    placeholder="Optional — not all Jamaican banks use one"
+                    hint="Leave blank if your bank doesn't provide a routing number for local transfers."
+                    value={form.payoutRoutingNumber}
+                    onChange={(v) =>
+                      setForm((f) => ({ ...f, payoutRoutingNumber: v }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {step === 8 && (
+              <div className="space-y-6">
+                <p className="text-sm leading-relaxed text-muted">
                   Review your submission below. Once submitted, our operations team will verify your documents against Jamaica Transport Authority records — typically within 1–2 business days.
                 </p>
 
@@ -1530,6 +1661,52 @@ function DriverOnboardingWizard() {
                             </p>
                           )}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">
+                    Payout account
+                  </p>
+                  <div className="grid gap-2 rounded-2xl border border-line bg-surface-soft p-3">
+                    {(
+                      [
+                        ["Bank", form.payoutBankName || "—"],
+                        ["Branch", form.payoutBranch || "—"],
+                        ["Account holder", form.payoutAccountHolderName || "—"],
+                        // Mask all but the last 4 digits so the review
+                        // screen doesn't paste the full account number
+                        // in the driver's screenshot / cache.
+                        [
+                          "Account number",
+                          form.payoutAccountNumber
+                            ? `•••• ${form.payoutAccountNumber.slice(-4)}`
+                            : "—",
+                        ],
+                        [
+                          "Account type",
+                          form.payoutAccountType === "chequing"
+                            ? "Chequing"
+                            : "Savings",
+                        ],
+                        [
+                          "Routing / ABM",
+                          form.payoutRoutingNumber || "Not provided",
+                        ],
+                      ] as Array<[string, string]>
+                    ).map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex items-start justify-between gap-3 rounded-lg bg-surface px-3 py-2"
+                      >
+                        <span className="mt-0.5 text-xs font-medium text-muted">
+                          {label}
+                        </span>
+                        <span className="text-right text-sm font-semibold">
+                          {value}
+                        </span>
                       </div>
                     ))}
                   </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, m } from "motion/react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -56,6 +56,22 @@ export function DriverOnlinePresence() {
   const [online, setOnline] = useState(false);
   const [locationOff, setLocationOff] = useState(false);
   const [going, setGoing] = useState<"offline" | null>(null);
+  // Bumped whenever locationOff transitions true → false. Threaded into
+  // useFleetBroadcaster's `rearmToken` so the underlying watchPosition
+  // + realtime channel tear down and re-arm the moment location comes
+  // back. Without this bump, a driver whose GPS died mid-trip (Android
+  // quick-settings, WebView backgrounding, OS location toggle) stayed
+  // silent to the rider's map even after they re-enabled location, and
+  // the rider watched a frozen marker until the trip ended. The counter
+  // itself isn't meaningful — any change to it triggers the re-arm.
+  const [fleetRearmToken, setFleetRearmToken] = useState(0);
+  const prevLocationOffRef = useRef(false);
+  useEffect(() => {
+    if (prevLocationOffRef.current && !locationOff) {
+      setFleetRearmToken((t) => t + 1);
+    }
+    prevLocationOffRef.current = locationOff;
+  }, [locationOff]);
   // True when the driver has an open route-taxi hailing session. While
   // this is true we remove the "Go offline" escape from the
   // location-off modal — the driver has riders mid-route relying on
@@ -159,7 +175,11 @@ export function DriverOnlinePresence() {
   /* ─── Position broadcast — drives the foreground service on
        Android and the browser watch on the web. Runs across every
        driver page now, not only the dashboard. ─── */
-  useFleetBroadcaster(driverUserId, online && onDriverPortal);
+  useFleetBroadcaster(
+    driverUserId,
+    online && onDriverPortal,
+    fleetRearmToken,
+  );
 
   /* ─── Silent location-permission monitor ─── */
   useEffect(() => {

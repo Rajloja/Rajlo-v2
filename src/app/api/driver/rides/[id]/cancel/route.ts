@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { createSupabaseAuthServerClient } from "@/lib/supabase-auth-server";
 import { sendTripCancelledEmail } from "@/lib/email-templates";
 import { notifyRider } from "@/lib/notify";
+import { getActiveHoldForRide, releaseHold } from "@/lib/wallet-holds";
 
 /**
  * POST /api/driver/rides/[id]/cancel
@@ -76,6 +77,15 @@ export async function POST(
       },
       { status: 409 },
     );
+  }
+
+  // Driver-initiated cancels are always fee-free for the rider (no
+  // cancellation-fees module call here) — so releasing the hold is a
+  // pure refund of the reserved fare. The rider's next booking sees
+  // this money as available immediately.
+  const hold = await getActiveHoldForRide(supabase, cancelled.id);
+  if (hold) {
+    await releaseHold(supabase, hold.id, "ride_cancelled_by_driver");
   }
 
   await supabase.from("ride_events").insert({

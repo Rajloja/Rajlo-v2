@@ -8,14 +8,13 @@ import { Logo } from "./logo";
 type NavLink = { label: string; href: string };
 type NavItem = NavLink | { label: string; menu: NavLink[] };
 
-/** Single source of truth for the top-bar nav. Items with a `menu`
- * key render as a dropdown (desktop) or expandable accordion
- * (mobile drawer). Plain `href` items render as a single link. */
-const NAV_ITEMS: NavItem[] = [
-  { label: "Home", href: "/" },
+/** Burger-menu items. The primary nav simplified in the July 2026
+ *  redesign — every deep link moved into the burger, leaving only a
+ *  single central "audience swap" link ("Drive with us" on the rider
+ *  variant, "Ride with us" on the driver variant) beside the logo. */
+const BURGER_ITEMS: NavItem[] = [
   { label: "How it works", href: "/how-it-works" },
   { label: "Fare estimator", href: "/fare-estimator" },
-  { label: "Drive with us", href: "/driver-join" },
   {
     label: "Support",
     menu: [
@@ -59,11 +58,23 @@ export function SiteHeader({
   bookHref = "/auth/rider/signup",
   bookLabel = "Book a ride",
   transparentOverDark = false,
+  variant = "rider",
 }: {
   bookHref?: string;
   bookLabel?: string;
   transparentOverDark?: boolean;
+  /** Header variant — drives the audience-swap link ("Drive with us"
+   *  on the rider variant, "Ride with us" on the driver variant) and
+   *  the right-side action shape (rider shows "Sign in" + CTA button;
+   *  driver shows only the "Sign in" CTA — no separate text link). */
+  variant?: "rider" | "driver";
 } = {}) {
+  const audienceLink =
+    variant === "driver"
+      ? { label: "Ride with us", href: "/" }
+      : { label: "Drive with us", href: "/drive" };
+  const signInHref =
+    variant === "driver" ? "/auth/driver/login" : "/auth/rider/login";
   const pathname = usePathname();
 
   const [scrolled, setScrolled] = useState(false);
@@ -127,65 +138,54 @@ export function SiteHeader({
             variant={isGlass ? "white" : "default"}
           />
 
-          {/* Desktop nav — hidden on mobile. */}
+          {/* Central audience-swap link — desktop only. Single link
+             ("Drive with us" or "Ride with us") replaces the older
+             6-item horizontal nav. Deep links moved into the burger
+             on the right. */}
           <nav
             className="hidden items-center gap-6 md:flex"
             aria-label="Primary"
           >
-            {NAV_ITEMS.map((item) => {
-              if (isMenu(item)) {
-                const anyActive = item.menu.some((m) => pathname === m.href);
-                return (
-                  <DesktopMenu
-                    key={item.label}
-                    label={item.label}
-                    items={item.menu}
-                    active={anyActive}
-                    linkTone={linkTone}
-                    activeLinkTone={activeLinkTone}
-                    isGlass={isGlass}
-                  />
-                );
-              }
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`text-sm font-medium ${
-                    active ? `font-semibold ${activeLinkTone}` : linkTone
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+            <Link
+              href={audienceLink.href}
+              className={`text-sm font-semibold ${
+                pathname === audienceLink.href ? activeLinkTone : linkTone
+              }`}
+            >
+              {audienceLink.label}
+            </Link>
           </nav>
 
-          {/* Right side — desktop: sign-in + CTA. Mobile: hamburger
-             only. The CTA moves into the drawer on mobile. */}
+          {/* Right side — desktop: sign-in (rider variant only) + CTA
+             button + burger. Mobile: only the burger; the CTA moves
+             into the drawer. */}
           <div className="flex items-center gap-2">
+            {variant === "rider" && (
+              <Link
+                href={signInHref}
+                className={`hidden rounded-full px-3 py-2 text-sm font-medium md:inline-flex ${signInTone}`}
+              >
+                Sign in
+              </Link>
+            )}
             <Link
-              href="/auth/rider/login"
-              className={`hidden rounded-full px-3 py-2 text-sm font-medium md:inline-flex ${signInTone}`}
-            >
-              Sign in
-            </Link>
-            <Link
-              href={bookHref}
+              href={variant === "driver" ? signInHref : bookHref}
               className="hidden rounded-full bg-rajlo-red px-4 py-2 text-sm font-semibold text-white shadow-md shadow-rajlo-red/30 transition-all hover:-translate-y-0.5 hover:bg-primary-hover md:inline-flex"
             >
-              {bookLabel}
+              {variant === "driver" ? "Sign in" : bookLabel}
             </Link>
 
-            {/* Mobile hamburger — 2-line minimal pictogram. */}
+            {/* Burger — visible on ALL breakpoints in the July 2026
+               redesign. On mobile it opens the drawer (as before);
+               on desktop it opens the same drawer, giving one place
+               to reach How it works / Fare estimator / Support /
+               Legal regardless of screen size. */}
             <button
               type="button"
               aria-label={drawerOpen ? "Close menu" : "Open menu"}
               aria-expanded={drawerOpen}
               onClick={() => setDrawerOpen((v) => !v)}
-              className={`grid h-10 w-10 place-items-center rounded-xl transition-colors md:hidden ${
+              className={`grid h-10 w-10 place-items-center rounded-xl transition-colors ${
                 isGlass
                   ? "bg-white/10 hover:bg-white/20"
                   : "bg-surface-soft hover:bg-primary-soft"
@@ -222,7 +222,7 @@ export function SiteHeader({
       <div
         aria-hidden={!drawerOpen}
         onClick={() => setDrawerOpen(false)}
-        className={`fixed inset-0 z-50 bg-rajlo-black/55 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
+        className={`fixed inset-0 z-50 bg-rajlo-black/55 backdrop-blur-sm transition-opacity duration-300 ${
           drawerOpen
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0"
@@ -233,7 +233,7 @@ export function SiteHeader({
          dark-gradient surface. Mirrors the dark-hero aesthetic so
          the transition from header to drawer feels seamless. */}
       <aside
-        className={`fixed inset-x-0 top-0 z-50 overflow-hidden border-b border-white/10 text-white shadow-2xl transition-transform duration-300 ease-out md:hidden ${
+        className={`fixed inset-x-0 top-0 z-50 overflow-hidden border-b border-white/10 text-white shadow-2xl transition-transform duration-300 ease-out ${
           drawerOpen ? "translate-y-0" : "-translate-y-full"
         }`}
         style={{
@@ -270,7 +270,23 @@ export function SiteHeader({
              inline links since the user is in a focused menu.
              Items with a `menu` render as an expandable group. */}
           <nav className="mt-5 grid gap-1" aria-label="Mobile primary">
-            {NAV_ITEMS.map((item) =>
+            {/* Audience-swap link first — same one that appears on
+               desktop centrally. Puts the primary cross-audience
+               action at the top of the drawer for one-tap access. */}
+            <Link
+              href={audienceLink.href}
+              className={`flex items-center justify-between rounded-2xl px-4 py-3 text-base font-extrabold tracking-tight transition-colors ${
+                pathname === audienceLink.href
+                  ? "bg-white text-rajlo-red"
+                  : "text-white/90 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              {audienceLink.label}
+              <svg viewBox="0 0 24 24" className="h-4 w-4 stroke-current" strokeWidth={2} strokeLinecap="round" fill="none">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </Link>
+            {BURGER_ITEMS.map((item) =>
               isMenu(item) ? (
                 <MobileGroup
                   key={item.label}
@@ -309,19 +325,24 @@ export function SiteHeader({
           </nav>
 
           {/* Divider + sign-in + CTA — the CTA gets the standout
-             brand-red treatment so it remains the obvious action. */}
+             brand-red treatment so it remains the obvious action.
+             On the driver variant we collapse to a single "Sign in"
+             CTA (no separate outline button) — matches the desktop
+             right-side treatment. */}
           <div className="mt-5 flex items-center gap-3 border-t border-white/10 pt-5">
+            {variant === "rider" && (
+              <Link
+                href={signInHref}
+                className="flex-1 rounded-full border border-white/20 px-4 py-3 text-center text-sm font-bold text-white/90 transition-colors hover:bg-white/10"
+              >
+                Sign in
+              </Link>
+            )}
             <Link
-              href="/auth/rider/login"
-              className="flex-1 rounded-full border border-white/20 px-4 py-3 text-center text-sm font-bold text-white/90 transition-colors hover:bg-white/10"
-            >
-              Sign in
-            </Link>
-            <Link
-              href={bookHref}
+              href={variant === "driver" ? signInHref : bookHref}
               className="flex-1 rounded-full bg-rajlo-red px-4 py-3 text-center text-sm font-extrabold text-white shadow-lg shadow-rajlo-red/40 transition-all hover:-translate-y-0.5 hover:bg-primary-hover"
             >
-              {bookLabel}
+              {variant === "driver" ? "Sign in" : bookLabel}
             </Link>
           </div>
 

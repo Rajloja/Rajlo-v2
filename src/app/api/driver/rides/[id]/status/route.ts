@@ -8,6 +8,11 @@ import {
 import { notifyRider } from "@/lib/notify";
 import { resolveDriverEmail } from "@/lib/driver-email-resolver";
 import { creditWallet, debitWallet } from "@/lib/wallet";
+import {
+  consumeHoldPortion,
+  getActiveHoldForRide,
+  releaseHold,
+} from "@/lib/wallet-holds";
 import { splitFare } from "@/lib/fare-engine";
 import {
   noShowWaitElapsed,
@@ -318,6 +323,25 @@ export async function POST(
     );
   }
 
+  // Per-ride settlement outcome, populated ONLY when action === "complete".
+  // Threaded into the response so the driver's client can render a
+  // "settled + JMD X" flash for the happy path and a warning banner
+  // when settlement lands in one of the failure branches. Declared at
+  // function scope (not inside the completion block below) so the
+  // final return statement can always read it — for non-complete
+  // actions it stays an empty array.
+  type SettlementOutcome = {
+    rideId: string;
+    status:
+      | "settled"
+      | "rider_debit_failed"
+      | "driver_credit_failed"
+      | "skipped_zero_fare";
+    earningsJmd: number | null;
+    error: string | null;
+  };
+  const settlements: SettlementOutcome[] = [];
+
   // For "complete" we additionally backfill final_fare_jmd from each
   // ride's own estimate. We do it per-row so each rider's row gets
   // their own fare snapshot rather than a copy of the group's.
@@ -378,10 +402,23 @@ export async function POST(
           .from("rides")
           .update({ settlement_status: "skipped_zero_fare" })
           .eq("id", ride.id);
+        settlements.push({
+          rideId: ride.id,
+          status: "skipped_zero_fare",
+          earningsJmd: null,
+          error: null,
+        });
         continue;
       }
       const { driverEarningsJmd, commissionJmd } = splitFare(fare);
       const description = `Ride · ${ride.pickup_name} → ${ride.dropoff_name}`;
+
+      // Pull the active hold placed at booking (if any). Rides created
+      // BEFORE the private-ride-hold migration won't have one — fall
+      // back to the pre-hold flow and let the debit succeed-or-fail on
+      // its own. Post-migration rides ALWAYS have a hold because the
+      // booking endpoint places one atomically with ride creation.
+      const activeHold = await getActiveHoldForRide(supabase, ride.id);
 
       const debit = await debitWallet(
         supabase,
@@ -391,12 +428,24 @@ export async function POST(
         { rideId: ride.id, description },
       );
       if (!debit.ok) {
-        // Rider couldn't be charged. Record the failure so admin can
-        // reach out / collect / waive. We DO NOT credit the driver in
-        // this branch — the platform shouldn't pay out earnings on a
-        // ride where the rider didn't actually pay. Driver gets paid
-        // when admin manually settles (or rider tops up + the cron
-        // sweeper retries — future work).
+        // Rider couldn't be charged. Under the hold model this should
+        // now be much rarer — the hold reserved the estimated fare at
+        // booking, so any subsequent withdrawal / transfer was
+        // rejected as "insufficient available balance." The remaining
+        // failure modes are (a) actual fare > estimated (rider added
+        // stops or the driver stamped a final_fare_jmd above the
+        // estimate), (b) admin manually released the hold, (c) trigger
+        // race. Release the hold before we bail so the rider's locked
+        // portion doesn't linger as a phantom — the debit failure
+        // means the ride is going to admin-reconciliation regardless,
+        // and stranded locks are a customer-support headache.
+        if (activeHold) {
+          await releaseHold(
+            supabase,
+            activeHold.id,
+            "rider_debit_failed_on_complete",
+          );
+        }
         await supabase
           .from("rides")
           .update({
@@ -406,7 +455,41 @@ export async function POST(
             driver_earnings_jmd: driverEarningsJmd,
           })
           .eq("id", ride.id);
+        settlements.push({
+          rideId: ride.id,
+          status: "rider_debit_failed",
+          earningsJmd: driverEarningsJmd,
+          error: debit.error.slice(0, 200),
+        });
         continue;
+      }
+
+      // Debit succeeded — clear the hold. The hold amount MAY differ
+      // from the actual fare (rider added a stop mid-trip that
+      // ballooned the estimate, or driver stamped a lower final fare):
+      //
+      //   fare <= hold.amount → consume `fare`; releaseHold flips the
+      //     remainder from `active` to `partial` (bookkeeping — money
+      //     already moved via debitWallet).
+      //   fare  > hold.amount → consume the full hold amount. The
+      //     debit already succeeded which means the rider's raw balance
+      //     covered the overage — the hold under-reserved but nothing
+      //     is actually broken.
+      if (activeHold) {
+        const consumeAmount = Math.min(fare, activeHold.amountJmd);
+        await consumeHoldPortion(supabase, activeHold.id, consumeAmount);
+        // If any portion of the hold remains active after consume
+        // (rider paid less than we reserved), release it back to the
+        // rider's available balance. releaseHold on a fully-consumed
+        // hold is a no-op — the status flipped to `consumed` inside
+        // consumeHoldPortion when remaining hit 0.
+        if (activeHold.amountJmd > consumeAmount) {
+          await releaseHold(
+            supabase,
+            activeHold.id,
+            "final_fare_below_estimate",
+          );
+        }
       }
 
       const credit = await creditWallet(
@@ -435,6 +518,12 @@ export async function POST(
             settled_at: new Date().toISOString(),
           })
           .eq("id", ride.id);
+        settlements.push({
+          rideId: ride.id,
+          status: "driver_credit_failed",
+          earningsJmd: driverEarningsJmd,
+          error: credit.error.slice(0, 200),
+        });
         continue;
       }
 
@@ -449,6 +538,12 @@ export async function POST(
           settled_at: new Date().toISOString(),
         })
         .eq("id", ride.id);
+      settlements.push({
+        rideId: ride.id,
+        status: "settled",
+        earningsJmd: driverEarningsJmd,
+        error: null,
+      });
     }
 
     // Best-effort receipt email per affected rider. We pull each
@@ -659,5 +754,10 @@ export async function POST(
     ok: true,
     status: transition.to,
     affectedRideIds: updated.map((r) => r.id),
+    // Empty for non-complete actions. On complete: one row per ride
+    // touched. Driver client reads this to decide whether to show the
+    // happy-path flash or the "trip completed but payment needs
+    // reconciliation" warning banner.
+    settlements,
   });
 }

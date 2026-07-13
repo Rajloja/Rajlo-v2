@@ -348,6 +348,17 @@ export async function notifyAllAvailableDrivers(
         d.user_id
           ? notifyDriver(supabase, {
               ...args,
+              // Fan-outs ALWAYS write inbox rows regardless of the
+              // caller's pushOnly flag. Callers set pushOnly:true on
+              // ride hails to avoid polluting every driver's inbox
+              // with 20+ auto-expiring rows per shift, but the
+              // trade-off silently dropped hails on drivers whose
+              // FCM token had been pruned/throttled — those drivers
+              // then had no visible signal a hail existed. Better to
+              // keep the inbox row (it's cheap; ~20 rows per shift
+              // isn't polluting) so the delivery is durable, and let
+              // the offer-timeout sweeper prune stale rows.
+              pushOnly: false,
               driverUserId: d.user_id as string,
             })
           : null,
@@ -377,6 +388,9 @@ export async function notifyAllAvailableDrivers(
       d.user_id
         ? notifyDriver(supabase, {
             ...args,
+            // See comment above — fan-outs force inbox delivery so a
+            // dead FCM token doesn't equal a lost hail.
+            pushOnly: false,
             driverUserId: d.user_id as string,
           })
         : null,
