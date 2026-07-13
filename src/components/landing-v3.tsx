@@ -4,7 +4,6 @@ import { LandingV3Hero } from "./landing-v3-hero";
 import { LandingV3Modes } from "./landing-v3-modes";
 import { LandingV3How } from "./landing-v3-how";
 import { LandingV3Why } from "./landing-v3-why";
-import { LandingV3Driver } from "./landing-v3-driver";
 import { LandingV3Founding } from "./landing-v3-founding";
 import { LandingV3Final } from "./landing-v3-final";
 import type { LandingCtaTargets } from "@/lib/landing-cta-targets";
@@ -68,20 +67,15 @@ export function LandingV3({ cta }: { cta: LandingCtaTargets }) {
          with a new intro block + five bulleted promises. */}
       <LandingV3Why />
 
-      {/* §5 Driver recruitment — full-bleed "Your car. Your hours."
-         section. Its primary CTA resolves via cta.driverHref:
-         anonymous → /drive (the driver marketing page), signed-in
-         driver → /driver (dashboard). The section stays on the
-         landing as a pitch; the /drive page carries the deeper
-         driver-audience marketing content and links onward into
-         /driver-join for the actual application. */}
-      <LandingV3Driver cta={cta} />
-
-      {/* §6 For riders / Route taxi — two equal panels bearing the
+      {/* §5 For riders / Route taxi — two equal panels bearing the
          two ride-mode CTAs. */}
       <LandingV3Founding cta={cta} />
 
-      {/* §7 Final CTA — single brand-red drench. */}
+      {/* §6 Final CTA — single brand-red drench.
+         Removed from this composition in the July 2026 pass:
+           - §3 TA tariff pull-quote → lives at /fare-estimator
+           - §5 Driver recruitment ("Your car. Your hours.") → lives
+             at /drive (reachable via the "Drive with us" nav link) */}
       <LandingV3Final cta={cta} />
 
       <SiteFooter />
