@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { appEnv } from "@/lib/app-env";
 
 /**
  * GET /api/health
@@ -78,5 +79,11 @@ export async function GET() {
     ts: new Date().toISOString(),
     // Vercel injects VERCEL_ENV automatically. Local dev shows undefined.
     env: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
+    // App-level env indicator. VERCEL_ENV can't distinguish the
+    // staging Vercel project from the prod one (both are
+    // "production" in Vercel terms) so this is the authoritative
+    // signal for smoke tests: hitting /api/health on staging must
+    // return appEnv:"staging", never "production".
+    appEnv: appEnv(),
   });
 }
