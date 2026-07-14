@@ -195,8 +195,7 @@ const REQUIRED_DOCS = [
   "Comprehensive PPV Insurance (commercial passenger cover)",
   "Valid Jamaica Driver's Licence (PPV class)",
   "TRN (Taxpayer Registration Number)",
-  "NIS (National Insurance Scheme) registration",
-  "Police Record / Good Conduct Certificate",
+  "Police Record / Good Conduct Certificate (can be uploaded after sign-up)",
   "Red Plate Vehicle Registration",
   "Identity selfie (matched against licence and badge)",
 ];

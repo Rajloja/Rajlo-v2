@@ -113,7 +113,7 @@ export function FileUpload({
     };
   }, [localBlobUrl]);
 
-  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault();
     setDragOver(false);
     const dropped = e.dataTransfer.files?.[0];
@@ -317,6 +317,18 @@ export function FileUpload({
   }
 
   // ═══════════════════ Standard row mode ═══════════════════
+  // Two input surfaces — one hints "camera" (opens the rear camera
+  // straight to snap a doc on mobile; ignored on desktop), the other
+  // is a plain file picker for browsing the device. Field-agent
+  // employers snap driver docs on the spot; drivers who already have
+  // digital copies browse.
+  //
+  // The row itself is NOT clickable anymore — clicks are scoped to
+  // the two icon buttons on the right. Drag-and-drop still hits the
+  // outer container so an existing "drop a PDF here" flow works.
+  const showActions = !file?.uploading && !file?.approved;
+  const showRemove = file?.path && !file.uploading && !file.approved;
+
   return (
     <div>
       <p className="mb-1.5 text-sm font-semibold">
@@ -324,18 +336,14 @@ export function FileUpload({
         {field.required && <span className="ml-0.5 text-rajlo-red">*</span>}
       </p>
       {field.hint && <p className="mb-2 text-xs text-muted">{field.hint}</p>}
-      <label
+      <div
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        // `overflow-hidden` is critical — without it, a long UUID-style
-        // filename bleeds past the container's right edge on mobile
-        // even though the inner <p> has `truncate`, because the flex
-        // child's `min-w-0` alone isn't always enough on iOS Safari.
-        className={`group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-2xl border-2 border-dashed px-4 py-3.5 transition-all sm:gap-4 sm:px-5 sm:py-4 ${stateClass}`}
+        className={`group relative flex items-center gap-3 overflow-hidden rounded-2xl border-2 border-dashed px-4 py-3.5 transition-all sm:gap-4 sm:px-5 sm:py-4 ${stateClass}`}
       >
         <span
           className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors sm:h-11 sm:w-11 ${iconBg}`}
@@ -350,14 +358,11 @@ export function FileUpload({
           {file?.error ? (
             <>
               <p className="truncate text-sm font-semibold text-rajlo-red">Upload failed</p>
-              <p className="truncate text-xs text-muted">{file.error} · click to retry</p>
+              <p className="truncate text-xs text-muted">{file.error} · tap camera or attach to retry</p>
             </>
           ) : file?.uploading ? (
             <>
               <p className="truncate text-sm font-semibold text-foreground">{file.name}</p>
-              {/* Indeterminate progress bar — a 30%-wide red pill that
-                  slides across a soft track. Communicates "in flight"
-                  without needing real upload-progress events. */}
               <div className="mt-1.5 flex items-center gap-2">
                 <div className="h-1 flex-1 overflow-hidden rounded-full bg-rajlo-red/15">
                   <div className="rajlo-pending-bar h-full w-1/3 rounded-full bg-rajlo-red" />
@@ -380,41 +385,76 @@ export function FileUpload({
               </div>
               <p className="truncate text-xs font-medium text-emerald-700">
                 {file.approved
-                  ? "Already verified by admin · click to replace"
-                  : `Uploaded · ${(file.size / 1024).toFixed(0)} KB · click to replace`}
+                  ? "Already verified by admin"
+                  : `Uploaded · ${(file.size / 1024).toFixed(0)} KB`}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold">Click or drop file here</p>
+              <p className="text-sm font-semibold">Snap or upload document</p>
               <p className="text-xs text-muted">PDF, JPG or PNG up to 10MB</p>
             </>
           )}
         </div>
-        {file?.path && !file.uploading && !file.approved && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              remove();
-            }}
-            aria-label="Remove file"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-white hover:text-rajlo-red"
-          >
-            <Icon name="x" className="h-4 w-4" />
-          </button>
+
+        {/* Action buttons — Camera (snap) + Attach (browse) + Remove.
+            Each label wraps its own hidden input so clicking the icon
+            triggers ITS input (native <label>/<input> binding), keeping
+            the two surfaces independent. `capture="environment"` on the
+            camera one hints mobile browsers to open the rear camera
+            directly; desktop just falls back to the standard file
+            picker (attribute is ignored). */}
+        {showActions && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <label
+              aria-label="Take photo"
+              title="Take photo"
+              className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg bg-white text-muted ring-1 ring-line transition-colors hover:text-rajlo-red hover:ring-rajlo-red/40 sm:h-10 sm:w-10"
+            >
+              <Icon name="camera" className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) pick(f);
+                  // Reset so picking the same file twice still fires onChange.
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <label
+              aria-label="Attach file"
+              title="Attach file"
+              className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg bg-white text-muted ring-1 ring-line transition-colors hover:text-rajlo-red hover:ring-rajlo-red/40 sm:h-10 sm:w-10"
+            >
+              <Icon name="paperclip" className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) pick(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {showRemove && (
+              <button
+                type="button"
+                onClick={remove}
+                aria-label="Remove file"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-white hover:text-rajlo-red sm:h-10 sm:w-10"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         )}
-        <input
-          type="file"
-          accept=".pdf,.jpg,.jpeg,.png"
-          className="hidden"
-          disabled={file?.uploading}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) pick(f);
-          }}
-        />
-      </label>
+      </div>
     </div>
   );
 }

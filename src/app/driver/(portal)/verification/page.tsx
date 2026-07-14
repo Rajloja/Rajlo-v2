@@ -480,7 +480,7 @@ export default function DriverVerificationPage() {
             />
             <RenewalLink
               label="Tax Administration Jamaica"
-              detail="TRN + NIS records"
+              detail="TRN records"
               href="https://www.jamaicatax.gov.jm/"
             />
           </ul>

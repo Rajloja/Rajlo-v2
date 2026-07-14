@@ -10,6 +10,7 @@ import {
   type FileState,
 } from "@/components/file-upload";
 import { VehiclePicker } from "@/components/vehicle-picker";
+import { WheelDateInput } from "@/components/wheel-date-input";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import {
   uploadEmployerDraftDocument,
@@ -52,7 +53,7 @@ import {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STEPS: { id: number; title: string; subtitle: string; icon: IconName }[] = [
-  { id: 1, title: "Personal info", subtitle: "TRN, NIS, contact", icon: "user" },
+  { id: 1, title: "Personal info", subtitle: "TRN + contact", icon: "user" },
   { id: 2, title: "Licence & Badge", subtitle: "Driver's licence + TA badge", icon: "shield-check" },
   { id: 3, title: "Vehicle details", subtitle: "Red plate + COF", icon: "car" },
   { id: 4, title: "TA Franchise", subtitle: "Franchise certificate", icon: "file-text" },
@@ -131,7 +132,7 @@ function isStepComplete(step: number, form: FormShape, files: FileState): boolea
     keys.every((k) => String(form[k]).trim() !== "");
   switch (step) {
     case 1:
-      return hasText("firstName", "lastName", "phone", "email", "trn", "nis");
+      return hasText("firstName", "lastName", "phone", "email", "trn");
     case 2:
       return (
         hasText("licenceNumber", "licenceExpiry", "badgeNumber") &&
@@ -157,7 +158,11 @@ function isStepComplete(step: number, form: FormShape, files: FileState): boolea
     case 5:
       return hasFile("insurance");
     case 6:
-      return hasFile("police_record") && hasFile("selfie");
+      // Police record is OPTIONAL at onboarding — many drivers won't
+      // have it with them at the taxi hub. Driver uploads it later
+      // from their dashboard; runtime eligibility gate stops them
+      // from going online until it's on file.
+      return hasFile("selfie");
     case 7:
       return hasText(
         "payoutBankName",
@@ -473,13 +478,6 @@ export default function EmployerOnboardPage() {
                 onChange={(v) => setForm((f) => ({ ...f, trn: v.replace(/\D/g, "") }))}
                 required
               />
-              <TextInput
-                label="NIS"
-                hint="National Insurance Scheme number"
-                value={form.nis}
-                onChange={(v) => setForm((f) => ({ ...f, nis: v }))}
-                required
-              />
             </div>
           </div>
         )}
@@ -492,9 +490,8 @@ export default function EmployerOnboardPage() {
               onChange={(v) => setForm((f) => ({ ...f, licenceNumber: v }))}
               required
             />
-            <TextInput
+            <WheelDateInput
               label="Licence expiry"
-              type="date"
               value={form.licenceExpiry}
               onChange={(v) => setForm((f) => ({ ...f, licenceExpiry: v }))}
               required
@@ -594,14 +591,14 @@ export default function EmployerOnboardPage() {
         {step === 4 && (
           <div className="space-y-4">
             <TextInput
-              label="Franchise certificate number"
+              label="Road license / Franchise certificate number"
+              hint="Same number issued by the TA — some drivers call it a Road License"
               value={form.franchiseNumber}
               onChange={(v) => setForm((f) => ({ ...f, franchiseNumber: v }))}
               required
             />
-            <TextInput
+            <WheelDateInput
               label="Franchise expiry"
-              type="date"
               value={form.franchiseExpiry}
               onChange={(v) => setForm((f) => ({ ...f, franchiseExpiry: v }))}
               required
@@ -637,11 +634,18 @@ export default function EmployerOnboardPage() {
 
         {step === 6 && (
           <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+              <p className="font-bold text-amber-900">Police record is optional here</p>
+              <p className="mt-1 text-amber-900/85">
+                Skip it if the driver doesn&apos;t have a soft copy on hand — they can upload it themselves from their driver dashboard after signing in. They won&apos;t be able to accept rides until it&apos;s on file; we&apos;ll email them reminders until then.
+              </p>
+            </div>
             <FileUpload
               field={{
                 id: "police_record",
                 label: "Police record / Good Conduct Certificate",
-                required: true,
+                hint: "Optional — driver can upload later from their dashboard.",
+                required: false,
               }}
               files={files}
               onPick={handlePickFile}
@@ -753,7 +757,6 @@ export default function EmployerOnboardPage() {
                   ["Email", form.email],
                   ["Mobile", form.phone],
                   ["TRN", form.trn],
-                  ["NIS", form.nis],
                   ["Licence", form.licenceNumber, form.licenceExpiry],
                   ["Badge", form.badgeNumber],
                   ["Plate", form.plateNumber],
