@@ -7,10 +7,13 @@
 export function friendlyError(code: string | null): string | null {
   if (!code) return null;
 
-  // Supabase OAuth PKCE / state errors all fall under one broad
-  // family — "we lost your session between Google and us". The fix is
-  // always the same from the user's perspective: try again in the
-  // same browser. Match heuristically on the message we get back.
+  // Supabase PKCE / state errors all fall under one broad family —
+  // "we lost your session between an external step (Google OAuth OR
+  // an email confirmation link) and us". The fix is always the same
+  // from the user's perspective: try again in the same browser.
+  // Message is deliberately provider-neutral because email-confirm
+  // flows hit the same code path and previously (mis)directed the
+  // user to Google.
   const lower = code.toLowerCase();
   if (
     lower.includes("pkce") ||
@@ -20,7 +23,7 @@ export function friendlyError(code: string | null): string | null {
     lower.includes("state cookie") ||
     lower.includes("auth code")
   ) {
-    return "Your sign-in session timed out before we could complete it. Please try Continue with Google again — same browser, same tab — and don't close it while you authenticate.";
+    return "Your sign-in session expired before we could finish. Try again in the same browser tab you started in, and don't close it until you're signed in.";
   }
 
   switch (code) {

@@ -184,11 +184,15 @@ export function WheelDateInput({
               className="relative flex overflow-hidden rounded-2xl bg-surface-soft"
               style={{ height: CONTAINER_HEIGHT }}
             >
-              {/* Center highlight pill — sits behind the wheels; the
-                  wheels' text renders on top. */}
+              {/* Center highlight pill — must sit BEHIND the wheels or
+                  it paints over the selected item's text (absolute
+                  elements normally paint above static siblings). Explicit
+                  z-0 on the pill + z-10 on each column below sorts the
+                  stacking so the pill is a background band, not an
+                  overlay. */}
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute left-2 right-2 rounded-xl bg-primary-soft"
+                className="pointer-events-none absolute left-2 right-2 z-0 rounded-xl bg-primary-soft"
                 style={{
                   top: (CONTAINER_HEIGHT - ITEM_HEIGHT) / 2,
                   height: ITEM_HEIGHT,
@@ -306,7 +310,7 @@ function WheelColumn<T extends number>({
     <div
       ref={ref}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-scroll [&::-webkit-scrollbar]:hidden"
+      className="relative z-10 flex-1 overflow-y-scroll [&::-webkit-scrollbar]:hidden"
       style={{
         scrollSnapType: "y mandatory",
         scrollbarWidth: "none",
@@ -320,7 +324,7 @@ function WheelColumn<T extends number>({
           key={v}
           className={`flex items-center justify-center text-base transition-colors ${
             v === selected
-              ? "font-bold text-foreground"
+              ? "font-bold text-rajlo-red"
               : "text-muted/60"
           }`}
           style={{ height: ITEM_HEIGHT, scrollSnapAlign: "center" }}
