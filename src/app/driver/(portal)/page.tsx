@@ -8,6 +8,7 @@ import { ArcWatermark } from "@/components/arc-pattern";
 import { FadeUp } from "@/components/anim";
 import { EmptyState } from "@/components/empty-state";
 import { DriverReadinessGate } from "@/components/driver-readiness-gate";
+import { PoliceRecordBanner } from "@/components/police-record-banner";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { formatJMD } from "@/lib/jamaica";
 import { announceDriverOnlineChange } from "@/components/driver-online-presence";
@@ -623,6 +624,11 @@ export default function DriverHomePage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 py-2 md:px-3 md:py-8">
+      {/* Police-record nudge — renders itself invisibly once the doc
+         is on file. Sits above the hero so it's the first thing a
+         driver sees on login until they've uploaded. */}
+      <PoliceRecordBanner />
+
       {/* HERO — wrapped in the readiness gate so an un-installed /
          un-subscribed driver sees the install + push-permission
          walkthrough INSTEAD of the online toggle. Once both

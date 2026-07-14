@@ -9,6 +9,7 @@ import { ArcWatermark } from "@/components/arc-pattern";
 import { Icon, type IconName } from "@/components/icons";
 import { FadeUp } from "@/components/anim";
 import { FileUpload, type FileState, type UploadedFile } from "@/components/file-upload";
+import { WheelDateInput } from "@/components/wheel-date-input";
 import { Skeleton } from "@/components/skeleton";
 import { VehiclePicker } from "@/components/vehicle-picker";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -42,7 +43,7 @@ const STEPS: {
   subtitle: string;
   icon: IconName;
 }[] = [
-  { id: 1, title: "Personal info", subtitle: "TRN, NIS, contact", icon: "user" },
+  { id: 1, title: "Personal info", subtitle: "TRN + contact", icon: "user" },
   { id: 2, title: "Licence & Badge", subtitle: "Driver's licence + TA badge", icon: "shield-check" },
   { id: 3, title: "Vehicle details", subtitle: "Red plate + COF", icon: "car" },
   { id: 4, title: "TA Franchise", subtitle: "Franchise certificate", icon: "file-text" },
@@ -104,152 +105,6 @@ function TextInput({
             : "bg-surface focus:border-rajlo-red focus:ring-2 focus:ring-rajlo-red/15"
         }`}
       />
-    </label>
-  );
-}
-
-/**
- * Type-friendly date input. Driver types the digits straight from their
- * licence (e.g. `15082030`) and we auto-format as `15/08/2030`. The form
- * state stays in ISO `YYYY-MM-DD` so the API/DB don't have to change.
- *
- * Why not <input type="date">? On mobile, picking a year 5+ years out
- * means tapping through page after page of the calendar — annoying for
- * licence/franchise expiry dates which are always in the future.
- */
-function DateInput({
-  label,
-  value,
-  onChange,
-  hint,
-  required,
-}: {
-  label: string;
-  /** ISO date `YYYY-MM-DD` (or empty string when unset). */
-  value: string;
-  /** Called with an ISO date when the input is a valid full date,
-   *  or the empty string when the user hasn't finished typing. */
-  onChange: (iso: string) => void;
-  hint?: string;
-  required?: boolean;
-}) {
-  // Local state holds the visible "DD/MM/YYYY" string. We seed it from the
-  // ISO `value` prop so pre-filled forms show the expected format.
-  const isoToDisplay = (iso: string): string => {
-    if (!iso) return "";
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-    if (!m) return "";
-    return `${m[3]}/${m[2]}/${m[1]}`;
-  };
-
-  const [display, setDisplay] = useState<string>(() => isoToDisplay(value));
-  // Track the last-synced value via a ref so the effect can skip
-  // setState entirely when the prop hasn't changed — avoids the
-  // React 19 "setState in effect" warning that fires on synchronous
-  // updates inside useEffect.
-  const lastSyncedRef = useRef(value);
-
-  // Re-sync when the form-level value flips (e.g. resubmission pre-fill or
-  // localStorage draft restore). Skipping the sync while the user is mid-type
-  // would erase their input on every render.
-  useEffect(() => {
-    if (lastSyncedRef.current === value) return;
-    lastSyncedRef.current = value;
-    const next = isoToDisplay(value);
-    const nextDigits = next.replace(/\D/g, "");
-    const prevDigits = display.replace(/\D/g, "");
-    if (prevDigits === nextDigits) return;
-    // Defer setState off the synchronous effect body so the lint
-    // rule's cascading-render check passes. Semantically identical
-    // to a direct setDisplay(next) call — just on the next microtask.
-    queueMicrotask(() => setDisplay(next));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  const formatDigits = (digits: string): string => {
-    const d = digits.slice(0, 8);
-    if (d.length <= 2) return d;
-    if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
-    return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
-  };
-
-  // Treat the visible string as valid when it parses to a real Gregorian
-  // date. Anything else stays as raw text and reports "" upward so the
-  // continue-button stays disabled until the date is complete.
-  const validateAndEmit = (next: string) => {
-    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(next);
-    if (!m) {
-      onChange("");
-      return;
-    }
-    const day = Number(m[1]);
-    const month = Number(m[2]);
-    const year = Number(m[3]);
-    if (
-      year < 1900 ||
-      year > 2100 ||
-      month < 1 ||
-      month > 12 ||
-      day < 1 ||
-      day > 31
-    ) {
-      onChange("");
-      return;
-    }
-    // Detect impossible days (Feb 30, Apr 31 etc.) by round-tripping.
-    const dt = new Date(Date.UTC(year, month - 1, day));
-    if (
-      dt.getUTCFullYear() !== year ||
-      dt.getUTCMonth() !== month - 1 ||
-      dt.getUTCDate() !== day
-    ) {
-      onChange("");
-      return;
-    }
-    const iso = `${year.toString().padStart(4, "0")}-${month
-      .toString()
-      .padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
-    onChange(iso);
-  };
-
-  const handleChange = (raw: string) => {
-    const digits = raw.replace(/\D/g, "");
-    const formatted = formatDigits(digits);
-    setDisplay(formatted);
-    validateAndEmit(formatted);
-  };
-
-  // Show a subtle inline warning when the user has entered enough digits
-  // to form a complete date but it failed validation — e.g. 31/02/2030.
-  const looksComplete = display.replace(/\D/g, "").length === 8;
-  const isInvalid = looksComplete && !value;
-
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold">
-        {label}
-        {required && <span className="ml-0.5 text-rajlo-red">*</span>}
-      </span>
-      {hint && <p className="mb-2 text-xs text-muted">{hint}</p>}
-      <input
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        value={display}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder="DD/MM/YYYY"
-        maxLength={10}
-        className={`w-full rounded-xl border bg-surface px-4 py-3 text-sm tracking-wide outline-none transition-all placeholder:text-muted/70 focus:ring-2 focus:ring-rajlo-red/15 ${
-          isInvalid
-            ? "border-rajlo-red focus:border-rajlo-red"
-            : "border-line focus:border-rajlo-red"
-        }`}
-      />
-      {isInvalid && (
-        <p className="mt-1.5 text-xs font-medium text-rajlo-red">
-          That doesn&apos;t look like a real date. Use DD/MM/YYYY.
-        </p>
-      )}
     </label>
   );
 }
@@ -557,7 +412,7 @@ function isStepComplete(
 
   switch (step) {
     case 1:
-      return hasText("firstName", "lastName", "phone", "email", "trn", "nis");
+      return hasText("firstName", "lastName", "phone", "email", "trn");
     case 2:
       return (
         hasText("licenceNumber", "licenceExpiry", "badgeNumber") &&
@@ -586,7 +441,15 @@ function isStepComplete(
     case 5:
       return hasFile("insurance");
     case 6:
-      return hasFile("police_record") && hasFile("selfie");
+      // Police record is OPTIONAL at onboarding. Many drivers don't
+      // have a soft copy of their Good Conduct Certificate on hand when
+      // signing up at a taxi hub — they can upload it later from the
+      // driver dashboard. The runtime eligibility gate
+      // (checkDriverOperationEligibility) still requires it before a
+      // driver can go online, and a periodic email reminder nags them
+      // until it's on file. Selfie stays required — no reason to defer
+      // that.
+      return hasFile("selfie");
     case 7:
       // Payout method — bank details required except routing (many
       // Jamaican banks don't use / expose a routing number the same
@@ -1429,17 +1292,14 @@ function DriverOnboardingWizard() {
                 </div>
                 <TextInput label="Mobile number" placeholder="876-XXX-XXXX" value={form.phone} onChange={setField("phone")} hint="Must match the number on your TA Badge application" required />
                 <TextInput label="Email address" type="email" value={authEmail || form.email} onChange={() => {}} hint="The email you registered with — used for all verification updates" required readOnly />
-                <div className="grid gap-5 md:grid-cols-2">
-                  <TextInput label="TRN" placeholder="9-digit TRN" value={form.trn} onChange={setField("trn")} hint="Required for all TA fee processing" required />
-                  <TextInput label="NIS number" placeholder="NIS number" value={form.nis} onChange={setField("nis")} hint="National Insurance Scheme" required />
-                </div>
+                <TextInput label="TRN" placeholder="9-digit TRN" value={form.trn} onChange={setField("trn")} hint="Required for all TA fee processing" required />
               </div>
             )}
 
             {step === 2 && (
               <div className="space-y-5">
                 <TextInput label="Driver's licence number" placeholder="DL-123456" value={form.licenceNumber} onChange={setField("licenceNumber")} hint="Class that permits PPV / taxi operation" required />
-                <DateInput label="Licence expiry date" value={form.licenceExpiry} onChange={setField("licenceExpiry")} hint="As shown on your driver's licence" required />
+                <WheelDateInput label="Licence expiry date" value={form.licenceExpiry} onChange={setField("licenceExpiry")} hint="As shown on your driver's licence" required />
                 <div className="grid gap-5 md:grid-cols-2">
                   <FileUpload field={{ id: "drivers_licence_front", label: "Driver's licence — front", hint: "Clear photo of the front of the licence", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
                   <FileUpload field={{ id: "drivers_licence_back", label: "Driver's licence — back", hint: "Clear photo of the back of the licence", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
@@ -1500,8 +1360,8 @@ function DriverOnboardingWizard() {
                 <p className="text-sm leading-relaxed text-muted">
                   The TA Franchise Certificate grants the right to operate on a specific route or zone. It&apos;s renewed annually and is the primary authorization for PPV operation in Jamaica.
                 </p>
-                <TextInput label="Franchise certificate number" placeholder="FC-2025-XXXXXX" value={form.franchiseNumber} onChange={setField("franchiseNumber")} required />
-                <DateInput label="Franchise expiry date" value={form.franchiseExpiry} onChange={setField("franchiseExpiry")} hint="Annual renewal — we'll remind you 60 days before expiry" required />
+                <TextInput label="Road license / Franchise certificate number" placeholder="FC-2025-XXXXXX" value={form.franchiseNumber} onChange={setField("franchiseNumber")} hint="Same number issued by the TA — some drivers call it a Road License" required />
+                <WheelDateInput label="Franchise expiry date" value={form.franchiseExpiry} onChange={setField("franchiseExpiry")} hint="Annual renewal — we'll remind you 60 days before expiry" required />
                 <FileUpload field={{ id: "franchise_cert", label: "TA Franchise Certificate", hint: "Upload the certificate as issued by the Jamaica Transport Authority", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
               </div>
             )}
@@ -1520,7 +1380,16 @@ function DriverOnboardingWizard() {
 
             {step === 6 && (
               <div className="space-y-5">
-                <FileUpload field={{ id: "police_record", label: "Police record / Good Conduct Certificate", hint: "Obtained from any police station in Jamaica. Required at first application; periodically thereafter.", required: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+                  <p className="font-bold text-amber-900">Police record is optional here</p>
+                  <p className="mt-1 text-amber-900/85">
+                    You can finish signing up without it and upload it later
+                    from your driver dashboard. You won&apos;t be able to
+                    accept rides until it&apos;s on file — we&apos;ll email
+                    you reminders until then.
+                  </p>
+                </div>
+                <FileUpload field={{ id: "police_record", label: "Police record / Good Conduct Certificate", hint: "Obtained from any police station in Jamaica. Upload now if you have a soft copy, or skip and upload later.", required: false }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
                 <FileUpload field={{ id: "selfie", label: "Live identity selfie", hint: "Clear photo of your face against a plain background. JPG or PNG. Used to match against your licence and TA badge.", required: true, previewAsAvatar: true }} files={files} onPick={handlePickFile} onRemove={handleRemoveFile} />
               </div>
             )}
@@ -1639,7 +1508,6 @@ function DriverOnboardingWizard() {
                       ["Full name", `${form.firstName} ${form.lastName}`.trim() || "—"],
                       ["Mobile", form.phone || "—"],
                       ["TRN", form.trn || "—"],
-                      ["NIS", form.nis || "—"],
                       ["Driver's licence", form.licenceNumber || "—", form.licenceExpiry],
                       ["TA badge", form.badgeNumber || "—"],
                       ["Red plate", form.plateNumber || "—"],

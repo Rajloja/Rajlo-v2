@@ -2020,3 +2020,86 @@ export async function sendWalletPayoutExcludedEmail(
   const t = walletPayoutExcludedTemplate(args);
   return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   Police-record reminder — sent by the daily cron at
+   /api/cron/police-record-reminder to drivers who signed up without
+   uploading their Good Conduct Certificate. Throttled to at most once
+   per 7 days (see drivers.police_record_reminder_sent_at). Tone
+   escalates as `reminderCount` grows so the fifth reminder reads
+   differently from the first.
+   ────────────────────────────────────────────────────────────────────── */
+
+export function policeRecordReminderTemplate(args: {
+  fullName?: string | null;
+  uploadUrl: string;
+  reminderCount: number;
+}) {
+  const first = firstNameOf(args.fullName);
+  const n = args.reminderCount;
+
+  const subject =
+    n <= 1
+      ? "Upload your police record to start earning on Rajlo"
+      : n < 4
+        ? "Reminder: your police record is still needed"
+        : "One last step before Rajlo can send you rides";
+
+  const intro =
+    n <= 1
+      ? `Hi ${first}, welcome again. You've completed sign-up but haven't uploaded your Police Record / Good Conduct Certificate yet — that's the only doc still standing between you and accepting rides on Rajlo.`
+      : n < 4
+        ? `Hi ${first}, quick nudge — your Police Record still isn't on file. Every other doc on your account looks good; this one's what's holding your account back from going online.`
+        : `Hi ${first}, this is the ${ordinal(n)} reminder. Your Rajlo driver account has been sitting inactive because we don't have your Police Record on file. If you'd rather not continue, no problem — just reply and let us know.`;
+
+  const sections: EmailSection[] = [
+    { type: "intro", text: intro },
+    {
+      type: "highlight",
+      tone: "neutral",
+      eyebrow: "How to get one",
+      text: "Any Jamaica Police Station can issue you a Good Conduct Certificate — bring your TRN and photo ID. Once you have it (paper or digital), snap a photo, sign into Rajlo, and upload.",
+    },
+    { type: "cta", href: args.uploadUrl, label: "Upload police record" },
+    {
+      type: "footnote",
+      text: "You'll get another reminder in about a week if it's still missing. Once it's uploaded and admin-approved you'll be able to go online and start accepting rides.",
+    },
+  ];
+
+  const html = renderEmail({
+    preheader: "Upload your Police Record so Rajlo can dispatch rides to you.",
+    eyebrow: "Rajlo Driver",
+    title:
+      n <= 1
+        ? "One more doc and you're live."
+        : "Your Rajlo account is waiting.",
+    sections,
+  });
+
+  const text = plaintext([
+    intro,
+    "",
+    `Upload: ${args.uploadUrl}`,
+    "",
+    "Any Jamaica Police Station can issue a Good Conduct Certificate — bring your TRN and photo ID.",
+  ]);
+
+  return { subject, html, text };
+}
+
+export async function sendPoliceRecordReminderEmail(
+  to: string,
+  args: Parameters<typeof policeRecordReminderTemplate>[0],
+) {
+  const t = policeRecordReminderTemplate(args);
+  return sendEmail({ to, subject: t.subject, html: t.html, text: t.text });
+}
+
+// Small helper — "1st", "2nd", "3rd", "4th", ... — used to make
+// reminder-count copy read naturally ("this is the 3rd reminder").
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}

@@ -97,7 +97,7 @@ const CATEGORIES: Category[] = [
       },
       {
         q: "What documents do I need?",
-        a: "TA Franchise Certificate, TA Driver Badge, Certificate of Fitness, PPV Comprehensive Insurance, a valid PPV-class Driver's Licence, TRN, NIS, Police Record, Red Plate Vehicle Registration, and an identity selfie. Rajlo is red-plate only — private/white-plate vehicles aren't eligible.",
+        a: "TA Franchise Certificate (a.k.a. Road License), TA Driver Badge, Certificate of Fitness, PPV Comprehensive Insurance, a valid PPV-class Driver's Licence, TRN, Police Record, Red Plate Vehicle Registration, and an identity selfie. Rajlo is red-plate only — private/white-plate vehicles aren't eligible.",
       },
       {
         q: "How long does verification take?",

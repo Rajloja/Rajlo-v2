@@ -36,7 +36,7 @@ export default function DriverDownloadAppPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <a
-              href="https://play.google.com/store/apps/details?id=com.rajlo.driver"
+              href="https://play.google.com/store/apps/details?id=com.rajlodriversapp"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 text-sm font-bold text-rajlo-black shadow-lg transition-transform hover:-translate-y-0.5"

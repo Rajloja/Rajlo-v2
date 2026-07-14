@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/employer-drafts-purge",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/police-record-reminder",
+      "schedule": "0 14 * * *"
     }
   ]
 }
