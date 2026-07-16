@@ -170,14 +170,14 @@ export function FileUpload({
           {field.required && <span className="ml-0.5 text-rajlo-red">*</span>}
         </p>
         {field.hint && <p className="mb-3 text-xs text-muted">{field.hint}</p>}
-        <label
+        <div
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`group flex cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-5 transition-all ${stateClass}`}
+          className={`group flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-5 transition-all ${stateClass}`}
         >
           {/* Circular avatar preview. Same 128px size across breakpoints
               so the driver's sense of "how big will my avatar be" is
@@ -296,22 +296,63 @@ export function FileUpload({
             </button>
           )}
 
-          <input
-            type="file"
-            // `capture="user"` hints to mobile browsers to open the
-            // FRONT camera (the selfie camera) when the driver taps
-            // the field. Desktop browsers ignore the attribute and
-            // just show the file picker.
-            accept="image/jpeg,image/png"
-            capture="user"
-            className="hidden"
-            disabled={file?.uploading}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) pick(f);
-            }}
-          />
-        </label>
+          {/* Action buttons — Camera (front-facing) + Gallery.
+              Same dual-icon pattern as standard row mode so employers
+              who already snapped the driver's selfie outside Chrome
+              can pick from Photos instead of re-launching the camera
+              app (which is the memory-heavy op that triggers
+              Android's tab-eviction). Each label wraps its own hidden
+              input so clicks route to the right picker. */}
+          <div className="flex items-center gap-2">
+            <label
+              aria-label="Take selfie"
+              title="Take selfie"
+              className={`inline-flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold transition-colors ${
+                file?.uploading
+                  ? "cursor-not-allowed text-muted/50"
+                  : "cursor-pointer text-muted hover:border-rajlo-red/40 hover:text-rajlo-red"
+              }`}
+            >
+              <Icon name="camera" className="h-4 w-4" />
+              Take selfie
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                capture="user"
+                className="hidden"
+                disabled={file?.uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) pick(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <label
+              aria-label="Choose from gallery"
+              title="Choose from gallery"
+              className={`inline-flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold transition-colors ${
+                file?.uploading
+                  ? "cursor-not-allowed text-muted/50"
+                  : "cursor-pointer text-muted hover:border-rajlo-red/40 hover:text-rajlo-red"
+              }`}
+            >
+              <Icon name="paperclip" className="h-4 w-4" />
+              Gallery
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                className="hidden"
+                disabled={file?.uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) pick(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
       </div>
     );
   }
