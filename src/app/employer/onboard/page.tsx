@@ -37,11 +37,14 @@ import {
  *      moves them into the newly-created driver's own folder using
  *      service_role.
  *
- *   3. `sessionId` is a per-wizard-run UUID stashed in sessionStorage
- *      so a reload doesn't wipe progress mid-onboarding. Closing the
- *      tab loses the draft — that's intentional; an employer walking
- *      away from a hub shouldn't leave a half-completed application
- *      cached for anyone to finish.
+ *   3. `sessionId` is a per-wizard-run UUID stashed in localStorage
+ *      alongside the draft form + files, so progress survives both
+ *      normal reloads AND the Android-Chrome-kills-tab-during-camera
+ *      scenario (native camera app takes RAM → Chrome evicts the tab
+ *      → "Use photo" relaunches the URL fresh — sessionStorage would
+ *      have died with the tab, localStorage survives). Drafts auto-
+ *      expire after DRAFT_TTL_MS to keep the "not left cached forever"
+ *      intent from the original design.
  *
  *   4. Submit hits POST /api/employer/drivers/submit rather than
  *      /api/driver/onboarding. On success, the server creates the
@@ -178,6 +181,10 @@ function isStepComplete(step: number, form: FormShape, files: FileState): boolea
 }
 
 const DRAFT_KEY = "rajlo-employer-onboarding-draft";
+// 4h — long enough to survive a normal onboarding session (native camera
+// eviction, phone call, brief break) but short enough that a shared
+// tablet doesn't hand a stale half-filled application to the next employer.
+const DRAFT_TTL_MS = 4 * 60 * 60 * 1000;
 
 export default function EmployerOnboardPage() {
   const router = useRouter();
@@ -202,30 +209,41 @@ export default function EmployerOnboardPage() {
       } = await supabase.auth.getUser();
       setEmployerUserId(user?.id ?? null);
     })();
-    // sessionStorage-persisted session id — survives a reload but a
-    // brand-new tab starts a fresh onboarding.
+    // localStorage-persisted session id + draft — survives both a
+    // normal reload AND the Android-Chrome-kills-tab-during-camera
+    // eviction (sessionStorage would die with the tab in that case).
+    // TTL enforced on restore so stale drafts don't linger on shared
+    // tablets.
     if (typeof window !== "undefined") {
-      let sid = window.sessionStorage.getItem(`${DRAFT_KEY}:session-id`);
+      let sid = window.localStorage.getItem(`${DRAFT_KEY}:session-id`);
       if (!sid) {
         sid =
           typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        window.sessionStorage.setItem(`${DRAFT_KEY}:session-id`, sid);
+        window.localStorage.setItem(`${DRAFT_KEY}:session-id`, sid);
       }
       sessionIdRef.current = sid;
-      // Restore form + files from sessionStorage
       try {
-        const raw = window.sessionStorage.getItem(DRAFT_KEY);
+        const raw = window.localStorage.getItem(DRAFT_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as {
             form?: Partial<FormShape>;
             files?: FileState;
             step?: number;
+            savedAt?: number;
           };
-          if (parsed.form) setForm((f) => ({ ...f, ...parsed.form }));
-          if (parsed.files) setFiles(parsed.files);
-          if (parsed.step) setStep(parsed.step);
+          const fresh =
+            typeof parsed.savedAt === "number" &&
+            Date.now() - parsed.savedAt < DRAFT_TTL_MS;
+          if (fresh) {
+            if (parsed.form) setForm((f) => ({ ...f, ...parsed.form }));
+            if (parsed.files) setFiles(parsed.files);
+            if (parsed.step) setStep(parsed.step);
+          } else {
+            window.localStorage.removeItem(DRAFT_KEY);
+            window.localStorage.removeItem(`${DRAFT_KEY}:session-id`);
+          }
         }
       } catch {
         /* corrupted draft — start fresh */
@@ -237,9 +255,9 @@ export default function EmployerOnboardPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.sessionStorage.setItem(
+      window.localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ form, files, step }),
+        JSON.stringify({ form, files, step, savedAt: Date.now() }),
       );
     } catch {
       /* full storage / private mode — silent */
@@ -248,8 +266,8 @@ export default function EmployerOnboardPage() {
 
   const clearDraft = () => {
     if (typeof window === "undefined") return;
-    window.sessionStorage.removeItem(DRAFT_KEY);
-    window.sessionStorage.removeItem(`${DRAFT_KEY}:session-id`);
+    window.localStorage.removeItem(DRAFT_KEY);
+    window.localStorage.removeItem(`${DRAFT_KEY}:session-id`);
   };
 
   const handlePickFile = async (docKey: string, file: File) => {
