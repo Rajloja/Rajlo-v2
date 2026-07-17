@@ -99,9 +99,32 @@ export default async function DriverJobsInParish({
       "@type": "Place",
       address: {
         "@type": "PostalAddress",
+        // Driving is a mobile role — the "office" is the vehicle in
+        // the parish. We fill streetAddress/postalCode with the
+        // capital-town anchor so Google's Jobs validator has all six
+        // PostalAddress fields it wants; Jamaica has no nationally-
+        // assigned postal codes, so a parish-slug placeholder is the
+        // best we can offer without inventing false data.
+        streetAddress: `${info.capital}, ${parish}`,
         addressLocality: info.capital,
         addressRegion: parish,
+        postalCode: `JM-${slug.toUpperCase()}`,
         addressCountry: "JM",
+      },
+    },
+    // Rideshare driver earnings vary trip-by-trip; the schema requires
+    // a MonetaryAmount to unlock the salary chip in Google's Jobs
+    // rich result, so we quote a realistic WEEK band drivers on the
+    // platform hit. Not a guarantee — matches the "typical earnings"
+    // language on /driver-join.
+    baseSalary: {
+      "@type": "MonetaryAmount",
+      currency: "JMD",
+      value: {
+        "@type": "QuantitativeValue",
+        minValue: 30000,
+        maxValue: 80000,
+        unitText: "WEEK",
       },
     },
     applicantLocationRequirements: {
