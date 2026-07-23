@@ -391,31 +391,58 @@ export default function DriverHomePage() {
     } catch {
       /* Permissions API unavailable — fall through */
     }
-    // Try a fix with a tight timeout. PERMISSION_DENIED or
-    // POSITION_UNAVAILABLE → off.
-    try {
-      await new Promise<void>((resolve, reject) => {
+    // Try a fix. First attempt: fast/low-accuracy (fused provider, cell
+    // + WiFi triangulation) with a generous timeout — a cold-start
+    // Android GPS indoors can legitimately take 8-15s to return the
+    // first fix, especially in the Capacitor WebView where the fused
+    // provider hasn't warmed up yet. The old 6s ceiling was firing
+    // "Couldn't read your location" on drivers who just needed a few
+    // more seconds.
+    //
+    // Second attempt (only if the first errored with a non-permission
+    // code): retry with high-accuracy on. Some Android WebViews only
+    // honour the GPS radio when explicitly asked, and the low-accuracy
+    // path silently returns POSITION_UNAVAILABLE if the fused provider
+    // has no cached fix.
+    const tryFix = (highAccuracy: boolean, timeout: number) =>
+      new Promise<void>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(
           () => resolve(),
           (err) => reject(err),
-          { enableHighAccuracy: false, maximumAge: 60_000, timeout: 6_000 },
+          {
+            enableHighAccuracy: highAccuracy,
+            maximumAge: 60_000,
+            timeout,
+          },
         );
       });
+    try {
+      await tryFix(false, 15_000);
       return true;
     } catch (err) {
       const code = (err as GeolocationPositionError | null)?.code;
+      // PERMISSION_DENIED (1) never recovers from a retry — bail early.
       if (code === 1) {
         setOnlineError("Allow location access for Rajlo, then try again.");
-      } else if (code === 2) {
-        setOnlineError(
-          "Turn on your phone's location service in your settings, then try again.",
-        );
-      } else {
-        setOnlineError(
-          "Couldn't read your location. Move outside or to a window and try again.",
-        );
+        return false;
       }
-      return false;
+      // Non-permission error: try one more time with high-accuracy on.
+      try {
+        await tryFix(true, 15_000);
+        return true;
+      } catch (err2) {
+        const code2 = (err2 as GeolocationPositionError | null)?.code;
+        if (code2 === 2) {
+          setOnlineError(
+            "Turn on your phone's location service in your settings, then try again.",
+          );
+        } else {
+          setOnlineError(
+            "Couldn't get a GPS fix. Move to a window or step outside, then try again.",
+          );
+        }
+        return false;
+      }
     }
   }, []);
 
